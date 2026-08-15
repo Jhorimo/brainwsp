@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  SUPERVISOR
+  AGENT
+}
+
+enum WhatsAppProvider {
+  BAILEYS
+  META_CLOUD
+}
+
+enum InstanceStatus {
+  DISCONNECTED
+  CONNECTING
+  QR_PENDING
+  CONNECTED
+  RECONNECTING
+  LOGGED_OUT
+  ERROR
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  LOCATION
+  CONTACT
+  STICKER
+  UNKNOWN
+}
+
+enum MessageStatus {
+  RECEIVED
+  QUEUED
+  PROCESSING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Company {
+  id             String             @id @default(uuid())
+  name           String
+  slug           String             @unique
+  active         Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  users          User[]
+  apiCredentials ApiCredential[]
+  instances      WhatsAppInstance[]
+  departments    Department[]
+  contacts       Contact[]
+  conversations  Conversation[]
+  messages       Message[]
+  quickReplies   QuickReply[]
+  webhooks       Webhook[]
+  auditLogs      AuditLog[]
+}
+
+model User {
+  id                   String          @id @default(uuid())
+  companyId            String
+  email                String          @unique
+  name                 String
+  passwordHash         String
+  role                 UserRole        @default(AGENT)
+  active               Boolean         @default(true)
+  lastLoginAt          DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  company              Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignedConversations Conversation[]  @relation("AssignedAgent")
+  departments          DepartmentUser[]
+
+  @@index([companyId])
+}
+
+model ApiCredential {
+  id         String            @id @default(uuid())
+  companyId  String
+  instanceId String?
+  name       String
+  appKey     String            @unique
+  authHash   String
+  active     Boolean           @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  company    Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  instance   WhatsAppInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([instanceId])
+}
+
+model WhatsAppInstance {
+  id               String           @id @default(uuid())
+  companyId        String
+  name             String
+  slug             String
+  provider         WhatsAppProvider @default(BAILEYS)
+  phoneNumber      String?
+  displayName      String?
+  status           InstanceStatus   @default(DISCONNECTED)
+  qr               String?
+  reconnectAttempt Int              @default(0)
+  lastError        String?
+  lastConnectedAt  DateTime?
+  lastDisconnectedAt DateTime?
+  active           Boolean          @default(true)
+  autoConnect      Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  apiCredentials   ApiCredential[]
+  conversations    Conversation[]
+  messages         Message[]
+  authCredential   WhatsAppAuthCredential?
+  authKeys         WhatsAppAuthKey[]
+
+  @@unique([companyId, slug])
+  @@index([companyId, status])
+}
+
+model WhatsAppAuthCredential {
+  instanceId String   @id
+  data       String   @db.Text
+  updatedAt  DateTime @updatedAt
+  instance   WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+}
+
+model WhatsAppAuthKey {
+  id         String   @id @default(uuid())
+  instanceId String
+  type       String
+  keyId      String
+  data       String   @db.Text
+  updatedAt  DateTime @updatedAt
+  instance   WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, type, keyId])
+  @@index([instanceId, type])
+}
+
+model Department {
+  id          String           @id @default(uuid())
+  companyId   String
+  name        String
+  description String?
+  active      Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users       DepartmentUser[]
+  conversations Conversation[]
+
+  @@unique([companyId, name])
+}
+
+model DepartmentUser {
+  departmentId String
+  userId       String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([departmentId, userId])
+}
+
+model Contact {
+  id            String         @id @default(uuid())
+  companyId     String
+  waId          String
+  phone         String?
+  name          String?
+  pushName      String?
+  avatarUrl     String?
+  email         String?
+  metadata      Json?
+  lastSeenAt    DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  messages      Message[]
+
+  @@unique([companyId, waId])
+  @@index([companyId, phone])
+}
+
+model Conversation {
+  id             String             @id @default(uuid())
+  companyId      String
+  instanceId     String
+  contactId      String
+  assignedUserId String?
+  departmentId   String?
+  status         ConversationStatus @default(OPEN)
+  subject        String?
+  aiEnabled      Boolean            @default(false)
+  unreadCount    Int                @default(0)
+  lastMessageAt  DateTime           @default(now())
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  company        Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  instance       WhatsAppInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  contact        Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedUser   User?              @relation("AssignedAgent", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  department     Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  messages       Message[]
+
+  @@unique([instanceId, contactId])
+  @@index([companyId, status, lastMessageAt])
+  @@index([assignedUserId, status])
+}
+
+model Message {
+  id             String           @id @default(uuid())
+  companyId      String
+  conversationId String
+  instanceId     String
+  contactId      String
+  waMessageId    String           @default(uuid())
+  direction      MessageDirection
+  type           MessageType      @default(TEXT)
+  status         MessageStatus
+  body           String?          @db.Text
+  mediaUrl       String?          @db.Text
+  fileName       String?
+  mimeType       String?
+  caption        String?          @db.Text
+  error          String?          @db.Text
+  metadata       Json?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  instance       WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  contact        Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, waMessageId])
+  @@index([conversationId, createdAt])
+  @@index([companyId, status, createdAt])
+}
+
+model QuickReply {
+  id        String   @id @default(uuid())
+  companyId String
+  shortcut  String
+  title     String
+  content   String   @db.Text
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, shortcut])
+}
+
+model Webhook {
+  id        String   @id @default(uuid())
+  companyId String
+  url       String
+  secret    String
+  events    String[]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, active])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  companyId String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  ip        String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+}

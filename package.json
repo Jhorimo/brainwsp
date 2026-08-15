@@ -1,0 +1,31 @@
+{
+  "name": "brainwsp-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BrainWSP - WhatsApp Gateway, live inbox and agent platform for BrainPOS/ERP integrations",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "dotenv -e .env -- concurrently -n API,WORKER,WEB -c auto \"npm run dev -w @brainwsp/api\" \"npm run dev -w @brainwsp/worker\" \"npm run dev -w @brainwsp/web\"",
+    "build": "npm run db:generate && npm run build -w @brainwsp/api && npm run build -w @brainwsp/worker && npm run build -w @brainwsp/web",
+    "db:generate": "npm run generate -w @brainwsp/database",
+    "db:migrate": "npm run migrate -w @brainwsp/database",
+    "db:push": "npm run push -w @brainwsp/database",
+    "db:seed": "npm run seed -w @brainwsp/database",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f --tail=200",
+    "db:migrate:deploy": "npm run migrate:deploy -w @brainwsp/database"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "dotenv-cli": "^8.0.0"
+  }
+}
