@@ -11,9 +11,11 @@
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@prisma/client": "6.19.0",
-    "@whiskeysockets/baileys": "6.7.24",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "bullmq": "^5.58.5",
+    "ffmpeg-static": "^5.2.0",
     "ioredis": "^5.7.0",
+    "minio": "^8.0.7",
     "pino": "^9.9.0"
   },
   "devDependencies": {

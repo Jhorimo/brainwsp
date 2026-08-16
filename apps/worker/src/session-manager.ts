@@ -1,6 +1,9 @@
 import makeWASocket, {
   Browsers,
+  BufferJSON,
   DisconnectReason,
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   proto,
   type WAMessage,
@@ -11,14 +14,16 @@ import {
   InstanceStatus,
   MessageDirection,
   MessageStatus,
+  MessageType,
   type PrismaClient,
 } from '@prisma/client';
-import IORedis from 'ioredis';
+import { Redis as IORedis } from 'ioredis';
 import type { Logger } from 'pino';
 import { config } from './config.js';
 import { usePrismaAuthState } from './auth-state.js';
-import { extractMessage, jidToPhone } from './message-utils.js';
+import { extensionFromMime, extractMessage, jidToPhone } from './message-utils.js';
 import type { RealtimePublisher } from './realtime.js';
+import { uploadBuffer } from './storage.js';
 
 const LEASE_TTL_MS = 30_000;
 const LEASE_RENEW_MS = 10_000;
@@ -98,18 +103,34 @@ export class SessionManager {
     const auth = await usePrismaAuthState(this.prisma, instanceId);
     const childLogger = this.logger.child({ instanceId });
 
+    // An outdated WA Web protocol version is the classic cause of messages
+    // arriving on the recipient's device stuck on "Esperando este mensaje":
+    // their client questions a message signed with a version it no longer
+    // trusts. Falls back to the version bundled with Baileys if offline.
+    const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
+
     const socket = makeWASocket({
       auth: {
         creds: auth.state.creds,
         keys: makeCacheableSignalKeyStore(auth.state.keys, childLogger as never),
       },
+      version,
       logger: childLogger as never,
       browser: Browsers.macOS('Google Chrome'),
       printQRInTerminal: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
-      getMessage: async () => undefined,
+      getMessage: async (key) => {
+        if (!key.id) return undefined;
+        const stored = await this.prisma.message.findUnique({
+          where: { instanceId_waMessageId: { instanceId, waMessageId: key.id } },
+          select: { metadata: true },
+        });
+        const rawContent = (stored?.metadata as { rawContent?: string } | null)?.rawContent;
+        if (!rawContent) return undefined;
+        return JSON.parse(rawContent, BufferJSON.reviver) as proto.IMessage;
+      },
     });
 
     this.sockets.set(instanceId, socket);
@@ -184,7 +205,7 @@ export class SessionManager {
     socket.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
       for (const message of messages) {
-        await this.persistIncoming(instanceId, message).catch((error) => {
+        await this.persistIncoming(instanceId, message, socket).catch((error) => {
           childLogger.error({ err: error, messageId: message.key.id }, 'failed to persist incoming message');
         });
       }
@@ -259,10 +280,10 @@ export class SessionManager {
     await this.redis.quit();
   }
 
-  private async persistIncoming(instanceId: string, message: WAMessage) {
+  private async persistIncoming(instanceId: string, message: WAMessage, socket: WASocket) {
     if (message.key.fromMe || !message.key.remoteJid || !message.key.id || !message.message) return;
     const remoteJid = message.key.remoteJid;
-    if (remoteJid === 'status@broadcast' || remoteJid.endsWith('@g.us')) return;
+    if (remoteJid === 'status@broadcast') return;
 
     // Baileys can re-emit the same message after a reconnect/history sync.
     // Check idempotency before incrementing unread counters or publishing realtime events.
@@ -275,23 +296,54 @@ export class SessionManager {
     const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId } });
     if (!instance) return;
 
-    const phone = jidToPhone(remoteJid);
+    const isGroup = remoteJid.endsWith('@g.us');
+
+    // For a group, `remoteJid` is the group's own JID and the conversation's "contact"
+    // is the group itself; `message.pushName` here belongs to whoever sent this specific
+    // message, not the group, so it must never be written onto the group's Contact row.
+    let groupSubject: string | undefined;
+    if (isGroup) {
+      const existingGroup = await this.prisma.contact.findUnique({
+        where: { companyId_waId: { companyId: instance.companyId, waId: remoteJid } },
+        select: { name: true },
+      });
+      if (!existingGroup?.name) {
+        try {
+          const metadata = await socket.groupMetadata(remoteJid);
+          groupSubject = metadata.subject;
+        } catch (error) {
+          this.logger.warn({ err: error, remoteJid }, 'failed to fetch group metadata');
+        }
+      }
+    }
+
+    // WhatsApp's privacy rollout can route 1:1 chats through an opaque `@lid`
+    // remoteJid instead of the phone-number JID. Baileys still reports the
+    // real phone number in `key.remoteJidAlt` for those messages.
+    const phone = jidToPhone(remoteJid) || (message.key.remoteJidAlt ? jidToPhone(message.key.remoteJidAlt) : null);
     const contact = await this.prisma.contact.upsert({
       where: { companyId_waId: { companyId: instance.companyId, waId: remoteJid } },
-      update: {
-        phone: phone || undefined,
-        pushName: message.pushName || undefined,
-        lastSeenAt: new Date(),
-      },
-      create: {
-        companyId: instance.companyId,
-        waId: remoteJid,
-        phone,
-        pushName: message.pushName || null,
-        name: message.pushName || null,
-        lastSeenAt: new Date(),
-      },
+      update: isGroup
+        ? { lastSeenAt: new Date(), ...(groupSubject ? { name: groupSubject, pushName: groupSubject } : {}) }
+        : { phone: phone || undefined, pushName: message.pushName || undefined, lastSeenAt: new Date() },
+      create: isGroup
+        ? { companyId: instance.companyId, waId: remoteJid, name: groupSubject || null, pushName: groupSubject || null, lastSeenAt: new Date() }
+        : { companyId: instance.companyId, waId: remoteJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
     });
+
+    // In a group, `key.participant` is the actual sender — track them as their own
+    // Contact so the UI can show who wrote each message, distinct from the group itself.
+    let authorContactId: string | undefined;
+    if (isGroup && message.key.participant) {
+      const participantJid = message.key.participant;
+      const participantPhone = jidToPhone(participantJid) || (message.key.participantAlt ? jidToPhone(message.key.participantAlt) : null);
+      const author = await this.prisma.contact.upsert({
+        where: { companyId_waId: { companyId: instance.companyId, waId: participantJid } },
+        update: { phone: participantPhone || undefined, pushName: message.pushName || undefined, lastSeenAt: new Date() },
+        create: { companyId: instance.companyId, waId: participantJid, phone: participantPhone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
+      });
+      authorContactId = author.id;
+    }
 
     const conversation = await this.prisma.conversation.upsert({
       where: { instanceId_contactId: { instanceId, contactId: contact.id } },
@@ -306,6 +358,22 @@ export class SessionManager {
     });
 
     const content = extractMessage(message);
+
+    let mediaUrl: string | undefined;
+    const downloadableTypes: MessageType[] = [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT, MessageType.STICKER];
+    if (downloadableTypes.includes(content.type)) {
+      try {
+        const buffer = await downloadMediaMessage(message, 'buffer', {}, {
+          logger: this.logger as never,
+          reuploadRequest: socket.updateMediaMessage,
+        });
+        const uploaded = await uploadBuffer(buffer, content.mimeType || 'application/octet-stream', extensionFromMime(content.mimeType));
+        mediaUrl = uploaded.internalUrl;
+      } catch (error) {
+        this.logger.warn({ err: error, messageId: message.key.id }, 'failed to download inbound media');
+      }
+    }
+
     const created = await this.prisma.message.upsert({
       where: { instanceId_waMessageId: { instanceId, waMessageId: message.key.id } },
       update: {},
@@ -314,6 +382,7 @@ export class SessionManager {
         conversationId: conversation.id,
         instanceId,
         contactId: contact.id,
+        authorContactId,
         waMessageId: message.key.id,
         direction: MessageDirection.INBOUND,
         type: content.type,
@@ -322,8 +391,10 @@ export class SessionManager {
         caption: content.caption,
         fileName: content.fileName,
         mimeType: content.mimeType,
+        mediaUrl,
         metadata: { remoteJid, timestamp: String(message.messageTimestamp || '') },
       },
+      include: { author: { select: { id: true, name: true, pushName: true } } },
     });
 
     const realtimeConversation = await this.prisma.conversation.findUnique({
@@ -418,9 +489,9 @@ export class SessionManager {
           key,
           config.workerId,
           String(LEASE_TTL_MS),
-        ).then((result) => {
+        ).then((result: unknown) => {
           if (Number(result) !== 1) void this.handleLeaseLost(instanceId);
-        }).catch((error) => {
+        }).catch((error: unknown) => {
           this.logger.error({ err: error, instanceId }, 'failed to renew WhatsApp instance lease');
         });
       }, LEASE_RENEW_MS);

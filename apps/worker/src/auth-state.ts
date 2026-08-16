@@ -27,7 +27,7 @@ export async function usePrismaAuthState(prisma: PrismaClient, instanceId: strin
         for (const row of rows) {
           let value = JSON.parse(row.data, BufferJSON.reviver);
           if (type === 'app-state-sync-key' && value) {
-            value = proto.Message.AppStateSyncKeyData.fromObject(value);
+            value = proto.Message.AppStateSyncKeyData.create(value);
           }
           result[row.keyId] = value as SignalDataTypeMap[T];
         }

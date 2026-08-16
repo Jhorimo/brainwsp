@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\" http://localhost:4000/api/health)",
+      "Bash(curl -s -o /dev/null -w \"WEB_STATUS:%{http_code}\\\\n\" http://localhost:3000)",
+      "Bash(curl -s -X POST http://localhost:4000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@braintech.com.pe\",\"password\":\"ChangeMe-123456!\"}' -w \"\\\\nLOGIN_STATUS:%{http_code}\\\\n\")",
+      "Bash(node -e \"console.log\\(require\\('multer/package.json'\\).version\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -X POST http://localhost:4000/api/conversations/__TRACKED_VAR__/messages/media -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -F 'file=@C:\\\\Users\\\\USUARIO\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--laragon-www-brainwsp\\\\d3c3a828-8c49-4b48-a820-cce35d46fa3d\\\\scratchpad/test.png;type=image/png' -F 'caption=prueba imagen')",
+      "Read(//c/Users/USUARIO/AppData/Local/Temp/claude/c--laragon-www-brainwsp/d3c3a828-8c49-4b48-a820-cce35d46fa3d/scratchpad/**)",
+      "Bash(curl -s -X POST http://localhost:4000/api/conversations/__TRACKED_VAR__/messages/media -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -F 'file=@/c/Users/USUARIO/AppData/Local/Temp/claude/c--laragon-www-brainwsp/d3c3a828-8c49-4b48-a820-cce35d46fa3d/scratchpad/test.png;type=image/png' -F 'caption=prueba imagen')",
+      "Bash(curl -s -X POST http://localhost:4000/api/conversations/__TRACKED_VAR__/messages/media -H 'Authorization: Bearer __TRACKED_VAR__' -F 'file=@test.png;type=image/png' -F 'caption=prueba imagen')",
+      "Bash(NODE_PATH=\"/c/Users/USUARIO/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules\" node \"C:\\\\Users\\\\USUARIO\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--laragon-www-brainwsp\\\\d3c3a828-8c49-4b48-a820-cce35d46fa3d\\\\scratchpad\\\\format_test.js\")",
+      "Bash(powershell -Command \"Stop-Process -Id 12480,20384,10600,9984,26204,1308,26184,25756,24852 -Force -ErrorAction SilentlyContinue\")",
+      "Bash(curl -s -X POST http://localhost:4000/api/api-credentials -H 'Content-Type: application/json' -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -d '{\"name\":\"BrainPOS Producción\"}' -w '\\\\nSTATUS:%{http_code}\\\\n')"
+    ]
+  }
+}

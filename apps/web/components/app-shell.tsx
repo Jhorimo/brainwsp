@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Activity,
+  AlertTriangle,
   Bot,
   ChevronDown,
   KeyRound,
   LayoutDashboard,
+  Lightbulb,
   LogOut,
   MessageSquareText,
   Settings,
@@ -16,13 +18,16 @@ import {
   Wifi,
 } from 'lucide-react';
 import { Protected } from './protected';
+import { FeedbackWidget } from './feedback-widget';
 
 const navigation = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/conversations', label: 'Conversaciones', icon: MessageSquareText },
   { href: '/instances', label: 'WhatsApp', icon: Wifi },
   { href: '/team', label: 'Equipo y agentes', icon: Users },
+  { href: '/incidents', label: 'Incidencias', icon: AlertTriangle },
   { href: '/api-settings', label: 'API e integraciones', icon: KeyRound },
+  { href: '/feedback', label: 'Sugerencias y reportes', icon: Lightbulb },
 ];
 
 export function AppShell({ title, subtitle, children, actions }: { title: string; subtitle?: string; children: React.ReactNode; actions?: React.ReactNode }) {
@@ -104,6 +109,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
           <div className="page-content">{children}</div>
         </main>
       </div>
+      <FeedbackWidget />
     </Protected>
   );
 }

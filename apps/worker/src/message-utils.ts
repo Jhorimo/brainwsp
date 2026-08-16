@@ -6,6 +6,13 @@ export function jidToPhone(jid: string): string | null {
   return jid.split('@')[0]?.split(':')[0]?.replace(/\D/g, '') || null;
 }
 
+export function extensionFromMime(mime?: string): string {
+  if (!mime) return 'bin';
+  const subtype = mime.split('/')[1]?.split(';')[0]?.trim();
+  if (!subtype) return 'bin';
+  return subtype.replace(/^x-/, '');
+}
+
 export function extractMessage(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string } {
   const content = message.message;
   if (!content) return { type: MessageType.UNKNOWN };

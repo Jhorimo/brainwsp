@@ -1,4 +1,4 @@
-import IORedis from 'ioredis';
+import { Redis as IORedis } from 'ioredis';
 import { config } from './config.js';
 
 export class RealtimePublisher {

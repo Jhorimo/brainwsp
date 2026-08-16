@@ -4,6 +4,7 @@ import { RealtimePublisher } from './realtime.js';
 import { SessionManager } from './session-manager.js';
 import { OutboundWorker } from './outbound-worker.js';
 import { CommandWorker } from './command-worker.js';
+import { ensureBucket } from './storage.js';
 
 const realtime = new RealtimePublisher();
 const sessions = new SessionManager(prisma, realtime, logger);
@@ -12,6 +13,7 @@ const commands = new CommandWorker(sessions, logger);
 
 async function start() {
   await prisma.$connect();
+  await ensureBucket();
   await sessions.bootstrap();
   logger.info('BrainWSP worker ready');
 }

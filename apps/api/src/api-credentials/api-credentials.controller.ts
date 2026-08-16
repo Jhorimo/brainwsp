@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -30,5 +30,15 @@ export class ApiCredentialsController {
   @Patch(':id/revoke')
   revoke(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.revoke(user.companyId, id);
+  }
+
+  @Patch(':id/regenerate')
+  regenerate(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.regenerate(user.companyId, id);
+  }
+
+  @Delete(':id')
+  remove(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.remove(user.companyId, id);
   }
 }

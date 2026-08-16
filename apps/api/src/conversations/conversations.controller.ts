@@ -1,11 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { SendAgentMessageDto, UpdateConversationDto } from './conversations.dto';
+import { ForwardMessageDto, SendAgentMessageDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto } from './conversations.dto';
+
+const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
 @ApiTags('Conversations')
 @ApiBearerAuth()
@@ -27,6 +30,45 @@ export class ConversationsController {
   @Post(':id/messages')
   send(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendAgentMessageDto) {
     return this.service.sendText(user.companyId, id, dto.message);
+  }
+
+  @Post(':id/messages/media')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_MEDIA_BYTES } }))
+  sendMedia(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body('caption') caption?: string,
+    @Body('ptt') ptt?: string,
+  ) {
+    if (!file) throw new BadRequestException('Archivo requerido');
+    return this.service.sendMedia(user.companyId, id, file, caption, ptt === 'true');
+  }
+
+  @Patch(':id/messages/:messageId')
+  updateMessageFlags(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() dto: UpdateMessageFlagsDto,
+  ) {
+    return this.service.updateMessageFlags(user.companyId, id, messageId, dto);
+  }
+
+  @Post(':id/messages/:messageId/forward')
+  forwardMessage(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() dto: ForwardMessageDto,
+  ) {
+    return this.service.forwardMessage(user.companyId, id, messageId, dto.targetConversationId);
+  }
+
+  @Patch(':id/notes')
+  updateNotes(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateNotesDto) {
+    return this.service.updateContactNotes(user.companyId, id, dto.notes);
   }
 
   @Patch(':id')

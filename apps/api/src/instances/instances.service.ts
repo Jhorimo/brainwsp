@@ -33,7 +33,12 @@ export class InstancesService {
     });
   }
 
-  async create(companyId: string, name: string, slug: string, provider = WhatsAppProvider.BAILEYS) {
+  async create(
+    companyId: string,
+    name: string,
+    slug: string,
+    provider: WhatsAppProvider = WhatsAppProvider.BAILEYS,
+  ) {
     const existing = await this.prisma.whatsAppInstance.findUnique({
       where: { companyId_slug: { companyId, slug } },
     });

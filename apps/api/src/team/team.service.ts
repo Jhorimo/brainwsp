@@ -116,4 +116,34 @@ export class TeamService {
       include: { users: { include: { user: { select: { id: true, name: true, email: true, role: true, active: true } } } } },
     });
   }
+
+  listProjects(companyId: string) {
+    return this.prisma.project.findMany({
+      where: { companyId },
+      include: { _count: { select: { conversations: true } } },
+      orderBy: [{ active: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  createProject(companyId: string, input: { name: string; description?: string }) {
+    return this.prisma.project.create({
+      data: { companyId, name: input.name.trim(), description: input.description?.trim() || null },
+    }).catch((error: unknown) => {
+      if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe un proyecto con ese nombre');
+      throw error;
+    });
+  }
+
+  async updateProject(companyId: string, projectId: string, input: { name?: string; description?: string; active?: boolean }) {
+    const project = await this.prisma.project.findFirst({ where: { id: projectId, companyId } });
+    if (!project) throw new NotFoundException('Proyecto no encontrado');
+    return this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.description !== undefined ? { description: input.description.trim() || null } : {}),
+        ...(input.active !== undefined ? { active: input.active } : {}),
+      },
+    });
+  }
 }

@@ -1,12 +1,36 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export class SendAgentMessageDto {
   @ApiProperty({ example: 'Hola, le envío su comprobante.' })
   @IsString()
   @MinLength(1)
   message!: string;
+}
+
+export class UpdateMessageFlagsDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  pinned?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  starred?: boolean;
+}
+
+export class ForwardMessageDto {
+  @ApiProperty()
+  @IsUUID()
+  targetConversationId!: string;
+}
+
+export class UpdateNotesDto {
+  @ApiProperty()
+  @IsString()
+  notes!: string;
 }
 
 export class UpdateConversationDto {
@@ -24,4 +48,14 @@ export class UpdateConversationDto {
   @IsOptional()
   @IsUUID()
   departmentId?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  projectId?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  pinned?: boolean;
 }

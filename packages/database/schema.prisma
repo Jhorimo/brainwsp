@@ -63,6 +63,24 @@ enum MessageStatus {
   FAILED
 }
 
+enum FeedbackType {
+  SUGGESTION
+  BUG
+  OTHER
+}
+
+enum FeedbackStatus {
+  PENDING
+  IN_REVIEW
+  RESOLVED
+}
+
+enum IncidentStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+}
+
 model Company {
   id             String             @id @default(uuid())
   name           String
@@ -74,12 +92,15 @@ model Company {
   apiCredentials ApiCredential[]
   instances      WhatsAppInstance[]
   departments    Department[]
+  projects       Project[]
   contacts       Contact[]
   conversations  Conversation[]
   messages       Message[]
   quickReplies   QuickReply[]
   webhooks       Webhook[]
   auditLogs      AuditLog[]
+  feedback       Feedback[]
+  incidents      Incident[]
 }
 
 model User {
@@ -96,6 +117,8 @@ model User {
   company              Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   assignedConversations Conversation[]  @relation("AssignedAgent")
   departments          DepartmentUser[]
+  feedback             Feedback[]
+  createdIncidents     Incident[]      @relation("IncidentCreatedBy")
 
   @@index([companyId])
 }
@@ -114,6 +137,7 @@ model ApiCredential {
   company    Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   instance   WhatsAppInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
 
+  @@unique([companyId, name])
   @@index([companyId])
   @@index([instanceId])
 }
@@ -178,6 +202,8 @@ model Department {
   company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   users       DepartmentUser[]
   conversations Conversation[]
+  feedback    Feedback[]
+  incidents   Incident[]
 
   @@unique([companyId, name])
 }
@@ -191,6 +217,20 @@ model DepartmentUser {
   @@id([departmentId, userId])
 }
 
+model Project {
+  id            String         @id @default(uuid())
+  companyId     String
+  name          String
+  description   String?
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([companyId, name])
+}
+
 model Contact {
   id            String         @id @default(uuid())
   companyId     String
@@ -200,6 +240,7 @@ model Contact {
   pushName      String?
   avatarUrl     String?
   email         String?
+  notes         String?        @db.Text
   metadata      Json?
   lastSeenAt    DateTime?
   createdAt     DateTime       @default(now())
@@ -207,6 +248,7 @@ model Contact {
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   conversations Conversation[]
   messages      Message[]
+  authoredMessages Message[]   @relation("MessageAuthor")
 
   @@unique([companyId, waId])
   @@index([companyId, phone])
@@ -219,9 +261,11 @@ model Conversation {
   contactId      String
   assignedUserId String?
   departmentId   String?
+  projectId      String?
   status         ConversationStatus @default(OPEN)
   subject        String?
   aiEnabled      Boolean            @default(false)
+  pinned         Boolean            @default(false)
   unreadCount    Int                @default(0)
   lastMessageAt  DateTime           @default(now())
   createdAt      DateTime           @default(now())
@@ -231,7 +275,9 @@ model Conversation {
   contact        Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
   assignedUser   User?              @relation("AssignedAgent", fields: [assignedUserId], references: [id], onDelete: SetNull)
   department     Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  project        Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
   messages       Message[]
+  incidents      Incident[]
 
   @@unique([instanceId, contactId])
   @@index([companyId, status, lastMessageAt])
@@ -255,6 +301,9 @@ model Message {
   caption        String?          @db.Text
   error          String?          @db.Text
   metadata       Json?
+  authorContactId String?
+  pinned         Boolean          @default(false)
+  starred        Boolean          @default(false)
   sentAt         DateTime?
   deliveredAt    DateTime?
   readAt         DateTime?
@@ -264,10 +313,12 @@ model Message {
   conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   instance       WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   contact        Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  author         Contact?         @relation("MessageAuthor", fields: [authorContactId], references: [id], onDelete: SetNull)
 
   @@unique([instanceId, waMessageId])
   @@index([conversationId, createdAt])
   @@index([companyId, status, createdAt])
+  @@index([authorContactId])
 }
 
 model QuickReply {
@@ -311,4 +362,43 @@ model AuditLog {
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, createdAt])
+}
+
+model Feedback {
+  id           String         @id @default(uuid())
+  companyId    String
+  userId       String
+  departmentId String?
+  type         FeedbackType   @default(SUGGESTION)
+  status       FeedbackStatus @default(PENDING)
+  subject      String
+  message      String         @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+}
+
+model Incident {
+  id              String         @id @default(uuid())
+  companyId       String
+  conversationId  String
+  departmentId    String
+  createdByUserId String
+  type            FeedbackType   @default(BUG)
+  status          IncidentStatus @default(PENDING)
+  subject         String
+  message         String         @db.Text
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversation    Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  department      Department     @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdByUser   User           @relation("IncidentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([departmentId, status])
 }

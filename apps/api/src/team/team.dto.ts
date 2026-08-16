@@ -83,3 +83,33 @@ export class SetDepartmentMembersDto {
   @IsUUID(undefined, { each: true })
   userIds!: string[];
 }
+
+export class CreateProjectDto {
+  @ApiProperty({ example: 'BrainPOS' })
+  @IsString()
+  @MinLength(2)
+  name!: string;
+
+  @ApiPropertyOptional({ example: 'Sistema de punto de venta' })
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
+export class UpdateProjectDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}

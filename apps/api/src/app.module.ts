@@ -5,12 +5,16 @@ import { AuthModule } from './auth/auth.module';
 import { ApiCredentialsModule } from './api-credentials/api-credentials.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { FeedbackModule } from './feedback/feedback.module';
 import { HealthModule } from './health/health.module';
+import { IncidentsModule } from './incidents/incidents.module';
 import { InstancesModule } from './instances/instances.module';
+import { MediaModule } from './media/media.module';
 import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { StorageModule } from './storage/storage.module';
 import { TeamModule } from './team/team.module';
 
 @Module({
@@ -23,14 +27,18 @@ import { TeamModule } from './team/team.module';
     }),
     PrismaModule,
     QueueModule,
+    StorageModule,
     AuthModule,
     ApiCredentialsModule,
     InstancesModule,
     MessagesModule,
     ConversationsModule,
     RealtimeModule,
+    MediaModule,
     TeamModule,
     DashboardModule,
+    FeedbackModule,
+    IncidentsModule,
     HealthModule,
   ],
 })

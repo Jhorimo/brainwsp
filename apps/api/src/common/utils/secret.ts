@@ -11,9 +11,13 @@ export function verifyApiSecret(secret: string, expectedHash: string): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+export function generateAuthKey(): string {
+  return randomBytes(36).toString('base64url');
+}
+
 export function generateApiCredential() {
   return {
     appKey: randomUUID(),
-    authKey: randomBytes(36).toString('base64url'),
+    authKey: generateAuthKey(),
   };
 }

@@ -6,12 +6,17 @@ export function getToken() {
   return localStorage.getItem('brainwsp_token') || '';
 }
 
+export function mediaUrl(messageId: string) {
+  return `${API_URL}/media/${messageId}?token=${encodeURIComponent(getToken())}`;
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init.headers || {}),
     },

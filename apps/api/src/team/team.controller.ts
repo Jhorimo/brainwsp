@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateDepartmentDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateDepartmentDto, UpdateTeamUserDto } from './team.dto';
+import { CreateDepartmentDto, CreateProjectDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateDepartmentDto, UpdateProjectDto, UpdateTeamUserDto } from './team.dto';
 import { TeamService } from './team.service';
 
 @ApiTags('Team')
@@ -55,5 +55,22 @@ export class TeamController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   setMembers(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SetDepartmentMembersDto) {
     return this.service.setDepartmentMembers(user.companyId, id, dto.userIds);
+  }
+
+  @Get('projects')
+  projects(@CurrentUser() user: JwtUser) {
+    return this.service.listProjects(user.companyId);
+  }
+
+  @Post('projects')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  createProject(@CurrentUser() user: JwtUser, @Body() dto: CreateProjectDto) {
+    return this.service.createProject(user.companyId, dto);
+  }
+
+  @Patch('projects/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  updateProject(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateProjectDto) {
+    return this.service.updateProject(user.companyId, id, dto);
   }
 }

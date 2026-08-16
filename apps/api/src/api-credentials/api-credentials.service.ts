@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { generateApiCredential, hashApiSecret, verifyApiSecret } from '../common/utils/secret';
+import { generateApiCredential, generateAuthKey, hashApiSecret, verifyApiSecret } from '../common/utils/secret';
 import type { ApiClientContext } from '../common/types/jwt-user';
 
 @Injectable()
@@ -25,6 +25,9 @@ export class ApiCredentialsService {
   }
 
   async create(companyId: string, name: string, instanceId?: string) {
+    const existing = await this.prisma.apiCredential.findFirst({ where: { companyId, name: { equals: name, mode: 'insensitive' } } });
+    if (existing) throw new BadRequestException(`Ya existe una credencial llamada "${name}". Usa otro nombre o elimina la anterior primero.`);
+
     if (instanceId) {
       const instance = await this.prisma.whatsAppInstance.findFirst({ where: { id: instanceId, companyId } });
       if (!instance) throw new BadRequestException('La instancia no pertenece a la empresa');
@@ -49,6 +52,25 @@ export class ApiCredentialsService {
     const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
     if (!credential) throw new NotFoundException('Credencial no encontrada');
     return this.prisma.apiCredential.update({ where: { id }, data: { active: false } });
+  }
+
+  async remove(companyId: string, id: string) {
+    const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
+    if (!credential) throw new NotFoundException('Credencial no encontrada');
+    await this.prisma.apiCredential.delete({ where: { id } });
+    return { success: true };
+  }
+
+  async regenerate(companyId: string, id: string) {
+    const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
+    if (!credential) throw new NotFoundException('Credencial no encontrada');
+    const authKey = generateAuthKey();
+    const updated = await this.prisma.apiCredential.update({
+      where: { id },
+      data: { authHash: hashApiSecret(authKey), active: true },
+      select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
+    });
+    return { ...updated, authKey, warning: 'Guarda el nuevo AUTH KEY ahora. El anterior dejó de funcionar y no se volverá a mostrar.' };
   }
 
   async authenticate(appKey: string, authKey: string): Promise<ApiClientContext> {

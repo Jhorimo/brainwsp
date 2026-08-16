@@ -1,5 +1,5 @@
 import { Worker, type Job } from 'bullmq';
-import IORedis from 'ioredis';
+import { Redis as IORedis } from 'ioredis';
 import type { Logger } from 'pino';
 import { config } from './config.js';
 import type { SessionManager } from './session-manager.js';
