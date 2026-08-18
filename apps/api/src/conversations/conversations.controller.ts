@@ -6,7 +6,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, StartConversationDto, UpdateConversationDto, UpdateLeadStageDto, UpdateMessageFlagsDto, UpdateNotesDto } from './conversations.dto';
+import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendStickerDto, StartConversationDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
@@ -35,6 +35,11 @@ export class ConversationsController {
   @Post(':id/messages')
   send(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendAgentMessageDto) {
     return this.service.sendText(user.companyId, id, dto.message);
+  }
+
+  @Post(':id/messages/sticker')
+  sendSticker(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendStickerDto) {
+    return this.service.sendSticker(user.companyId, id, dto.stickerId);
   }
 
   @Post(':id/messages/media')
@@ -86,9 +91,9 @@ export class ConversationsController {
     return this.service.removeContactTag(user.companyId, id, tagId);
   }
 
-  @Patch(':id/lead-stage')
-  updateLeadStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateLeadStageDto) {
-    return this.service.updateLeadStage(user.companyId, id, dto.leadStage);
+  @Patch(':id/stage')
+  updateStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateStageDto) {
+    return this.service.updateStage(user.companyId, id, dto.stageId);
   }
 
   @Patch(':id')

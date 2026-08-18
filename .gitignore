@@ -8,3 +8,5 @@ coverage/
 *.log
 .DS_Store
 apps/web/.next/
+docker-compose.prod.yml
+

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, Layers, Plus, ShieldCheck, UserRoundCog, Users } from 'lucide-react';
+import { Building2, Layers, Plus, ShieldCheck, Trash2, UserRoundCog, Users, Workflow } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
 
@@ -23,6 +23,7 @@ type Department = {
   users: Array<{ user: Pick<TeamUser, 'id' | 'name' | 'email' | 'role' | 'active'> }>;
   _count?: { conversations: number };
 };
+type Stage = { id: string; name: string; color: string };
 type Project = {
   id: string;
   name: string;
@@ -46,12 +47,16 @@ export default function TeamPage() {
   const [departmentModal, setDepartmentModal] = useState(false);
   const [projectModal, setProjectModal] = useState(false);
   const [membersModal, setMembersModal] = useState<Department | null>(null);
+  const [stagesModal, setStagesModal] = useState<Department | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [agentForm, setAgentForm] = useState({ name: '', email: '', password: '', role: 'AGENT' as TeamUser['role'] });
   const [departmentForm, setDepartmentForm] = useState({ name: '', description: '' });
   const [projectForm, setProjectForm] = useState({ name: '', description: '' });
   const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [newStageName, setNewStageName] = useState('');
+  const [newStageColor, setNewStageColor] = useState('#6b8afd');
 
   const load = useCallback(async () => {
     try {
@@ -132,6 +137,30 @@ export default function TeamPage() {
     finally { setSaving(false); }
   };
 
+  const openStages = async (department: Department) => {
+    setStagesModal(department);
+    setNewStageName('');
+    try { setStages(await apiFetch<Stage[]>(`/team/departments/${department.id}/stages`)); }
+    catch { setStages([]); }
+  };
+
+  const createStage = async () => {
+    if (!stagesModal || !newStageName.trim()) return;
+    setSaving(true);
+    try {
+      const stage = await apiFetch<Stage>(`/team/departments/${stagesModal.id}/stages`, { method: 'POST', body: JSON.stringify({ name: newStageName.trim(), color: newStageColor }) });
+      setStages((current) => [...current, stage]);
+      setNewStageName('');
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear la etapa'); }
+    finally { setSaving(false); }
+  };
+
+  const removeStage = async (id: string) => {
+    setStages((current) => current.filter((item) => item.id !== id));
+    try { await apiFetch(`/team/stages/${id}`, { method: 'DELETE' }); }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar la etapa'); }
+  };
+
   return (
     <AppShell
       title="Equipo y agentes"
@@ -174,7 +203,10 @@ export default function TeamPage() {
                 <div className="department-row" key={department.id}>
                   <div className="department-icon"><Building2 size={17} /></div>
                   <div className="department-copy"><strong>{department.name}</strong><span>{department.description || 'Sin descripción'} · {department.users.length} miembro(s)</span></div>
-                  <button className="button small" onClick={() => openMembers(department)}>Miembros</button>
+                  <div className="department-row-actions">
+                    <button className="button small" onClick={() => void openStages(department)}><Workflow size={13} />Etapas</button>
+                    <button className="button small" onClick={() => openMembers(department)}>Miembros</button>
+                  </div>
                 </div>
               ))}
               {!departments.length && <div className="empty-state"><div><strong>Aún no hay departamentos</strong>Crea Ventas, Soporte, Facturación u otras áreas.</div></div>}
@@ -203,6 +235,34 @@ export default function TeamPage() {
       {projectModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nuevo proyecto</h2><p>Un producto que soportas o vendes (ej. BrainPOS, dominios, VPS).</p></div><div className="modal-body"><div className="form-grid"><div className="field"><label>Nombre</label><input value={projectForm.name} onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} placeholder="BrainPOS" /></div><div className="field"><label>Descripción</label><textarea value={projectForm.description} onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })} placeholder="Sistema de punto de venta" /></div></div></div><div className="modal-actions"><button className="button" onClick={() => setProjectModal(false)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void createProject()}>{saving ? 'Guardando...' : 'Crear proyecto'}</button></div></div></div>}
 
       {membersModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Miembros de {membersModal.name}</h2><p>Selecciona qué agentes pertenecen a este departamento.</p></div><div className="modal-body"><div className="member-picker">{activeAgents.map((user) => <label className="member-option" key={user.id}><input type="checkbox" checked={memberIds.includes(user.id)} onChange={(e) => setMemberIds((current) => e.target.checked ? [...current, user.id] : current.filter((id) => id !== user.id))} /><div><strong>{user.name}</strong><span>{user.email} · {roleNames[user.role]}</span></div></label>)}</div></div><div className="modal-actions"><button className="button" onClick={() => setMembersModal(null)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void saveMembers()}>{saving ? 'Guardando...' : 'Guardar miembros'}</button></div></div></div>}
+
+      {stagesModal && (
+        <div className="modal-backdrop" onClick={() => setStagesModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header"><h2>Etapas de {stagesModal.name}</h2><p>El pipeline propio de este departamento. Los agentes solo verán estas etapas al atender conversaciones asignadas a {stagesModal.name}.</p></div>
+            <div className="modal-body">
+              <div className="stage-list">
+                {stages.map((stage) => (
+                  <div className="stage-row" key={stage.id}>
+                    <span className="stage-row-dot" style={{ background: stage.color }} />
+                    <strong>{stage.name}</strong>
+                    <button className="icon-button" onClick={() => void removeStage(stage.id)} title="Eliminar etapa"><Trash2 size={14} /></button>
+                  </div>
+                ))}
+                {!stages.length && <p className="contact-empty-hint">Aún no hay etapas. Ej: Nuevo, Contactado, Calificado, Ganado, Perdido.</p>}
+              </div>
+              <div className="stage-add">
+                <input type="color" value={newStageColor} onChange={(e) => setNewStageColor(e.target.value)} title="Color" />
+                <input value={newStageName} onChange={(e) => setNewStageName(e.target.value)} placeholder="Nombre de la etapa..." onKeyDown={(e) => { if (e.key === 'Enter') void createStage(); }} />
+                <button className="button small" disabled={saving || !newStageName.trim()} onClick={() => void createStage()}><Plus size={13} />Agregar</button>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button primary" onClick={() => setStagesModal(null)}>Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

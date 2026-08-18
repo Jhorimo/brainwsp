@@ -1,5 +1,10 @@
 import { spawn } from 'node:child_process';
-import ffmpegPath from 'ffmpeg-static';
+import { createRequire } from 'node:module';
+
+// `ffmpeg-static` is plain CJS (`module.exports = path`); importing it as an ESM default
+// under NodeNext resolves to the module namespace instead of the string, which `tsc`
+// rejects (tsx's looser resolution let it slide in dev). `require` sidesteps that entirely.
+const ffmpegPath: string | null = createRequire(import.meta.url)('ffmpeg-static');
 
 // WhatsApp expects voice notes/audio as OGG/Opus. The browser's MediaRecorder can
 // only produce WebM (Chrome) or, at best, inconsistently-supported Ogg (Firefox), and

@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum UserRole {
+  SUPERADMIN
   OWNER
   ADMIN
   SUPERVISOR
@@ -36,14 +37,6 @@ enum ConversationStatus {
   CLOSED
 }
 
-enum LeadStage {
-  NEW
-  CONTACTED
-  QUALIFIED
-  PROPOSAL
-  WON
-  LOST
-}
 
 enum MessageDirection {
   INBOUND
@@ -95,9 +88,13 @@ model Company {
   name           String
   slug           String             @unique
   active         Boolean            @default(true)
+  phone          String?
+  planId         String?
+  licenseRenewsAt DateTime?
   aiSystemPrompt String?            @db.Text
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
+  plan           Plan?              @relation(fields: [planId], references: [id], onDelete: SetNull)
   users          User[]
   apiCredentials ApiCredential[]
   instances      WhatsAppInstance[]
@@ -115,6 +112,23 @@ model Company {
   tags           Tag[]
   knowledgeEntries KnowledgeEntry[]
   stickers       StickerItem[]
+  pipelineStages PipelineStage[]
+}
+
+// Platform-level catalog, managed by SUPERADMIN users — not scoped to any one company.
+// A company's current plan is just `Company.planId`; this is the sellable catalog it
+// picks from (name, price, limits), analogous to Brain Tech's other SaaS products.
+model Plan {
+  id           String    @id @default(uuid())
+  name         String    @unique
+  billingCycle String    @default("MONTHLY")
+  price        Int       @default(0)
+  maxAgents    Int?
+  maxInstances Int?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  companies    Company[]
 }
 
 model User {
@@ -133,6 +147,7 @@ model User {
   departments          DepartmentUser[]
   feedback             Feedback[]
   createdIncidents     Incident[]      @relation("IncidentCreatedBy")
+  auditLogs            AuditLog[]
 
   @@index([companyId])
 }
@@ -218,8 +233,28 @@ model Department {
   conversations Conversation[]
   feedback    Feedback[]
   incidents   Incident[]
+  stages      PipelineStage[]
 
   @@unique([companyId, name])
+}
+
+// A department's own sales/case pipeline — Ventas might use Nuevo→Contactado→Ganado/Perdido
+// while Cobranzas uses Pendiente→Pagado→Moroso. Deliberately scoped to one department (not
+// nullable/company-wide) so there's no ambiguous "general pipeline" fallback to reason
+// about: a conversation with no department simply has no stages to pick from.
+model PipelineStage {
+  id           String        @id @default(uuid())
+  companyId    String
+  departmentId String
+  name         String
+  color        String        @default("#6b8afd")
+  createdAt    DateTime      @default(now())
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department   Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([departmentId, name])
+  @@index([companyId])
 }
 
 model DepartmentUser {
@@ -255,7 +290,6 @@ model Contact {
   avatarUrl     String?
   email         String?
   notes         String?        @db.Text
-  leadStage     LeadStage      @default(NEW)
   metadata      Json?
   lastSeenAt    DateTime?
   createdAt     DateTime       @default(now())
@@ -317,6 +351,7 @@ model Conversation {
   assignedUserId String?
   departmentId   String?
   projectId      String?
+  stageId        String?
   status         ConversationStatus @default(OPEN)
   subject        String?
   aiEnabled      Boolean            @default(false)
@@ -331,6 +366,7 @@ model Conversation {
   assignedUser   User?              @relation("AssignedAgent", fields: [assignedUserId], references: [id], onDelete: SetNull)
   department     Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   project        Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  stage          PipelineStage?     @relation(fields: [stageId], references: [id], onDelete: SetNull)
   messages       Message[]
   incidents      Incident[]
 
@@ -454,6 +490,7 @@ model AuditLog {
   metadata  Json?
   createdAt DateTime @default(now())
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([companyId, createdAt])
 }

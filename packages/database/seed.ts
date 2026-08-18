@@ -47,6 +47,33 @@ async function main() {
     },
   });
 
+  // Platform staff account — separate from the tenant OWNER above so promoting someone
+  // to SUPERADMIN never disturbs the day-to-day company they already use BrainWSP as.
+  const superadminName = process.env.SEED_SUPERADMIN_NAME || 'Super Admin';
+  const superadminEmail = process.env.SEED_SUPERADMIN_EMAIL || 'superadmin@braintech.com.pe';
+  const superadminPassword = process.env.SEED_SUPERADMIN_PASSWORD || 'SuperAdmin-123456!';
+  const superadminPasswordHash = await bcrypt.hash(superadminPassword, 12);
+  await prisma.user.upsert({
+    where: { email: superadminEmail },
+    update: { name: superadminName, companyId: company.id, role: UserRole.SUPERADMIN, active: true },
+    create: {
+      companyId: company.id,
+      email: superadminEmail,
+      name: superadminName,
+      passwordHash: superadminPasswordHash,
+      role: UserRole.SUPERADMIN,
+    },
+  });
+
+  const defaultPlans: Array<{ name: string; billingCycle: string; price: number; maxAgents?: number; maxInstances?: number }> = [
+    { name: 'Gratis', billingCycle: 'FREE', price: 0, maxAgents: 2, maxInstances: 1 },
+    { name: 'Mensual', billingCycle: 'MONTHLY', price: 9900, maxAgents: 10, maxInstances: 3 },
+    { name: 'Anual', billingCycle: 'ANNUAL', price: 99900, maxAgents: 25, maxInstances: 10 },
+  ];
+  for (const plan of defaultPlans) {
+    await prisma.plan.upsert({ where: { name: plan.name }, update: {}, create: plan });
+  }
+
   const existingCredential = await prisma.apiCredential.findFirst({
     where: { companyId: company.id, name: 'BrainPOS / ERP - Desarrollo' },
   });
@@ -76,6 +103,9 @@ async function main() {
   console.log(`Swagger:   http://localhost:4000/docs`);
   console.log(`Usuario:   ${adminEmail}`);
   console.log(`Password:  ${adminPassword}`);
+  console.log('----------------------------------------------------------');
+  console.log(`Panel admin (plataforma): ${superadminEmail} / ${superadminPassword}`);
+  console.log('----------------------------------------------------------');
   console.log(`APP KEY:   ${appKey}`);
   if (authKey) {
     console.log(`AUTH KEY:  ${authKey}`);

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { join } from 'node:path';
 import { AuthModule } from './auth/auth.module';
+import { AdminModule } from './admin/admin.module';
 import { ApiCredentialsModule } from './api-credentials/api-credentials.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -41,6 +42,7 @@ import { TeamModule } from './team/team.module';
     FeedbackModule,
     IncidentsModule,
     StickersModule,
+    AdminModule,
     HealthModule,
   ],
 })

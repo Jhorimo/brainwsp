@@ -1,12 +1,19 @@
-import { BadRequestException, Controller, Delete, Get, Param, Post, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { IsUUID } from 'class-validator';
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { StorageService } from '../storage/storage.service';
 import { StickersService } from './stickers.service';
+
+class AddFromMessageDto {
+  @ApiProperty()
+  @IsUUID()
+  messageId!: string;
+}
 
 const MAX_STICKER_BYTES = 8 * 1024 * 1024;
 
@@ -31,6 +38,11 @@ export class StickersController {
   async upload(@CurrentUser() user: JwtUser, @UploadedFile() file: Express.Multer.File | undefined) {
     if (!file) throw new BadRequestException('Archivo requerido');
     return this.service.upload(user.companyId, file);
+  }
+
+  @Post('from-message')
+  addFromMessage(@CurrentUser() user: JwtUser, @Body() dto: AddFromMessageDto) {
+    return this.service.addFromMessage(user.companyId, dto.messageId);
   }
 
   @Delete(':id')

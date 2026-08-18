@@ -10,6 +10,10 @@ export function mediaUrl(messageId: string) {
   return `${API_URL}/media/${messageId}?token=${encodeURIComponent(getToken())}`;
 }
 
+export function stickerFileUrl(stickerId: string) {
+  return `${API_URL}/stickers/${stickerId}/file?token=${encodeURIComponent(getToken())}`;
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;

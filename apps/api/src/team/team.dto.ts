@@ -96,6 +96,18 @@ export class CreateProjectDto {
   description?: string;
 }
 
+export class CreateStageDto {
+  @ApiProperty({ example: 'Calificado' })
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @ApiPropertyOptional({ example: '#6b8afd' })
+  @IsOptional()
+  @IsString()
+  color?: string;
+}
+
 export class CreateTagDto {
   @ApiProperty({ example: 'Cliente VIP' })
   @IsString()

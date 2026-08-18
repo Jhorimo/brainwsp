@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InstanceStatus, type LeadStage, MessageDirection, MessageStatus, MessageType, type ConversationStatus } from '@prisma/client';
+import { InstanceStatus, MessageDirection, MessageStatus, MessageType, type ConversationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -28,10 +28,11 @@ export class ConversationsService {
     return this.prisma.conversation.findMany({
       where: { companyId, ...(status ? { status } : {}) },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, leadStage: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
+        stage: { select: { id: true, name: true, color: true } },
         instance: { select: { id: true, name: true, slug: true, status: true } },
         messages: {
           take: 1,
@@ -277,9 +278,16 @@ export class ConversationsService {
     return hydrated;
   }
 
-  async updateLeadStage(companyId: string, conversationId: string, leadStage: LeadStage) {
+  async updateStage(companyId: string, conversationId: string, stageId: string | null | undefined) {
     const conversation = await this.getOwned(companyId, conversationId);
-    await this.prisma.contact.update({ where: { id: conversation.contactId }, data: { leadStage } });
+    if (stageId) {
+      // A stage only makes sense within its own department's pipeline — reject silently
+      // mismatched stage/department combinations rather than storing a dangling reference.
+      const stage = await this.prisma.pipelineStage.findFirst({ where: { id: stageId, companyId } });
+      if (!stage) throw new NotFoundException('Etapa no encontrada');
+      if (stage.departmentId !== conversation.departmentId) throw new BadRequestException('Esa etapa no pertenece al departamento de esta conversación');
+    }
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { stageId: stageId || null } });
     const hydrated = await this.getHydrated(companyId, conversationId);
     if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
     return hydrated;
@@ -290,7 +298,7 @@ export class ConversationsService {
     conversationId: string,
     data: { status?: ConversationStatus; assignedUserId?: string | null; departmentId?: string | null; projectId?: string | null; pinned?: boolean; aiEnabled?: boolean },
   ) {
-    await this.getOwned(companyId, conversationId);
+    const current = await this.getOwned(companyId, conversationId);
     if (data.assignedUserId) {
       const user = await this.prisma.user.findFirst({ where: { id: data.assignedUserId, companyId, active: true } });
       if (!user) throw new NotFoundException('Agente no encontrado');
@@ -303,7 +311,10 @@ export class ConversationsService {
       const project = await this.prisma.project.findFirst({ where: { id: data.projectId, companyId, active: true } });
       if (!project) throw new NotFoundException('Proyecto no encontrado');
     }
-    await this.prisma.conversation.update({ where: { id: conversationId }, data });
+    // The stage belongs to the old department's pipeline — carrying it over to a
+    // different department would leave it pointing at a stage that no longer applies.
+    const departmentChanged = data.departmentId !== undefined && data.departmentId !== current.departmentId;
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { ...data, ...(departmentChanged ? { stageId: null } : {}) } });
     const hydrated = await this.getHydrated(companyId, conversationId);
     if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
     return hydrated;
@@ -319,10 +330,11 @@ export class ConversationsService {
     return this.prisma.conversation.findFirst({
       where: { id, companyId },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, leadStage: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
+        stage: { select: { id: true, name: true, color: true } },
         instance: { select: { id: true, name: true, slug: true, status: true } },
         messages: {
           take: 1,

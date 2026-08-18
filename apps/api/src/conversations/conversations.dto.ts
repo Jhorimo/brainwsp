@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ConversationStatus, LeadStage } from '@prisma/client';
+import { ConversationStatus } from '@prisma/client';
 import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export class SendAgentMessageDto {
@@ -93,8 +93,9 @@ export class SendStickerDto {
   stickerId!: string;
 }
 
-export class UpdateLeadStageDto {
-  @ApiProperty({ enum: LeadStage })
-  @IsEnum(LeadStage)
-  leadStage!: LeadStage;
+export class UpdateStageDto {
+  @ApiPropertyOptional({ description: 'null quita la etapa (ej. si la conversación no tiene departamento asignado).' })
+  @IsOptional()
+  @IsUUID()
+  stageId?: string | null;
 }

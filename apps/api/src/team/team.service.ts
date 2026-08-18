@@ -9,7 +9,9 @@ export class TeamService {
 
   listUsers(companyId: string) {
     return this.prisma.user.findMany({
-      where: { companyId },
+      // Platform staff seeded into this company (SUPERADMIN) aren't part of anyone's
+      // tenant team roster — keep them out of the company's own "Equipo y agentes" list.
+      where: { companyId, role: { not: UserRole.SUPERADMIN } },
       select: {
         id: true,
         name: true,
@@ -27,6 +29,11 @@ export class TeamService {
   }
 
   async createUser(companyId: string, input: { name: string; email: string; password: string; role?: UserRole }) {
+    // SUPERADMIN is a platform-staff role, not a tenant one — it must only ever be
+    // granted by seeding/direct DB access, never through a company's own team management,
+    // or any OWNER could self-promote a teammate to cross-tenant access.
+    if (input.role === UserRole.SUPERADMIN) throw new BadRequestException('Rol no permitido');
+
     const email = input.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) throw new BadRequestException('Ya existe un usuario con ese correo');
@@ -45,8 +52,10 @@ export class TeamService {
   }
 
   async updateUser(companyId: string, userId: string, input: { name?: string; role?: UserRole; active?: boolean; password?: string }) {
+    if (input.role === UserRole.SUPERADMIN) throw new BadRequestException('Rol no permitido');
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (user.role === UserRole.SUPERADMIN) throw new BadRequestException('No puedes modificar este usuario desde aquí');
 
     return this.prisma.user.update({
       where: { id: userId },
@@ -145,6 +154,30 @@ export class TeamService {
         ...(input.active !== undefined ? { active: input.active } : {}),
       },
     });
+  }
+
+  async listStages(companyId: string, departmentId: string) {
+    const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
+    if (!department) throw new NotFoundException('Departamento no encontrado');
+    return this.prisma.pipelineStage.findMany({ where: { companyId, departmentId }, orderBy: { createdAt: 'asc' } });
+  }
+
+  async createStage(companyId: string, departmentId: string, input: { name: string; color?: string }) {
+    const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
+    if (!department) throw new NotFoundException('Departamento no encontrado');
+    return this.prisma.pipelineStage.create({
+      data: { companyId, departmentId, name: input.name.trim(), color: input.color || undefined },
+    }).catch((error: unknown) => {
+      if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una etapa con ese nombre en este departamento');
+      throw error;
+    });
+  }
+
+  async deleteStage(companyId: string, id: string) {
+    const stage = await this.prisma.pipelineStage.findFirst({ where: { id, companyId } });
+    if (!stage) throw new NotFoundException('Etapa no encontrada');
+    await this.prisma.pipelineStage.delete({ where: { id } });
+    return { success: true };
   }
 
   listTags(companyId: string) {

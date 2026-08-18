@@ -27,7 +27,7 @@ export default function LoginPage() {
       localStorage.setItem('brainwsp_token', data.accessToken);
       localStorage.setItem('brainwsp_user', JSON.stringify(data.user));
       localStorage.setItem('brainwsp_company', JSON.stringify(data.company));
-      router.replace('/dashboard');
+      router.replace(data.user.role === 'SUPERADMIN' ? '/admin/clients' : '/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
     } finally {

@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateTeamUserDto } from './team.dto';
+import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateStageDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateTeamUserDto } from './team.dto';
 import { TeamService } from './team.service';
 
 @ApiTags('Team')
@@ -72,6 +72,23 @@ export class TeamController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   updateProject(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateProjectDto) {
     return this.service.updateProject(user.companyId, id, dto);
+  }
+
+  @Get('departments/:id/stages')
+  stages(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.listStages(user.companyId, id);
+  }
+
+  @Post('departments/:id/stages')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  createStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: CreateStageDto) {
+    return this.service.createStage(user.companyId, id, dto);
+  }
+
+  @Delete('stages/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  deleteStage(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.deleteStage(user.companyId, id);
   }
 
   @Get('tags')

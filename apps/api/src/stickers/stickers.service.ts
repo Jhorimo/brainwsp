@@ -31,6 +31,18 @@ export class StickersService {
     return this.prisma.stickerItem.create({ data: { companyId, mediaUrl: internalUrl } });
   }
 
+  // Saves a sticker the business already received/sent (in `Message.mediaUrl`, already
+  // webp — it came from or went to WhatsApp as a real sticker) into the reusable tray,
+  // without re-uploading or re-converting anything.
+  async addFromMessage(companyId: string, messageId: string) {
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, companyId, type: 'STICKER' },
+      select: { mediaUrl: true },
+    });
+    if (!message?.mediaUrl) throw new NotFoundException('Mensaje de sticker no encontrado');
+    return this.prisma.stickerItem.create({ data: { companyId, mediaUrl: message.mediaUrl } });
+  }
+
   async remove(companyId: string, id: string) {
     const sticker = await this.prisma.stickerItem.findFirst({ where: { id, companyId } });
     if (!sticker) throw new NotFoundException('Sticker no encontrado');

@@ -3,17 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Phone, Pin, Plus, Search, Send, Settings, Smile, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Phone, Pin, Plus, Search, Send, Settings, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch, getToken, mediaUrl, SOCKET_URL } from '@/lib/api';
+import { apiFetch, getToken, mediaUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 type Tag = { id: string; name: string; color: string };
-type LeadStage = 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'PROPOSAL' | 'WON' | 'LOST';
-type Contact = { id: string; name?: string | null; pushName?: string | null; phone?: string | null; waId: string; notes?: string | null; avatarUrl?: string | null; leadStage: LeadStage; tags?: Array<{ tag: Tag }> };
+type Stage = { id: string; name: string; color: string };
+type Contact = { id: string; name?: string | null; pushName?: string | null; phone?: string | null; waId: string; notes?: string | null; avatarUrl?: string | null; tags?: Array<{ tag: Tag }> };
 type Author = { id: string; name?: string | null; pushName?: string | null };
 type Conversation = {
   id: string;
@@ -26,6 +26,7 @@ type Conversation = {
   assignedUser?: { id: string; name: string } | null;
   department?: { id: string; name: string } | null;
   project?: { id: string; name: string } | null;
+  stage?: Stage | null;
   instance: { id: string; name: string; slug: string; status: string };
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; author?: Author | null }>;
 };
@@ -54,8 +55,6 @@ const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: typeof Ligh
   { id: 'OTHER', label: 'Otro', icon: MessageCircle },
 ];
 const incidentStatusLabels: Record<IncidentStatus, string> = { PENDING: 'Pendiente', IN_PROGRESS: 'En proceso', RESOLVED: 'Solucionado' };
-const leadStageLabels: Record<LeadStage, string> = { NEW: 'Nuevo', CONTACTED: 'Contactado', QUALIFIED: 'Calificado', PROPOSAL: 'Propuesta enviada', WON: 'Ganado', LOST: 'Perdido' };
-const LEAD_STAGES: LeadStage[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'WON', 'LOST'];
 
 function sortConversations(list: Conversation[]) {
   return [...list].sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || (new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()));
@@ -160,6 +159,7 @@ export default function ConversationsPage() {
   const [filterAgent, setFilterAgent] = useState('');
   const [filterDept, setFilterDept] = useState('');
   const [filterProject, setFilterProject] = useState('');
+  const [filterStage, setFilterStage] = useState('');
   const [quickFilter, setQuickFilter] = useState<string>('all');
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
@@ -171,6 +171,7 @@ export default function ConversationsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [companyTags, setCompanyTags] = useState<Tag[]>([]);
+  const [stagesByDept, setStagesByDept] = useState<Record<string, Stage[]>>({});
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const tagMenuRef = useRef<HTMLDivElement>(null);
@@ -186,6 +187,14 @@ export default function ConversationsPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showStickerTray, setShowStickerTray] = useState(false);
+  const [stickerTrayPos, setStickerTrayPos] = useState<{ top: number; left: number } | null>(null);
+  const stickerButtonRef = useRef<HTMLButtonElement>(null);
+  const stickerTrayRef = useRef<HTMLDivElement>(null);
+  const [stickers, setStickers] = useState<Array<{ id: string }>>([]);
+  const [savedStickerMsgIds, setSavedStickerMsgIds] = useState<Set<string>>(new Set());
+  const [stickerUploading, setStickerUploading] = useState(false);
+  const stickerFileInputRef = useRef<HTMLInputElement>(null);
   const [emojiPos, setEmojiPos] = useState<{ top: number; left: number } | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const emojiPopoverRef = useRef<HTMLDivElement>(null);
@@ -330,6 +339,23 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [showEmoji]);
 
+  useEffect(() => {
+    if (!showStickerTray) { setStickerTrayPos(null); return; }
+    const button = stickerButtonRef.current;
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      setStickerTrayPos({ top: rect.top, left: rect.left });
+    }
+    void apiFetch<Array<{ id: string }>>('/stickers').then(setStickers).catch(() => undefined);
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (stickerTrayRef.current?.contains(target) || stickerButtonRef.current?.contains(target)) return;
+      setShowStickerTray(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showStickerTray]);
+
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
   // get its options cut off and unclickable, exactly like the emoji grid did.
@@ -378,6 +404,7 @@ export default function ConversationsPage() {
       if (tagMenuOpen) { setTagMenuOpen(false); return; }
       if (openMessageMenuId) { setOpenMessageMenuId(null); return; }
       if (showEmoji) { setShowEmoji(false); return; }
+      if (showStickerTray) { setShowStickerTray(false); return; }
       if (forwardMessageId) { setForwardMessageId(null); return; }
       if (lightboxUrl) { setLightboxUrl(null); return; }
       if (incidentModal) { setIncidentModal(false); return; }
@@ -386,30 +413,43 @@ export default function ConversationsPage() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, showEmoji, forwardMessageId, lightboxUrl, incidentModal, newChatModal, aiPromptModal]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, showEmoji, showStickerTray, forwardMessageId, lightboxUrl, incidentModal, newChatModal, aiPromptModal]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
   useEffect(() => () => { streamRef.current?.getTracks().forEach((track) => track.stop()); if (timerRef.current) clearInterval(timerRef.current); }, []);
 
   const selected = conversations.find((item) => item.id === selectedId) || null;
+
+  useEffect(() => {
+    const departmentIds = [selected?.department?.id, filterDept].filter((id): id is string => !!id && !stagesByDept[id]);
+    for (const departmentId of new Set(departmentIds)) {
+      void apiFetch<Stage[]>(`/team/departments/${departmentId}/stages`)
+        .then((stages) => setStagesByDept((current) => ({ ...current, [departmentId]: stages })))
+        .catch(() => undefined);
+    }
+  }, [selected?.department?.id, filterDept, stagesByDept]);
+
   const baseFiltered = useMemo(() => conversations.filter((item) =>
     `${displayName(item.contact)} ${item.contact.phone || ''} ${lastText(item)}`.toLowerCase().includes(search.toLowerCase())
     && (!filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent))
     && (!filterDept || item.department?.id === filterDept)
     && (!filterProject || item.project?.id === filterProject)
-  ), [conversations, search, filterAgent, filterDept, filterProject]);
+    && (!filterStage || item.stage?.id === filterStage)
+  ), [conversations, search, filterAgent, filterDept, filterProject, filterStage]);
   const unreadTabCount = useMemo(() => baseFiltered.filter((item) => item.unreadCount > 0).length, [baseFiltered]);
   const pinnedTabCount = useMemo(() => baseFiltered.filter((item) => item.pinned).length, [baseFiltered]);
   const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
+  const aiTabCount = useMemo(() => baseFiltered.filter((item) => item.aiEnabled).length, [baseFiltered]);
   const filtered = useMemo(() => baseFiltered.filter((item) => {
     if (quickFilter === 'unread') return item.unreadCount > 0;
     if (quickFilter === 'pinned') return item.pinned;
     if (quickFilter === 'groups') return isGroupContact(item.contact);
+    if (quickFilter === 'ai') return item.aiEnabled;
     if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
     return true;
   }), [baseFiltered, quickFilter]);
-  const hasActiveFilters = !!(filterAgent || filterDept || filterProject);
+  const hasActiveFilters = !!(filterAgent || filterDept || filterProject || filterStage);
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
   const canDeleteTags = isAdmin || identity.role === 'SUPERVISOR';
@@ -667,12 +707,45 @@ export default function ConversationsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar la etiqueta'); }
   };
 
-  const updateLeadStage = async (leadStage: LeadStage) => {
+  const sendStickerFromTray = async (stickerId: string) => {
+    if (!selectedId) return;
+    setShowStickerTray(false);
+    try {
+      await apiFetch(`/conversations/${selectedId}/messages/sticker`, { method: 'POST', body: JSON.stringify({ stickerId }) });
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo enviar el sticker'); }
+  };
+
+  const uploadSticker = async (file: File) => {
+    setStickerUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const sticker = await apiFetch<{ id: string }>('/stickers', { method: 'POST', body: form });
+      setStickers((current) => [sticker, ...current]);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo subir el sticker'); }
+    finally { setStickerUploading(false); }
+  };
+
+  const saveStickerToLibrary = async (messageId: string) => {
+    if (savedStickerMsgIds.has(messageId)) return;
+    try {
+      await apiFetch('/stickers/from-message', { method: 'POST', body: JSON.stringify({ messageId }) });
+      setSavedStickerMsgIds((current) => new Set(current).add(messageId));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar el sticker'); }
+  };
+
+  const deleteStickerItem = async (id: string) => {
+    setStickers((current) => current.filter((item) => item.id !== id));
+    try { await apiFetch(`/stickers/${id}`, { method: 'DELETE' }); }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo borrar el sticker'); }
+  };
+
+  const updateStage = async (stageId: string | null) => {
     if (!selectedId) return;
     try {
-      const updated = await apiFetch<Conversation>(`/conversations/${selectedId}/lead-stage`, { method: 'PATCH', body: JSON.stringify({ leadStage }) });
+      const updated = await apiFetch<Conversation>(`/conversations/${selectedId}/stage`, { method: 'PATCH', body: JSON.stringify({ stageId }) });
       setConversations((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar la etapa del lead'); }
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar la etapa'); }
   };
 
   const toggleAi = async () => {
@@ -837,8 +910,18 @@ export default function ConversationsPage() {
           </div>
         );
       }
-      case 'STICKER':
-        return <div className="sticker-wrap"><img className="message-sticker" src={mediaUrl(message.id)} alt="Sticker" onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Sticker no disponible</div></div>;
+      case 'STICKER': {
+        const saved = savedStickerMsgIds.has(message.id);
+        return (
+          <div className="sticker-wrap">
+            <img className="message-sticker" src={mediaUrl(message.id)} alt="Sticker" onError={handleMediaError} />
+            <div className="media-fallback"><AlertCircle size={18} />Sticker no disponible</div>
+            <button className={`sticker-save-btn ${saved ? 'saved' : ''}`} onClick={() => void saveStickerToLibrary(message.id)} title={saved ? 'Guardado en tu galería' : 'Guardar en mi galería de stickers'}>
+              {saved ? <Check size={12} /> : <Plus size={12} />}
+            </button>
+          </div>
+        );
+      }
       default:
         return formatMessageText(message.body || message.caption || message.type);
     }
@@ -861,10 +944,11 @@ export default function ConversationsPage() {
               <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
               <div className="chat-quick-more" ref={quickMenuRef}>
-                <button className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
+                <button className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
                 {quickMenuOpen && (
                   <div className="chat-quick-menu">
                     <button className={quickFilter === 'groups' ? 'active' : ''} onClick={() => { setQuickFilter('groups'); setQuickMenuOpen(false); }}><Users size={14} />Grupos{groupTabCount > 0 && <span className="chat-quick-menu-count">{groupTabCount}</span>}</button>
+                    <button className={quickFilter === 'ai' ? 'active' : ''} onClick={() => { setQuickFilter('ai'); setQuickMenuOpen(false); }}><Bot size={14} />Con IA activa{aiTabCount > 0 && <span className="chat-quick-menu-count">{aiTabCount}</span>}</button>
                     {companyTags.length > 0 && <div className="chat-quick-menu-divider" />}
                     {companyTags.map((tag) => (
                       <button key={tag.id} className={quickFilter === `tag:${tag.id}` ? 'active' : ''} onClick={() => { setQuickFilter(`tag:${tag.id}`); setQuickMenuOpen(false); }}>
@@ -881,15 +965,21 @@ export default function ConversationsPage() {
                 <option value="unassigned">Sin asignar</option>
                 {teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}
               </select>
-              <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
+              <select value={filterDept} onChange={(e) => { setFilterDept(e.target.value); setFilterStage(''); }}>
                 <option value="">Todos los departamentos</option>
                 {departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}
               </select>
+              {filterDept && (
+                <select value={filterStage} onChange={(e) => setFilterStage(e.target.value)}>
+                  <option value="">Todas las etapas</option>
+                  {(stagesByDept[filterDept] || []).map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
+                </select>
+              )}
               <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
                 <option value="">Todos los proyectos</option>
                 {projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
               </select>
-              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); }}>Limpiar filtros</button>}
+              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); setFilterStage(''); }}>Limpiar filtros</button>}
             </div>
           </div>
           <div className="chat-list-scroll">
@@ -949,6 +1039,7 @@ export default function ConversationsPage() {
 
             <div className="chat-composer">
               <input ref={fileInputRef} type="file" hidden accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={onFileChange} />
+              <input ref={stickerFileInputRef} type="file" hidden accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadSticker(file); }} />
               {recording ? (
                 <div className="recording-indicator">
                   <span className="recording-dot" />
@@ -959,6 +1050,7 @@ export default function ConversationsPage() {
                 <>
                   <button className="icon-button ghost" onClick={pickFile} title="Adjuntar archivo"><Paperclip size={17} /></button>
                   <button ref={emojiButtonRef} className="icon-button ghost" onClick={() => setShowEmoji((v) => !v)} title="Emojis"><Smile size={17} /></button>
+                  <button ref={stickerButtonRef} className="icon-button ghost" onClick={() => setShowStickerTray((v) => !v)} title="Stickers"><StickerIcon size={17} /></button>
                   <textarea
                     ref={textareaRef}
                     rows={1}
@@ -982,7 +1074,15 @@ export default function ConversationsPage() {
         </div>
 
         <aside className="contact-panel">
-          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><button onClick={() => void addTag(tag.id)}><span className="tag-dot" style={{ background: tag.color }} />{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa del lead</h4><select className={`lead-stage-select lead-stage-${selected.contact.leadStage.toLowerCase()}`} value={selected.contact.leadStage} onChange={(e) => void updateLeadStage(e.target.value as LeadStage)}>{LEAD_STAGES.map((stage) => <option value={stage} key={stage}>{leadStageLabels[stage]}</option>)}</select></div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">General</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><h4>Notas</h4><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
+          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><button onClick={() => void addTag(tag.id)}><span className="tag-dot" style={{ background: tag.color }} />{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
+              const stages = stagesByDept[selected.department!.id] || [];
+              return stages.length ? (
+                <select className="lead-stage-select" style={{ background: `${(selected.stage?.color) || '#eef1f7'}22`, borderColor: `${(selected.stage?.color) || '#dde1ea'}55`, color: selected.stage?.color || '#5b6478' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>
+                  <option value="">Sin etapa</option>
+                  {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
+                </select>
+              ) : <p className="contact-empty-hint">"{selected.department.name}" todavía no tiene etapas configuradas. Créalas desde Equipo y agentes.</p>;
+            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">General</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><h4>Notas</h4><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
         </aside>
       </section>
 
@@ -1145,6 +1245,23 @@ export default function ConversationsPage() {
     {showEmoji && emojiPos && typeof document !== 'undefined' && createPortal(
       <div ref={emojiPopoverRef} className="emoji-popover" style={{ top: emojiPos.top, left: emojiPos.left }}>
         <EmojiPicker onEmojiClick={insertEmoji} />
+      </div>,
+      document.body,
+    )}
+    {showStickerTray && stickerTrayPos && typeof document !== 'undefined' && createPortal(
+      <div ref={stickerTrayRef} className="sticker-tray" style={{ top: stickerTrayPos.top, left: stickerTrayPos.left }}>
+        <div className="sticker-tray-grid">
+          <button className="sticker-tray-add" onClick={() => stickerFileInputRef.current?.click()} disabled={stickerUploading} title="Subir sticker nuevo">
+            {stickerUploading ? '...' : <Plus size={20} />}
+          </button>
+          {stickers.map((sticker) => (
+            <div className="sticker-tray-item" key={sticker.id}>
+              <button onClick={() => void sendStickerFromTray(sticker.id)}><img src={stickerFileUrl(sticker.id)} alt="Sticker" /></button>
+              <button className="sticker-tray-delete" onClick={() => void deleteStickerItem(sticker.id)} title="Eliminar sticker"><Trash2 size={11} /></button>
+            </div>
+          ))}
+        </div>
+        {!stickers.length && <p className="contact-empty-hint">Sube tu primer sticker con el botón "+".</p>}
       </div>,
       document.body,
     )}

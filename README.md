@@ -311,3 +311,29 @@ Este repositorio es una base profesional de MVP, pero antes de venderlo como ser
 ## Licencias y canal WhatsApp
 
 Baileys implementa WhatsApp Web y no es una API oficial de Meta. El producto debe presentar el canal QR como una integración no oficial y reservar Meta Cloud API para escenarios que requieran soporte oficial.
+
+## Despliegue local
+
+Manual paso a paso (instalación rápida con Docker o entorno de desarrollo con Node.js, credenciales, verificación y problemas comunes): **[Instalación BrainWSP](https://claude.ai/code/artifact/440bbbc7-7514-451c-a545-399976417017)**.
+
+## Despliegue en VPS
+
+Antes de empezar, apunta el DNS de tu dominio (y el subdominio de la API) a la IP del VPS:
+
+```text
+tudominio.com       A   IP_DEL_VPS
+api.tudominio.com   A   IP_DEL_VPS
+```
+
+Luego, en el VPS (Ubuntu, como root o con sudo):
+
+```bash
+apt-get update && apt-get install -y git
+git clone https://github.com/Jhorimo/brainwsp.git
+cd brainwsp
+chmod +x deploy.sh
+./deploy.sh tudominio.com
+```
+
+El script instala Docker, arma el proxy con SSL, genera credenciales seguras, construye las imágenes y levanta todo. Al final entrega la URL, el usuario y la contraseña del administrador (también quedan guardados en `../tudominio.com.txt`). Volver a correr el mismo comando actualiza el despliegue (`git pull` + rebuild) sin perder las credenciales existentes.
+
