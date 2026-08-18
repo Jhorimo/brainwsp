@@ -1,3 +1,6 @@
+import { Queue } from 'bullmq';
+import { Redis as IORedis } from 'ioredis';
+import { config } from './config.js';
 import { prisma } from './prisma.js';
 import { logger } from './logger.js';
 import { RealtimePublisher } from './realtime.js';
@@ -7,7 +10,9 @@ import { CommandWorker } from './command-worker.js';
 import { ensureBucket } from './storage.js';
 
 const realtime = new RealtimePublisher();
-const sessions = new SessionManager(prisma, realtime, logger);
+const outboundQueueConnection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
+const outboundQueue = new Queue('whatsapp.outbound', { connection: outboundQueueConnection });
+const sessions = new SessionManager(prisma, realtime, logger, outboundQueue);
 const outbound = new OutboundWorker(prisma, sessions, realtime, logger);
 const commands = new CommandWorker(sessions, logger);
 
@@ -23,6 +28,7 @@ async function shutdown(signal: string) {
   await Promise.allSettled([commands.close(), outbound.close()]);
   await sessions.close();
   await realtime.close();
+  await Promise.allSettled([outboundQueue.close(), outboundQueueConnection.quit()]);
   await prisma.$disconnect();
   process.exit(0);
 }

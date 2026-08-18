@@ -17,10 +17,12 @@ import {
   MessageType,
   type PrismaClient,
 } from '@prisma/client';
+import type { Queue } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import type { Logger } from 'pino';
 import { config } from './config.js';
 import { usePrismaAuthState } from './auth-state.js';
+import { maybeReplyWithAi } from './ai-agent.js';
 import { extensionFromMime, extractMessage, jidToPhone } from './message-utils.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
@@ -40,6 +42,7 @@ export class SessionManager {
     private readonly prisma: PrismaClient,
     private readonly realtime: RealtimePublisher,
     private readonly logger: Logger,
+    private readonly outboundQueue: Queue,
   ) {}
 
   async bootstrap() {
@@ -158,6 +161,9 @@ export class SessionManager {
         });
         await this.emitInstance(instanceId);
         childLogger.info({ phoneNumber }, 'WhatsApp connected');
+        this.backfillAvatars(instanceId, socket).catch((error) => {
+          childLogger.warn({ err: error }, 'avatar backfill failed');
+        });
       }
 
       if (update.connection === 'close') {
@@ -207,6 +213,14 @@ export class SessionManager {
       for (const message of messages) {
         await this.persistIncoming(instanceId, message, socket).catch((error) => {
           childLogger.error({ err: error, messageId: message.key.id }, 'failed to persist incoming message');
+        });
+      }
+    });
+
+    socket.ev.on('messages.reaction', async (reactions) => {
+      for (const { key, reaction } of reactions) {
+        await this.persistReaction(instanceId, key, reaction).catch((error) => {
+          childLogger.error({ err: error, messageId: key.id }, 'failed to persist reaction');
         });
       }
     });
@@ -330,6 +344,7 @@ export class SessionManager {
         ? { companyId: instance.companyId, waId: remoteJid, name: groupSubject || null, pushName: groupSubject || null, lastSeenAt: new Date() }
         : { companyId: instance.companyId, waId: remoteJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
     });
+    this.refreshAvatar(socket, contact.id, remoteJid, contact.avatarUrl);
 
     // In a group, `key.participant` is the actual sender — track them as their own
     // Contact so the UI can show who wrote each message, distinct from the group itself.
@@ -343,6 +358,7 @@ export class SessionManager {
         create: { companyId: instance.companyId, waId: participantJid, phone: participantPhone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
       });
       authorContactId = author.id;
+      this.refreshAvatar(socket, author.id, participantJid, author.avatarUrl);
     }
 
     const conversation = await this.prisma.conversation.upsert({
@@ -390,6 +406,7 @@ export class SessionManager {
         body: content.body,
         caption: content.caption,
         fileName: content.fileName,
+        fileSize: content.fileSize,
         mimeType: content.mimeType,
         mediaUrl,
         metadata: { remoteJid, timestamp: String(message.messageTimestamp || '') },
@@ -411,6 +428,96 @@ export class SessionManager {
       message: created,
       conversation: realtimeConversation ? { ...realtimeConversation, messages: [created] } : { ...conversation, contact, messages: [created] },
     });
+
+    maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id).catch((error) => {
+      this.logger.warn({ err: error, conversationId: conversation.id }, 'AI auto-reply failed');
+    });
+  }
+
+  // `targetKey` identifies the message being reacted to; `reaction.key` is the reactor's own
+  // envelope (remoteJid/participant/fromMe) — see Baileys process-message.js, which builds this
+  // event as `{ key: content.reactionMessage.key, reaction: { ...content.reactionMessage, key: message.key } }`.
+  // A falsy `reaction.text` means the person removed their reaction.
+  private async persistReaction(instanceId: string, targetKey: proto.IMessageKey, reaction: proto.IReaction) {
+    if (!targetKey.id) return;
+
+    const message = await this.prisma.message.findUnique({
+      where: { instanceId_waMessageId: { instanceId, waMessageId: targetKey.id } },
+      select: { id: true, companyId: true, conversationId: true },
+    });
+    if (!message) return;
+
+    const reactorKey = reaction.key;
+    const fromMe = !!reactorKey?.fromMe;
+    const reactorJid = fromMe ? 'me' : reactorKey?.participant || reactorKey?.remoteJid || 'unknown';
+    const emoji = reaction.text || '';
+
+    if (!emoji) {
+      const { count } = await this.prisma.messageReaction.deleteMany({
+        where: { messageId: message.id, reactorJid },
+      });
+      if (!count) return;
+      await this.realtime.publish(message.companyId, 'message.reaction', {
+        messageId: message.id,
+        conversationId: message.conversationId,
+        reactorJid,
+        emoji: '',
+      });
+      return;
+    }
+
+    let contactId: string | undefined;
+    if (!fromMe) {
+      const contact = await this.prisma.contact.findUnique({
+        where: { companyId_waId: { companyId: message.companyId, waId: reactorJid } },
+        select: { id: true },
+      });
+      contactId = contact?.id;
+    }
+
+    const saved = await this.prisma.messageReaction.upsert({
+      where: { messageId_reactorJid: { messageId: message.id, reactorJid } },
+      update: { emoji, contactId },
+      create: { messageId: message.id, companyId: message.companyId, reactorJid, fromMe, contactId, emoji },
+    });
+
+    await this.realtime.publish(message.companyId, 'message.reaction', {
+      messageId: message.id,
+      conversationId: message.conversationId,
+      reaction: saved,
+    });
+  }
+
+  // Fire-and-forget: WhatsApp profile pictures are fetched lazily so they never
+  // delay message persistence, and only for contacts that don't have one cached yet
+  // (Baileys throws for contacts with no photo or privacy-restricted ones — that's fine, the
+  // UI falls back to initials).
+  private refreshAvatar(socket: WASocket, contactId: string, waId: string, hasAvatar: string | null) {
+    if (hasAvatar) return;
+    socket.profilePictureUrl(waId, 'image')
+      .then((url) => { if (url) return this.prisma.contact.update({ where: { id: contactId }, data: { avatarUrl: url } }); })
+      .catch(() => {});
+  }
+
+  // One pass per (re)connect over contacts still missing a photo, so existing chats
+  // pick up avatars without waiting for a new inbound message from each one.
+  private async backfillAvatars(instanceId: string, socket: WASocket) {
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId }, select: { companyId: true } });
+    if (!instance) return;
+    const contacts = await this.prisma.contact.findMany({
+      where: { companyId: instance.companyId, avatarUrl: null },
+      select: { id: true, waId: true },
+      take: 200,
+    });
+    for (const contact of contacts) {
+      try {
+        const url = await socket.profilePictureUrl(contact.waId, 'image');
+        if (url) await this.prisma.contact.update({ where: { id: contact.id }, data: { avatarUrl: url } });
+      } catch {
+        // no photo or privacy-restricted
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 
   private async scheduleReconnect(instanceId: string, statusCode?: number) {

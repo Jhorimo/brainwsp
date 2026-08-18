@@ -96,6 +96,51 @@ export class CreateProjectDto {
   description?: string;
 }
 
+export class CreateTagDto {
+  @ApiProperty({ example: 'Cliente VIP' })
+  @IsString()
+  @MinLength(2)
+  name!: string;
+
+  @ApiPropertyOptional({ example: '#6b8afd' })
+  @IsOptional()
+  @IsString()
+  color?: string;
+}
+
+export class UpdateAiSettingsDto {
+  @ApiPropertyOptional({ description: 'Instrucciones del sistema para el agente IA. Vacío = usa el prompt por defecto.' })
+  @IsOptional()
+  @IsString()
+  aiSystemPrompt?: string;
+}
+
+export class CreateKnowledgeEntryDto {
+  @ApiProperty({ example: 'Horario de atención' })
+  @IsString()
+  @MinLength(2)
+  title!: string;
+
+  @ApiProperty({ example: 'Atendemos de lunes a sábado de 9am a 7pm.' })
+  @IsString()
+  @MinLength(2)
+  content!: string;
+}
+
+export class UpdateKnowledgeEntryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  title?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  content?: string;
+}
+
 export class UpdateProjectDto {
   @ApiPropertyOptional()
   @IsOptional()

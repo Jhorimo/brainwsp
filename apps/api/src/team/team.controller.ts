@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateDepartmentDto, CreateProjectDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateDepartmentDto, UpdateProjectDto, UpdateTeamUserDto } from './team.dto';
+import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateTeamUserDto } from './team.dto';
 import { TeamService } from './team.service';
 
 @ApiTags('Team')
@@ -72,5 +72,57 @@ export class TeamController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   updateProject(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateProjectDto) {
     return this.service.updateProject(user.companyId, id, dto);
+  }
+
+  @Get('tags')
+  tags(@CurrentUser() user: JwtUser) {
+    return this.service.listTags(user.companyId);
+  }
+
+  @Post('tags')
+  createTag(@CurrentUser() user: JwtUser, @Body() dto: CreateTagDto) {
+    return this.service.createTag(user.companyId, dto);
+  }
+
+  @Delete('tags/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.SUPERVISOR)
+  deleteTag(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.deleteTag(user.companyId, id);
+  }
+
+  @Get('ai')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  aiSettings(@CurrentUser() user: JwtUser) {
+    return this.service.getAiSettings(user.companyId);
+  }
+
+  @Patch('ai')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  updateAiSettings(@CurrentUser() user: JwtUser, @Body() dto: UpdateAiSettingsDto) {
+    return this.service.updateAiSettings(user.companyId, dto);
+  }
+
+  @Get('knowledge')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  knowledge(@CurrentUser() user: JwtUser) {
+    return this.service.listKnowledge(user.companyId);
+  }
+
+  @Post('knowledge')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  createKnowledge(@CurrentUser() user: JwtUser, @Body() dto: CreateKnowledgeEntryDto) {
+    return this.service.createKnowledge(user.companyId, dto);
+  }
+
+  @Patch('knowledge/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  updateKnowledge(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateKnowledgeEntryDto) {
+    return this.service.updateKnowledge(user.companyId, id, dto);
+  }
+
+  @Delete('knowledge/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  deleteKnowledge(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.deleteKnowledge(user.companyId, id);
   }
 }

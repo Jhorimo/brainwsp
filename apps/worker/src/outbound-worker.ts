@@ -82,6 +82,10 @@ export class OutboundWorker {
           fileName: message.fileName || 'documento.pdf',
           caption: message.caption || undefined,
         });
+      } else if (message.type === MessageType.STICKER) {
+        if (!message.mediaUrl) throw new Error('El sticker no tiene URL');
+        const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
+        response = await socket.sendMessage(message.contact.waId, { sticker: buffer });
       } else {
         throw new Error(`Tipo de mensaje todavía no implementado: ${message.type}`);
       }

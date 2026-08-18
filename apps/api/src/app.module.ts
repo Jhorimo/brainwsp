@@ -14,6 +14,7 @@ import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { StickersModule } from './stickers/stickers.module';
 import { StorageModule } from './storage/storage.module';
 import { TeamModule } from './team/team.module';
 
@@ -39,6 +40,7 @@ import { TeamModule } from './team/team.module';
     DashboardModule,
     FeedbackModule,
     IncidentsModule,
+    StickersModule,
     HealthModule,
   ],
 })

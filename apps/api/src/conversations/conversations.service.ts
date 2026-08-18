@@ -1,12 +1,13 @@
 import { extname } from 'node:path';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { MessageDirection, MessageStatus, MessageType, type ConversationStatus } from '@prisma/client';
+import { InstanceStatus, type LeadStage, MessageDirection, MessageStatus, MessageType, type ConversationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { StorageService } from '../storage/storage.service';
 
 function messageTypeFromMimetype(mimetype: string): MessageType | null {
+  if (mimetype === 'image/webp') return MessageType.STICKER;
   if (mimetype.startsWith('image/')) return MessageType.IMAGE;
   if (mimetype.startsWith('video/')) return MessageType.VIDEO;
   if (mimetype.startsWith('audio/')) return MessageType.AUDIO;
@@ -27,7 +28,7 @@ export class ConversationsService {
     return this.prisma.conversation.findMany({
       where: { companyId, ...(status ? { status } : {}) },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, leadStage: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
@@ -49,7 +50,10 @@ export class ConversationsService {
       where: { companyId, conversationId },
       orderBy: { createdAt: 'asc' },
       take: 500,
-      include: { author: { select: { id: true, name: true, pushName: true } } },
+      include: {
+        author: { select: { id: true, name: true, pushName: true } },
+        reactions: { select: { id: true, emoji: true, fromMe: true, reactorJid: true, contactId: true } },
+      },
     });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
     return items;
@@ -69,7 +73,9 @@ export class ConversationsService {
         body: text,
       },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date() } });
+    // A human agent sending anything is the handoff signal — hand control back from the AI.
+    const wasAiEnabled = conversation.aiEnabled;
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
     await this.queues.outbound.add('send-text', { messageId: message.id }, {
       jobId: message.id,
       attempts: 5,
@@ -79,8 +85,37 @@ export class ConversationsService {
     });
 
     const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
+    if (hydrated) {
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    }
     return message;
+  }
+
+  // Agent-initiated first contact: no inbound message exists yet, so the Contact/Conversation
+  // rows have to be created here instead of by the worker's `persistIncoming`.
+  async startConversation(companyId: string, instanceId: string, rawPhone: string, text: string) {
+    const instance = await this.prisma.whatsAppInstance.findFirst({ where: { id: instanceId, companyId, active: true } });
+    if (!instance) throw new NotFoundException('Instancia de WhatsApp no encontrada');
+    if (instance.status !== InstanceStatus.CONNECTED) throw new BadRequestException('La instancia de WhatsApp no está conectada');
+
+    const phone = rawPhone.replace(/[^0-9]/g, '');
+    if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
+    const waId = `${phone}@s.whatsapp.net`;
+
+    const contact = await this.prisma.contact.upsert({
+      where: { companyId_waId: { companyId, waId } },
+      update: { phone },
+      create: { companyId, waId, phone },
+    });
+
+    const conversation = await this.prisma.conversation.upsert({
+      where: { instanceId_contactId: { instanceId, contactId: contact.id } },
+      update: {},
+      create: { companyId, instanceId, contactId: contact.id },
+    });
+
+    return this.sendText(companyId, conversation.id, text);
   }
 
   async sendMedia(
@@ -112,7 +147,8 @@ export class ConversationsService {
         ...(type === MessageType.AUDIO && ptt ? { metadata: { ptt: true } } : {}),
       },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date() } });
+    const wasAiEnabled = conversation.aiEnabled;
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
     await this.queues.outbound.add('send-media', { messageId: message.id }, {
       jobId: message.id,
       attempts: 5,
@@ -122,7 +158,46 @@ export class ConversationsService {
     });
 
     const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
+    if (hydrated) {
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    }
+    return message;
+  }
+
+  async sendSticker(companyId: string, conversationId: string, stickerId: string) {
+    const conversation = await this.getOwned(companyId, conversationId);
+    const sticker = await this.prisma.stickerItem.findFirst({ where: { id: stickerId, companyId } });
+    if (!sticker) throw new NotFoundException('Sticker no encontrado');
+
+    const message = await this.prisma.message.create({
+      data: {
+        companyId,
+        conversationId,
+        instanceId: conversation.instanceId,
+        contactId: conversation.contactId,
+        direction: MessageDirection.OUTBOUND,
+        type: MessageType.STICKER,
+        status: MessageStatus.QUEUED,
+        mimeType: 'image/webp',
+        mediaUrl: sticker.mediaUrl,
+      },
+    });
+    const wasAiEnabled = conversation.aiEnabled;
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
+    await this.queues.outbound.add('send-media', { messageId: message.id }, {
+      jobId: message.id,
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 1500 },
+      removeOnComplete: 5000,
+      removeOnFail: 5000,
+    });
+
+    const hydrated = await this.getHydrated(companyId, conversationId);
+    if (hydrated) {
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    }
     return message;
   }
 
@@ -180,10 +255,40 @@ export class ConversationsService {
     return { notes };
   }
 
+  async addContactTag(companyId: string, conversationId: string, tagId: string) {
+    const conversation = await this.getOwned(companyId, conversationId);
+    const tag = await this.prisma.tag.findFirst({ where: { id: tagId, companyId } });
+    if (!tag) throw new NotFoundException('Etiqueta no encontrada');
+    await this.prisma.contactTag.upsert({
+      where: { contactId_tagId: { contactId: conversation.contactId, tagId } },
+      update: {},
+      create: { contactId: conversation.contactId, tagId },
+    });
+    const hydrated = await this.getHydrated(companyId, conversationId);
+    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    return hydrated;
+  }
+
+  async removeContactTag(companyId: string, conversationId: string, tagId: string) {
+    const conversation = await this.getOwned(companyId, conversationId);
+    await this.prisma.contactTag.deleteMany({ where: { contactId: conversation.contactId, tagId } });
+    const hydrated = await this.getHydrated(companyId, conversationId);
+    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    return hydrated;
+  }
+
+  async updateLeadStage(companyId: string, conversationId: string, leadStage: LeadStage) {
+    const conversation = await this.getOwned(companyId, conversationId);
+    await this.prisma.contact.update({ where: { id: conversation.contactId }, data: { leadStage } });
+    const hydrated = await this.getHydrated(companyId, conversationId);
+    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    return hydrated;
+  }
+
   async update(
     companyId: string,
     conversationId: string,
-    data: { status?: ConversationStatus; assignedUserId?: string | null; departmentId?: string | null; projectId?: string | null; pinned?: boolean },
+    data: { status?: ConversationStatus; assignedUserId?: string | null; departmentId?: string | null; projectId?: string | null; pinned?: boolean; aiEnabled?: boolean },
   ) {
     await this.getOwned(companyId, conversationId);
     if (data.assignedUserId) {
@@ -214,7 +319,7 @@ export class ConversationsService {
     return this.prisma.conversation.findFirst({
       where: { id, companyId },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, leadStage: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },

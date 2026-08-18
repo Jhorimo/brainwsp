@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -17,7 +17,12 @@ export class MediaController {
   ) {}
 
   @Get(':messageId')
-  async get(@CurrentUser() user: JwtUser, @Param('messageId') messageId: string, @Res() res: Response) {
+  async get(
+    @CurrentUser() user: JwtUser,
+    @Param('messageId') messageId: string,
+    @Query('download') download: string | undefined,
+    @Res() res: Response,
+  ) {
     const message = await this.prisma.message.findFirst({
       where: { id: messageId, companyId: user.companyId },
       select: { mediaUrl: true, mimeType: true, fileName: true },
@@ -26,7 +31,8 @@ export class MediaController {
 
     const objectName = message.mediaUrl.split('/').pop() as string;
     res.setHeader('Content-Type', message.mimeType || 'application/octet-stream');
-    if (message.fileName) res.setHeader('Content-Disposition', `inline; filename="${message.fileName}"`);
+    const disposition = download ? 'attachment' : 'inline';
+    if (message.fileName) res.setHeader('Content-Disposition', `${disposition}; filename="${message.fileName}"`);
 
     const stream = await this.storage.getObjectStream(objectName);
     stream.on('error', () => res.destroy());

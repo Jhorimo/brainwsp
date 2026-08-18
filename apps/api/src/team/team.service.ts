@@ -146,4 +146,67 @@ export class TeamService {
       },
     });
   }
+
+  listTags(companyId: string) {
+    return this.prisma.tag.findMany({ where: { companyId }, orderBy: { name: 'asc' } });
+  }
+
+  createTag(companyId: string, input: { name: string; color?: string }) {
+    return this.prisma.tag.create({
+      data: { companyId, name: input.name.trim(), color: input.color || undefined },
+    }).catch((error: unknown) => {
+      if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una etiqueta con ese nombre');
+      throw error;
+    });
+  }
+
+  async deleteTag(companyId: string, tagId: string) {
+    const tag = await this.prisma.tag.findFirst({ where: { id: tagId, companyId } });
+    if (!tag) throw new NotFoundException('Etiqueta no encontrada');
+    await this.prisma.tag.delete({ where: { id: tagId } });
+    return { success: true };
+  }
+
+  async getAiSettings(companyId: string) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { aiSystemPrompt: true } });
+    return { aiSystemPrompt: company?.aiSystemPrompt || '' };
+  }
+
+  async updateAiSettings(companyId: string, input: { aiSystemPrompt?: string }) {
+    const company = await this.prisma.company.update({
+      where: { id: companyId },
+      data: { aiSystemPrompt: input.aiSystemPrompt?.trim() || null },
+      select: { aiSystemPrompt: true },
+    });
+    return { aiSystemPrompt: company.aiSystemPrompt || '' };
+  }
+
+  listKnowledge(companyId: string) {
+    return this.prisma.knowledgeEntry.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  createKnowledge(companyId: string, input: { title: string; content: string }) {
+    return this.prisma.knowledgeEntry.create({
+      data: { companyId, title: input.title.trim(), content: input.content.trim() },
+    });
+  }
+
+  async updateKnowledge(companyId: string, id: string, input: { title?: string; content?: string }) {
+    const entry = await this.prisma.knowledgeEntry.findFirst({ where: { id, companyId } });
+    if (!entry) throw new NotFoundException('Entrada no encontrada');
+    return this.prisma.knowledgeEntry.update({
+      where: { id },
+      data: {
+        ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+        ...(input.content !== undefined ? { content: input.content.trim() } : {}),
+      },
+    });
+  }
+
+  async deleteKnowledge(companyId: string, id: string) {
+    const entry = await this.prisma.knowledgeEntry.findFirst({ where: { id, companyId } });
+    if (!entry) throw new NotFoundException('Entrada no encontrada');
+    await this.prisma.knowledgeEntry.delete({ where: { id } });
+    return { success: true };
+  }
 }

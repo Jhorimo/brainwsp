@@ -7,6 +7,8 @@ export const config = {
   workerId: process.env.WORKER_ID || `wa-${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`,
   concurrency: Number(process.env.WORKER_CONCURRENCY || 20),
   logLevel: process.env.LOG_LEVEL || 'info',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+  anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
   minio: {
     endpoint: process.env.MINIO_ENDPOINT || 'localhost',
     port: Number(process.env.MINIO_PORT || 9000),

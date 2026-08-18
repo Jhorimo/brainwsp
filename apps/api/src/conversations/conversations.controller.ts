@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
@@ -6,7 +6,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { ForwardMessageDto, SendAgentMessageDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto } from './conversations.dto';
+import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, StartConversationDto, UpdateConversationDto, UpdateLeadStageDto, UpdateMessageFlagsDto, UpdateNotesDto } from './conversations.dto';
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
@@ -25,6 +25,11 @@ export class ConversationsController {
   @Get(':id/messages')
   messages(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.messages(user.companyId, id);
+  }
+
+  @Post('start')
+  start(@CurrentUser() user: JwtUser, @Body() dto: StartConversationDto) {
+    return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text);
   }
 
   @Post(':id/messages')
@@ -69,6 +74,21 @@ export class ConversationsController {
   @Patch(':id/notes')
   updateNotes(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateNotesDto) {
     return this.service.updateContactNotes(user.companyId, id, dto.notes);
+  }
+
+  @Post(':id/tags')
+  addTag(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: AttachTagDto) {
+    return this.service.addContactTag(user.companyId, id, dto.tagId);
+  }
+
+  @Delete(':id/tags/:tagId')
+  removeTag(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('tagId') tagId: string) {
+    return this.service.removeContactTag(user.companyId, id, tagId);
+  }
+
+  @Patch(':id/lead-stage')
+  updateLeadStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateLeadStageDto) {
+    return this.service.updateLeadStage(user.companyId, id, dto.leadStage);
   }
 
   @Patch(':id')

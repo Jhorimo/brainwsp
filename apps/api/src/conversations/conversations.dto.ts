@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ConversationStatus } from '@prisma/client';
+import { ConversationStatus, LeadStage } from '@prisma/client';
 import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export class SendAgentMessageDto {
@@ -7,6 +7,22 @@ export class SendAgentMessageDto {
   @IsString()
   @MinLength(1)
   message!: string;
+}
+
+export class StartConversationDto {
+  @ApiProperty()
+  @IsUUID()
+  instanceId!: string;
+
+  @ApiProperty({ example: '51999999999' })
+  @IsString()
+  @MinLength(8)
+  phone!: string;
+
+  @ApiProperty({ example: 'Hola, le escribo de...' })
+  @IsString()
+  @MinLength(1)
+  text!: string;
 }
 
 export class UpdateMessageFlagsDto {
@@ -58,4 +74,27 @@ export class UpdateConversationDto {
   @IsOptional()
   @IsBoolean()
   pinned?: boolean;
+
+  @ApiPropertyOptional({ description: 'Activa/desactiva el agente IA para esta conversación.' })
+  @IsOptional()
+  @IsBoolean()
+  aiEnabled?: boolean;
+}
+
+export class AttachTagDto {
+  @ApiProperty()
+  @IsUUID()
+  tagId!: string;
+}
+
+export class SendStickerDto {
+  @ApiProperty()
+  @IsUUID()
+  stickerId!: string;
+}
+
+export class UpdateLeadStageDto {
+  @ApiProperty({ enum: LeadStage })
+  @IsEnum(LeadStage)
+  leadStage!: LeadStage;
 }

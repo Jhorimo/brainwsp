@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, Check, CheckCheck, ChevronDown, Clock, Copy, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Phone, Pin, Search, Send, Smile, Square, StickyNote, Star, Trash2, Users, UserRoundCheck, X, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Phone, Pin, Plus, Search, Send, Settings, Smile, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -11,12 +11,15 @@ import { apiFetch, getToken, mediaUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
-type Contact = { id: string; name?: string | null; pushName?: string | null; phone?: string | null; waId: string; notes?: string | null };
+type Tag = { id: string; name: string; color: string };
+type LeadStage = 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'PROPOSAL' | 'WON' | 'LOST';
+type Contact = { id: string; name?: string | null; pushName?: string | null; phone?: string | null; waId: string; notes?: string | null; avatarUrl?: string | null; leadStage: LeadStage; tags?: Array<{ tag: Tag }> };
 type Author = { id: string; name?: string | null; pushName?: string | null };
 type Conversation = {
   id: string;
   status: string;
   pinned: boolean;
+  aiEnabled: boolean;
   unreadCount: number;
   lastMessageAt: string;
   contact: Contact;
@@ -26,7 +29,8 @@ type Conversation = {
   instance: { id: string; name: string; slug: string; status: string };
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; author?: Author | null }>;
 };
-type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean };
+type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
+type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; reactions?: Reaction[] };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
@@ -50,6 +54,8 @@ const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: typeof Ligh
   { id: 'OTHER', label: 'Otro', icon: MessageCircle },
 ];
 const incidentStatusLabels: Record<IncidentStatus, string> = { PENDING: 'Pendiente', IN_PROGRESS: 'En proceso', RESOLVED: 'Solucionado' };
+const leadStageLabels: Record<LeadStage, string> = { NEW: 'Nuevo', CONTACTED: 'Contactado', QUALIFIED: 'Calificado', PROPOSAL: 'Propuesta enviada', WON: 'Ganado', LOST: 'Perdido' };
+const LEAD_STAGES: LeadStage[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'WON', 'LOST'];
 
 function sortConversations(list: Conversation[]) {
   return [...list].sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || (new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()));
@@ -68,6 +74,7 @@ function initials(contact: Contact) {
   return name.split(' ').slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 }
 function avatarContent(contact: Contact, iconSize = 16) {
+  if (contact.avatarUrl) return <img src={contact.avatarUrl} alt="" className="chat-avatar-img" />;
   return isGroupContact(contact) ? <Users size={iconSize} /> : initials(contact);
 }
 function lastText(conversation: Conversation) {
@@ -122,6 +129,26 @@ function formatMessageText(text: string) {
   if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
   return nodes;
 }
+function fileExtLabel(fileName?: string | null, mimeType?: string | null) {
+  const fromName = fileName?.split('.').pop();
+  if (fromName && fromName.length <= 5 && !fromName.includes(' ')) return fromName.toUpperCase();
+  const subtype = mimeType?.split('/')[1]?.split(';')[0];
+  return subtype ? subtype.replace(/^x-/, '').toUpperCase() : 'ARCHIVO';
+}
+function formatFileSize(bytes?: number | null) {
+  if (!bytes) return '';
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1_000_000) return `${Math.round(bytes / 100) / 10} kB`;
+  return `${Math.round(bytes / 100_000) / 10} MB`;
+}
+// A media message whose file failed to persist (e.g. a transient download error on the
+// worker) renders an <img> with no valid src; swap it for a clear placeholder instead of
+// the browser's broken-image icon sitting next to raw alt text.
+function handleMediaError(e: SyntheticEvent<HTMLImageElement>) {
+  e.currentTarget.style.display = 'none';
+  const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+  if (fallback) fallback.style.display = 'flex';
+}
 function isImageFile(file: File) { return file.type.startsWith('image/'); }
 function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 
@@ -133,6 +160,9 @@ export default function ConversationsPage() {
   const [filterAgent, setFilterAgent] = useState('');
   const [filterDept, setFilterDept] = useState('');
   const [filterProject, setFilterProject] = useState('');
+  const [quickFilter, setQuickFilter] = useState<string>('all');
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+  const quickMenuRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -140,6 +170,17 @@ export default function ConversationsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [companyTags, setCompanyTags] = useState<Tag[]>([]);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const tagMenuRef = useRef<HTMLDivElement>(null);
+  const [aiPromptModal, setAiPromptModal] = useState(false);
+  const [aiPromptDraft, setAiPromptDraft] = useState('');
+  const [aiPromptSaving, setAiPromptSaving] = useState(false);
+  const [knowledgeEntries, setKnowledgeEntries] = useState<Array<{ id: string; title: string; content: string }>>([]);
+  const [newKnowledgeTitle, setNewKnowledgeTitle] = useState('');
+  const [newKnowledgeContent, setNewKnowledgeContent] = useState('');
+  const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [identity, setIdentity] = useState({ id: '', role: '' });
 
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -169,6 +210,14 @@ export default function ConversationsPage() {
   const [incidentError, setIncidentError] = useState('');
   const [incidentSent, setIncidentSent] = useState(false);
 
+  const [newChatModal, setNewChatModal] = useState(false);
+  const [newChatInstances, setNewChatInstances] = useState<Array<{ id: string; name: string; status: string }>>([]);
+  const [newChatInstanceId, setNewChatInstanceId] = useState('');
+  const [newChatPhone, setNewChatPhone] = useState('');
+  const [newChatText, setNewChatText] = useState('');
+  const [newChatSaving, setNewChatSaving] = useState(false);
+  const [newChatError, setNewChatError] = useState('');
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageStreamRef = useRef<HTMLDivElement>(null);
@@ -196,8 +245,8 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     void loadConversations();
-    void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents')])
-      .then(([users, deps, projs, incs]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); })
+    void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags')])
+      .then(([users, deps, projs, incs, tags]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); })
       .catch(() => undefined);
   }, [loadConversations]);
 
@@ -244,6 +293,13 @@ export default function ConversationsPage() {
     });
     socket.on('message.updated', () => {
       if (selectedIdRef.current) void loadMessages(selectedIdRef.current);
+    });
+    socket.on('message.reaction', (event: { messageId: string; reactorJid: string; emoji: string; reaction?: Reaction }) => {
+      setMessages((current) => current.map((item) => {
+        if (item.id !== event.messageId) return item;
+        const withoutReactor = (item.reactions || []).filter((r) => r.reactorJid !== event.reactorJid);
+        return { ...item, reactions: event.emoji && event.reaction ? [...withoutReactor, event.reaction] : withoutReactor };
+      }));
     });
     return () => { socket.disconnect(); };
   }, [loadMessages]);
@@ -293,35 +349,70 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [openMessageMenuId]);
 
+  useEffect(() => {
+    if (!quickMenuOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (quickMenuRef.current?.contains(e.target as Node)) return;
+      setQuickMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [quickMenuOpen]);
+
+  useEffect(() => {
+    if (!tagMenuOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (tagMenuRef.current?.contains(e.target as Node)) return;
+      setTagMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [tagMenuOpen]);
+
   // Esc closes whichever popover/overlay is currently on top — emoji picker, message
   // actions menu, forward dialog, image lightbox — same as WhatsApp Web.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (quickMenuOpen) { setQuickMenuOpen(false); return; }
+      if (tagMenuOpen) { setTagMenuOpen(false); return; }
       if (openMessageMenuId) { setOpenMessageMenuId(null); return; }
       if (showEmoji) { setShowEmoji(false); return; }
       if (forwardMessageId) { setForwardMessageId(null); return; }
       if (lightboxUrl) { setLightboxUrl(null); return; }
       if (incidentModal) { setIncidentModal(false); return; }
+      if (newChatModal) { setNewChatModal(false); return; }
+      if (aiPromptModal) { setAiPromptModal(false); return; }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [openMessageMenuId, showEmoji, forwardMessageId, lightboxUrl, incidentModal]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, showEmoji, forwardMessageId, lightboxUrl, incidentModal, newChatModal, aiPromptModal]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
   useEffect(() => () => { streamRef.current?.getTracks().forEach((track) => track.stop()); if (timerRef.current) clearInterval(timerRef.current); }, []);
 
   const selected = conversations.find((item) => item.id === selectedId) || null;
-  const filtered = useMemo(() => conversations.filter((item) =>
+  const baseFiltered = useMemo(() => conversations.filter((item) =>
     `${displayName(item.contact)} ${item.contact.phone || ''} ${lastText(item)}`.toLowerCase().includes(search.toLowerCase())
     && (!filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent))
     && (!filterDept || item.department?.id === filterDept)
     && (!filterProject || item.project?.id === filterProject)
   ), [conversations, search, filterAgent, filterDept, filterProject]);
+  const unreadTabCount = useMemo(() => baseFiltered.filter((item) => item.unreadCount > 0).length, [baseFiltered]);
+  const pinnedTabCount = useMemo(() => baseFiltered.filter((item) => item.pinned).length, [baseFiltered]);
+  const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
+  const filtered = useMemo(() => baseFiltered.filter((item) => {
+    if (quickFilter === 'unread') return item.unreadCount > 0;
+    if (quickFilter === 'pinned') return item.pinned;
+    if (quickFilter === 'groups') return isGroupContact(item.contact);
+    if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
+    return true;
+  }), [baseFiltered, quickFilter]);
   const hasActiveFilters = !!(filterAgent || filterDept || filterProject);
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
+  const canDeleteTags = isAdmin || identity.role === 'SUPERVISOR';
   const myDepartmentIds = useMemo(() => new Set(
     departments.filter((department) => department.users?.some((item) => item.user.id === identity.id)).map((department) => department.id),
   ), [departments, identity.id]);
@@ -465,6 +556,44 @@ export default function ConversationsPage() {
 
   const closeIncidentModal = () => setIncidentModal(false);
 
+  const openNewChatModal = async () => {
+    setNewChatError('');
+    setNewChatPhone('');
+    setNewChatText('');
+    setNewChatModal(true);
+    try {
+      const instances = await apiFetch<Array<{ id: string; name: string; status: string }>>('/instances');
+      const connected = instances.filter((instance) => instance.status === 'CONNECTED');
+      setNewChatInstances(connected);
+      setNewChatInstanceId((current) => current && connected.some((i) => i.id === current) ? current : connected[0]?.id || '');
+    } catch {
+      setNewChatInstances([]);
+    }
+  };
+
+  const closeNewChatModal = () => setNewChatModal(false);
+
+  const submitNewChat = async () => {
+    if (!newChatInstanceId) { setNewChatError('Selecciona la línea de WhatsApp desde la que vas a escribir'); return; }
+    if (newChatPhone.replace(/[^0-9]/g, '').length < 8) { setNewChatError('Ingresa un número válido con código de país'); return; }
+    if (!newChatText.trim()) { setNewChatError('Escribe el primer mensaje'); return; }
+    setNewChatSaving(true);
+    setNewChatError('');
+    try {
+      const message = await apiFetch<{ conversationId: string }>('/conversations/start', {
+        method: 'POST',
+        body: JSON.stringify({ instanceId: newChatInstanceId, phone: newChatPhone.trim(), text: newChatText.trim() }),
+      });
+      await loadConversations();
+      setSelectedId(message.conversationId);
+      setNewChatModal(false);
+    } catch (err) {
+      setNewChatError(err instanceof Error ? err.message : 'No se pudo iniciar la conversación');
+    } finally {
+      setNewChatSaving(false);
+    }
+  };
+
   const submitIncident = async () => {
     if (!selectedId) return;
     if (!incidentDepartmentId) { setIncidentError('Selecciona el área que debe atender la incidencia'); return; }
@@ -497,6 +626,106 @@ export default function ConversationsPage() {
       await apiFetch(`/conversations/${selectedId}`, { method: 'PATCH', body: JSON.stringify({ [field]: value || null }) });
       await loadConversations();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo transferir la conversación'); }
+  };
+
+  const addTag = async (tagId: string) => {
+    if (!selectedId) return;
+    setTagMenuOpen(false);
+    try {
+      const updated = await apiFetch<Conversation>(`/conversations/${selectedId}/tags`, { method: 'POST', body: JSON.stringify({ tagId }) });
+      setConversations((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo agregar la etiqueta'); }
+  };
+
+  const removeTag = async (tagId: string) => {
+    if (!selectedId) return;
+    try {
+      const updated = await apiFetch<Conversation>(`/conversations/${selectedId}/tags/${tagId}`, { method: 'DELETE' });
+      setConversations((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo quitar la etiqueta'); }
+  };
+
+  const createTag = async () => {
+    const name = newTagName.trim();
+    if (!name) return;
+    try {
+      const tag = await apiFetch<Tag>('/team/tags', { method: 'POST', body: JSON.stringify({ name }) });
+      setCompanyTags((current) => [...current, tag].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewTagName('');
+      await addTag(tag.id);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear la etiqueta'); }
+  };
+
+  const deleteCompanyTag = async (tag: Tag) => {
+    if (!window.confirm(`¿Eliminar la etiqueta "${tag.name}"? Se quitará de todos los contactos que la tengan.`)) return;
+    try {
+      await apiFetch(`/team/tags/${tag.id}`, { method: 'DELETE' });
+      setCompanyTags((current) => current.filter((item) => item.id !== tag.id));
+      setConversations((current) => current.map((item) => item.contact.tags?.some((t) => t.tag.id === tag.id)
+        ? { ...item, contact: { ...item.contact, tags: item.contact.tags?.filter((t) => t.tag.id !== tag.id) } }
+        : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar la etiqueta'); }
+  };
+
+  const updateLeadStage = async (leadStage: LeadStage) => {
+    if (!selectedId) return;
+    try {
+      const updated = await apiFetch<Conversation>(`/conversations/${selectedId}/lead-stage`, { method: 'PATCH', body: JSON.stringify({ leadStage }) });
+      setConversations((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar la etapa del lead'); }
+  };
+
+  const toggleAi = async () => {
+    if (!selected) return;
+    const next = !selected.aiEnabled;
+    setConversations((current) => current.map((item) => item.id === selected.id ? { ...item, aiEnabled: next } : item));
+    try {
+      await apiFetch(`/conversations/${selected.id}`, { method: 'PATCH', body: JSON.stringify({ aiEnabled: next }) });
+    } catch (err) {
+      setConversations((current) => current.map((item) => item.id === selected.id ? { ...item, aiEnabled: !next } : item));
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar el agente IA');
+    }
+  };
+
+  const openAiPromptModal = async () => {
+    setAiPromptModal(true);
+    try {
+      const [settings, entries] = await Promise.all([
+        apiFetch<{ aiSystemPrompt: string }>('/team/ai'),
+        apiFetch<Array<{ id: string; title: string; content: string }>>('/team/knowledge'),
+      ]);
+      setAiPromptDraft(settings.aiSystemPrompt);
+      setKnowledgeEntries(entries);
+    } catch { setAiPromptDraft(''); }
+  };
+
+  const saveAiPrompt = async () => {
+    setAiPromptSaving(true);
+    try {
+      await apiFetch('/team/ai', { method: 'PATCH', body: JSON.stringify({ aiSystemPrompt: aiPromptDraft }) });
+      setAiPromptModal(false);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar el prompt'); }
+    finally { setAiPromptSaving(false); }
+  };
+
+  const addKnowledgeEntry = async () => {
+    const title = newKnowledgeTitle.trim();
+    const content = newKnowledgeContent.trim();
+    if (!title || !content) return;
+    setKnowledgeSaving(true);
+    try {
+      const entry = await apiFetch<{ id: string; title: string; content: string }>('/team/knowledge', { method: 'POST', body: JSON.stringify({ title, content }) });
+      setKnowledgeEntries((current) => [entry, ...current]);
+      setNewKnowledgeTitle('');
+      setNewKnowledgeContent('');
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la entrada'); }
+    finally { setKnowledgeSaving(false); }
+  };
+
+  const deleteKnowledgeEntry = async (id: string) => {
+    setKnowledgeEntries((current) => current.filter((item) => item.id !== id));
+    try { await apiFetch(`/team/knowledge/${id}`, { method: 'DELETE' }); }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo borrar la entrada'); }
   };
 
   const updateIncidentStatus = async (incident: Incident, status: IncidentStatus) => {
@@ -585,15 +814,31 @@ export default function ConversationsPage() {
   const renderMessageBody = (message: Message) => {
     switch (message.type) {
       case 'IMAGE':
-        return <div className="message-media"><button className="media-zoom" onClick={() => setLightboxUrl(mediaUrl(message.id))} title="Ampliar imagen"><img src={mediaUrl(message.id)} alt={message.caption || 'Imagen'} /><span className="media-zoom-hint"><ZoomIn size={15} /></span></button>{message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}</div>;
+        return <div className="message-media"><button className="media-zoom" onClick={() => setLightboxUrl(mediaUrl(message.id))} title="Ampliar imagen"><img src={mediaUrl(message.id)} alt={message.caption || 'Imagen'} onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Imagen no disponible</div><span className="media-zoom-hint"><ZoomIn size={15} /></span></button>{message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}</div>;
       case 'VIDEO':
         return <div className="message-media"><video controls src={mediaUrl(message.id)} />{message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}</div>;
       case 'AUDIO':
         return <audio controls src={mediaUrl(message.id)} className="message-audio" />;
-      case 'DOCUMENT':
-        return <a className="doc-link" href={mediaUrl(message.id)} target="_blank" rel="noreferrer">📄 {message.fileName || 'Documento'}</a>;
+      case 'DOCUMENT': {
+        const meta = [fileExtLabel(message.fileName, message.mimeType), formatFileSize(message.fileSize)].filter(Boolean).join(' · ');
+        return (
+          <div className="doc-card">
+            <div className="doc-card-main">
+              <div className="doc-card-icon"><FileText size={20} /></div>
+              <div className="doc-card-info">
+                <div className="doc-card-name">{message.fileName || 'Documento'}</div>
+                {meta && <div className="doc-card-meta">{meta}</div>}
+              </div>
+            </div>
+            <div className="doc-card-actions">
+              <a href={mediaUrl(message.id)} target="_blank" rel="noreferrer">Abrir</a>
+              <a href={`${mediaUrl(message.id)}&download=1`}>Guardar como...</a>
+            </div>
+          </div>
+        );
+      }
       case 'STICKER':
-        return <img className="message-sticker" src={mediaUrl(message.id)} alt="Sticker" />;
+        return <div className="sticker-wrap"><img className="message-sticker" src={mediaUrl(message.id)} alt="Sticker" onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Sticker no disponible</div></div>;
       default:
         return formatMessageText(message.body || message.caption || message.type);
     }
@@ -606,8 +851,30 @@ export default function ConversationsPage() {
       <section className="chat-layout">
         <aside className="chat-list">
           <div className="chat-list-head">
-            <h2>Conversaciones</h2>
+            <div className="chat-list-title-row">
+              <h2>Conversaciones</h2>
+              <button className="button small" onClick={() => void openNewChatModal()} title="Iniciar una conversación con un número nuevo"><Plus size={14} />Nuevo chat</button>
+            </div>
             <div className="searchbox"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente..." /></div>
+            <div className="chat-quick-filters">
+              <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>
+              <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
+              <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
+              <div className="chat-quick-more" ref={quickMenuRef}>
+                <button className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
+                {quickMenuOpen && (
+                  <div className="chat-quick-menu">
+                    <button className={quickFilter === 'groups' ? 'active' : ''} onClick={() => { setQuickFilter('groups'); setQuickMenuOpen(false); }}><Users size={14} />Grupos{groupTabCount > 0 && <span className="chat-quick-menu-count">{groupTabCount}</span>}</button>
+                    {companyTags.length > 0 && <div className="chat-quick-menu-divider" />}
+                    {companyTags.map((tag) => (
+                      <button key={tag.id} className={quickFilter === `tag:${tag.id}` ? 'active' : ''} onClick={() => { setQuickFilter(`tag:${tag.id}`); setQuickMenuOpen(false); }}>
+                        <span className="tag-dot" style={{ background: tag.color }} />{tag.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <div className="chat-filters">
               <select value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)}>
                 <option value="">Todos los agentes</option>
@@ -649,21 +916,26 @@ export default function ConversationsPage() {
 
         <div className="chat-main">
           {selected ? <>
-            <header className="chat-header"><div className="chat-avatar">{avatarContent(selected.contact, 17)}</div><div className="chat-header-copy"><strong>{displayName(selected.contact)}</strong><span>{selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span></div>{!selected.assignedUser && <button className="button small" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}<button className="button small" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={14} />Incidencia</button>{selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}<button className="icon-button"><MoreHorizontal size={17} /></button></header>
+            <header className="chat-header"><div className="chat-avatar">{avatarContent(selected.contact, 17)}</div><div className="chat-header-copy"><strong>{displayName(selected.contact)}</strong><span>{selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span></div>{!selected.assignedUser && <button className="button small" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}<button className={`button small ${selected.aiEnabled ? 'ai-toggle-on' : ''}`} onClick={() => void toggleAi()} title={selected.aiEnabled ? 'El agente IA está respondiendo automáticamente aquí. Click para desactivarlo.' : 'Activar respuesta automática con IA en esta conversación'}><Bot size={14} />{selected.aiEnabled ? 'IA activa' : 'Activar IA'}</button>{isAdmin && <button className="icon-button" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}<button className="button small" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={14} />Incidencia</button>{selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}<button className="icon-button"><MoreHorizontal size={17} /></button></header>
             <div className="message-stream" ref={messageStreamRef}>
-              {messages.map((message) => (
-                <div className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''}`} key={message.id}>
-                  <button className="message-menu-trigger" onClick={(e) => toggleMessageMenu(e, message.id)} title="Más opciones"><ChevronDown size={13} /></button>
-                  {message.direction === 'INBOUND' && authorName(message.author) && <div className="message-author">{authorName(message.author)}</div>}
-                  {renderMessageBody(message)}
-                  <div className="message-time">
-                    {message.pinned && <Pin size={10} className="message-badge-pin" />}
-                    {message.starred && <Star size={10} className="message-badge-star" />}
-                    {new Date(message.createdAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
-                    {message.direction === 'OUTBOUND' && statusIcon(message.status)}
+              <div className="message-stream-inner">
+                {messages.map((message) => (
+                  <div className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''}`} key={message.id}>
+                    <button className="message-menu-trigger" onClick={(e) => toggleMessageMenu(e, message.id)} title="Más opciones"><ChevronDown size={13} /></button>
+                    {message.direction === 'INBOUND' && authorName(message.author) && <div className="message-author">{authorName(message.author)}</div>}
+                    {renderMessageBody(message)}
+                    {message.reactions && message.reactions.length > 0 && (
+                      <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
+                    )}
+                    <div className="message-time">
+                      {message.pinned && <Pin size={10} className="message-badge-pin" />}
+                      {message.starred && <Star size={10} className="message-badge-star" />}
+                      {new Date(message.createdAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
+                      {message.direction === 'OUTBOUND' && statusIcon(message.status)}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
 
             {pendingFile && (
@@ -710,7 +982,7 @@ export default function ConversationsPage() {
         </div>
 
         <aside className="contact-panel">
-          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">General</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><h4>Notas</h4><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
+          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><button onClick={() => void addTag(tag.id)}><span className="tag-dot" style={{ background: tag.color }} />{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa del lead</h4><select className={`lead-stage-select lead-stage-${selected.contact.leadStage.toLowerCase()}`} value={selected.contact.leadStage} onChange={(e) => void updateLeadStage(e.target.value as LeadStage)}>{LEAD_STAGES.map((stage) => <option value={stage} key={stage}>{leadStageLabels[stage]}</option>)}</select></div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">General</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><h4>Notas</h4><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
         </aside>
       </section>
 
@@ -735,6 +1007,79 @@ export default function ConversationsPage() {
                     <span>{displayName(c.contact)}</span>
                   </button>
                 ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newChatModal && (
+        <div className="modal-backdrop" onClick={closeNewChatModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={closeNewChatModal} title="Cerrar"><X size={16} /></button>
+            <div className="modal-header"><h2>Nuevo chat</h2><p>Escríbele primero a un número que todavía no te ha contactado.</p></div>
+            <div className="modal-body">
+              {newChatError && <div className="error-box">{newChatError}</div>}
+              <div className="warning-box">
+                <strong>Ten cuidado:</strong> este número simula tu WhatsApp normal, no la API oficial de negocios. Escribirle a desconocidos que no te han contactado puede generar reportes de spam y, si se abusa, el bloqueo de tu número. Úsalo solo con contactos legítimos (ej. un cliente que te dejó su número por otro medio).
+              </div>
+              <div className="form-grid">
+                <div className="field">
+                  <label>Línea de WhatsApp</label>
+                  <select value={newChatInstanceId} onChange={(e) => setNewChatInstanceId(e.target.value)}>
+                    {newChatInstances.length === 0 && <option value="">No hay líneas conectadas</option>}
+                    {newChatInstances.map((instance) => <option value={instance.id} key={instance.id}>{instance.name}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Número (con código de país)</label>
+                  <input value={newChatPhone} onChange={(e) => setNewChatPhone(e.target.value)} placeholder="Ej: 51999999999" />
+                </div>
+                <div className="field">
+                  <label>Primer mensaje</label>
+                  <textarea value={newChatText} onChange={(e) => setNewChatText(e.target.value)} placeholder="Escribe el mensaje..." rows={4} />
+                </div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={closeNewChatModal}>Cancelar</button>
+              <button className="button primary" disabled={newChatSaving || newChatInstances.length === 0} onClick={() => void submitNewChat()}>{newChatSaving ? 'Enviando...' : 'Iniciar conversación'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aiPromptModal && (
+        <div className="modal-backdrop" onClick={() => setAiPromptModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setAiPromptModal(false)} title="Cerrar"><X size={16} /></button>
+            <div className="modal-header"><h2>Configuración del agente IA</h2><p>Aplica a toda la empresa. Se usa cuando actives "IA activa" en una conversación.</p></div>
+            <div className="modal-body">
+              <div className="field">
+                <label>Instrucciones del sistema</label>
+                <textarea value={aiPromptDraft} onChange={(e) => setAiPromptDraft(e.target.value)} placeholder="Ej: Eres el asistente de ventas de Brain Tech. Responde en español, sé breve y ofrece agendar una llamada si el cliente muestra interés real... (vacío = comportamiento por defecto)" rows={5} />
+              </div>
+              <div className="field">
+                <label>Base de conocimiento</label>
+                <p className="contact-empty-hint" style={{ margin: '0 0 8px' }}>El agente usa estas entradas como referencia para responder con precisión (horarios, precios, políticas...).</p>
+                <div className="knowledge-list">
+                  {knowledgeEntries.map((entry) => (
+                    <div className="knowledge-row" key={entry.id}>
+                      <div className="knowledge-row-copy"><strong>{entry.title}</strong><span>{entry.content}</span></div>
+                      <button className="icon-button" onClick={() => void deleteKnowledgeEntry(entry.id)} title="Eliminar"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                  {!knowledgeEntries.length && <p className="contact-empty-hint">Aún no hay entradas.</p>}
+                </div>
+                <div className="knowledge-add">
+                  <input value={newKnowledgeTitle} onChange={(e) => setNewKnowledgeTitle(e.target.value)} placeholder="Título (ej: Horario de atención)" />
+                  <textarea value={newKnowledgeContent} onChange={(e) => setNewKnowledgeContent(e.target.value)} placeholder="Contenido..." rows={2} />
+                  <button className="button small" disabled={knowledgeSaving || !newKnowledgeTitle.trim() || !newKnowledgeContent.trim()} onClick={() => void addKnowledgeEntry()}><Plus size={13} />Agregar</button>
+                </div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => setAiPromptModal(false)}>Cancelar</button>
+              <button className="button primary" disabled={aiPromptSaving} onClick={() => void saveAiPrompt()}>{aiPromptSaving ? 'Guardando...' : 'Guardar'}</button>
             </div>
           </div>
         </div>

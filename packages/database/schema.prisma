@@ -36,6 +36,15 @@ enum ConversationStatus {
   CLOSED
 }
 
+enum LeadStage {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
 enum MessageDirection {
   INBOUND
   OUTBOUND
@@ -86,6 +95,7 @@ model Company {
   name           String
   slug           String             @unique
   active         Boolean            @default(true)
+  aiSystemPrompt String?            @db.Text
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   users          User[]
@@ -96,11 +106,15 @@ model Company {
   contacts       Contact[]
   conversations  Conversation[]
   messages       Message[]
+  messageReactions MessageReaction[]
   quickReplies   QuickReply[]
   webhooks       Webhook[]
   auditLogs      AuditLog[]
   feedback       Feedback[]
   incidents      Incident[]
+  tags           Tag[]
+  knowledgeEntries KnowledgeEntry[]
+  stickers       StickerItem[]
 }
 
 model User {
@@ -241,6 +255,7 @@ model Contact {
   avatarUrl     String?
   email         String?
   notes         String?        @db.Text
+  leadStage     LeadStage      @default(NEW)
   metadata      Json?
   lastSeenAt    DateTime?
   createdAt     DateTime       @default(now())
@@ -249,9 +264,49 @@ model Contact {
   conversations Conversation[]
   messages      Message[]
   authoredMessages Message[]   @relation("MessageAuthor")
+  reactions     MessageReaction[]
+  tags          ContactTag[]
 
   @@unique([companyId, waId])
   @@index([companyId, phone])
+}
+
+model Tag {
+  id        String       @id @default(uuid())
+  companyId String
+  name      String
+  color     String       @default("#6b8afd")
+  createdAt DateTime     @default(now())
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contacts  ContactTag[]
+
+  @@unique([companyId, name])
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+}
+
+// Kept intentionally simple — plain title/content entries stuffed into the AI's system
+// prompt (see apps/worker/src/ai-agent.ts), not a vector-embedding search. Good enough for
+// the handful of FAQs a small business support inbox actually needs; revisit with
+// pgvector + embeddings if the entry count grows large enough to blow the context budget.
+model KnowledgeEntry {
+  id        String   @id @default(uuid())
+  companyId String
+  title     String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 model Conversation {
@@ -297,6 +352,7 @@ model Message {
   body           String?          @db.Text
   mediaUrl       String?          @db.Text
   fileName       String?
+  fileSize       Int?
   mimeType       String?
   caption        String?          @db.Text
   error          String?          @db.Text
@@ -314,11 +370,49 @@ model Message {
   instance       WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   contact        Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
   author         Contact?         @relation("MessageAuthor", fields: [authorContactId], references: [id], onDelete: SetNull)
+  reactions      MessageReaction[]
 
   @@unique([instanceId, waMessageId])
   @@index([conversationId, createdAt])
   @@index([companyId, status, createdAt])
   @@index([authorContactId])
+}
+
+// One row per person reacting to a message, keyed by their WhatsApp JID rather than
+// Contact — the reactor's Contact row may not exist/resolve (e.g. business's own
+// reactions), but the JID is always present and is what WhatsApp itself deduplicates on
+// (a person has at most one active reaction per message; an empty `reaction.text` from
+// Baileys means "removed", handled by deleting this row rather than storing it empty).
+model MessageReaction {
+  id         String   @id @default(uuid())
+  messageId  String
+  companyId  String
+  reactorJid String
+  fromMe     Boolean  @default(false)
+  contactId  String?
+  emoji      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact    Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reactorJid])
+  @@index([contactId])
+}
+
+// A shared, reusable "sticker tray" for the company, mirroring WhatsApp's own picker —
+// upload once, then click to send to any conversation instead of re-attaching a file
+// every time. Media itself (already converted to webp) lives in MinIO, same as message
+// attachments; this just indexes it for the tray UI.
+model StickerItem {
+  id        String   @id @default(uuid())
+  companyId String
+  mediaUrl  String   @db.Text
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 model QuickReply {
