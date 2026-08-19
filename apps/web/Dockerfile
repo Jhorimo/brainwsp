@@ -22,4 +22,5 @@ COPY --from=build /app/apps/web/public ./apps/web/public
 COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 COPY --from=build /app/apps/web/next.config.ts ./apps/web/next.config.ts
 COPY --from=build /app/package.json ./package.json
+EXPOSE 3000
 CMD ["npm", "run", "start", "-w", "@brainwsp/web"]
