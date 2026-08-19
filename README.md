@@ -30,7 +30,7 @@ Plataforma profesional para centralizar WhatsApp en el ecosistema Brain Tech: **
 
 - **Frontend:** Next.js 16.3 + React 19 + TypeScript.
 - **Backend:** NestJS 11 + TypeScript.
-- **WhatsApp QR:** Baileys 6.7.24.
+- **WhatsApp QR:** Baileys (`@whiskeysockets/baileys`) 7.0.0-rc14.
 - **DB:** PostgreSQL 16 + Prisma 6.19.
 - **Queue/cache/locks:** Redis 7 + BullMQ.
 - **Realtime:** Socket.IO + Redis Pub/Sub.
