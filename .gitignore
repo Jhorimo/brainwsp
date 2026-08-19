@@ -10,3 +10,6 @@ coverage/
 apps/web/.next/
 docker-compose.prod.yml
 
+# Local Pi runtime state
+.atl/
+
