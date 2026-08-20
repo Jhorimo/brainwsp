@@ -3,6 +3,10 @@ name: Build y Deploy BrainWSP
 on:
     push:
         branches: [main]
+        paths-ignore:
+            - "docs/**"
+            - "scripts/**"
+            - "**.md"
     workflow_dispatch:
 
 env:
