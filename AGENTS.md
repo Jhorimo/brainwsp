@@ -27,6 +27,20 @@ Mantener una plataforma SaaS multiempresa para WhatsApp: Gateway API compatible 
 - Cualquier endpoint público de integración debe usar `ApiCredentialGuard`.
 - Secretos de producción solo por variables de entorno / secret manager.
 
+## Cambios en packages/database/schema.prisma
+- Nunca usar `npm run db:push` para cambios que van a producción: no deja historial y el
+  servidor rechaza el arranque cuando detecta conflicto (ver CMD de `apps/api/Dockerfile`,
+  que corre `prisma migrate deploy`, no `db push`).
+- Todo cambio de schema se hace así (equivalente a una migración de Laravel):
+  1. Editar `schema.prisma`.
+  2. Correr `npm run db:migrate` (= `prisma migrate dev`) — genera la carpeta en
+     `packages/database/migrations/<timestamp>_nombre/migration.sql`.
+  3. Revisar el SQL generado y **commitear esa carpeta junto con el cambio de schema**.
+  4. En producción, el próximo `./deploy.sh` aplica la migración sola al levantar el
+     contenedor `api` (`prisma migrate deploy`).
+- `db:push` solo sirve para prototipar rápido en tu base local; si lo usas, después
+  genera la migración real con `db:migrate` antes de subir el cambio.
+
 ## Antes de fusionar cambios
 1. `npm run db:generate`
 2. `npm run build`

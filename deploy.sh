@@ -201,7 +201,9 @@ echo "Construyendo y levantando contenedores (puede tardar varios minutos la pri
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 # El esquema de base de datos y el usuario administrador se crean solos al iniciar
-# el contenedor "api" (ver CMD en apps/api/Dockerfile: prisma db push + seed).
+# el contenedor "api" (ver CMD en apps/api/Dockerfile: prisma migrate deploy + seed).
+# Las migraciones pendientes viven en packages/database/migrations/ y se generan con
+# `npm run db:migrate` (ver AGENTS.md) — deben commitearse junto al cambio de schema.prisma.
 echo "Esperando a que la API prepare la base de datos..."
 sleep 15
 docker compose logs api --tail 40

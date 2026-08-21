@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0 -or $dockerInfoFailed) {
     }
     $elapsed = 0
     while ($true) {
-        docker info *> $null
+        try { docker info *> $null } catch {}
         if ($LASTEXITCODE -eq 0) { break }
         if ($elapsed -ge 120) {
             throw "Docker Desktop no arrancó en 120s. Ábrelo manualmente y reintenta."

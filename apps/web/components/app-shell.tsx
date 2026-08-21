@@ -36,10 +36,22 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const router = useRouter();
   const [identity, setIdentity] = useState({ company: 'Empresa', role: 'Usuario', initials: 'BW' });
   const [collapsed, setCollapsed] = useState(false);
+  // Below 640px the sidebar becomes a hidden off-canvas drawer instead of an icon rail
+  // (see the ≤640px block in globals.css) — this tracks whether it's pulled open. The
+  // same hamburger button drives both `collapsed` and this; each is only visually
+  // meaningful at its own breakpoint; toggling the other is harmless.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('brainwsp_sidebar_collapsed') === '1');
   }, []);
+
+  // Close the mobile drawer on route change, and don't let the page scroll behind it while open.
+  useEffect(() => { setMobileNavOpen(false); }, [pathname]);
+  useEffect(() => {
+    document.body.style.overflow = mobileNavOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileNavOpen]);
 
   const toggleCollapsed = () => {
     setCollapsed((current) => {
@@ -47,6 +59,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
       localStorage.setItem('brainwsp_sidebar_collapsed', next ? '1' : '0');
       return next;
     });
+    setMobileNavOpen((current) => !current);
   };
 
   useEffect(() => {
@@ -71,7 +84,8 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
 
   return (
     <Protected>
-      <div className={`app-frame ${collapsed ? 'collapsed' : ''}`}>
+      <div className={`app-frame ${collapsed ? 'collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
+        <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} />
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-mark">B</div>

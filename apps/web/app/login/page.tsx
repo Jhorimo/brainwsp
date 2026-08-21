@@ -65,7 +65,7 @@ export default function LoginPage() {
           </div>
           <div className="login-hint">Las credenciales mostradas son las del entorno de desarrollo. Cámbialas antes de publicar el sistema.</div>
           <div style={{marginTop:14, textAlign:'center', fontSize:11, color:'#6b7690'}}>
-            ¿No tienes cuenta? <Link href="/register" style={{color:'#1258d6', fontWeight:700}}>Regístrate</Link>
+            ¿No tienes cuenta? <Link href="/register" style={{color:'#0855c4', fontWeight:700}}>Regístrate</Link>
           </div>
         </form>
       </section>

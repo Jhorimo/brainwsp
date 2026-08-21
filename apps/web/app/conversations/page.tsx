@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Phone, Pin, Plus, Search, Send, Settings, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Search, Send, Settings, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -35,6 +35,7 @@ type Message = { id: string; body?: string | null; caption?: string | null; type
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
+type QuickReply = { id: string; shortcut: string; title: string; content: string; active: boolean };
 type IncidentType = 'SUGGESTION' | 'BUG' | 'OTHER';
 type IncidentStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
 type Incident = {
@@ -154,6 +155,10 @@ function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Below ~850px the list and the open chat can't share the screen (WhatsApp's own mobile
+  // pattern): only one is visible at a time, this tracks which. Starts closed so a phone
+  // lands on the conversation list first, not whatever conversation auto-selected on load.
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [search, setSearch] = useState('');
   const [filterAgent, setFilterAgent] = useState('');
@@ -186,6 +191,8 @@ export default function ConversationsPage() {
 
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const dragCounterRef = useRef(0);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showStickerTray, setShowStickerTray] = useState(false);
   const [stickerTrayPos, setStickerTrayPos] = useState<{ top: number; left: number } | null>(null);
@@ -195,6 +202,19 @@ export default function ConversationsPage() {
   const [savedStickerMsgIds, setSavedStickerMsgIds] = useState<Set<string>>(new Set());
   const [stickerUploading, setStickerUploading] = useState(false);
   const stickerFileInputRef = useRef<HTMLInputElement>(null);
+  const [showQuickReplyTray, setShowQuickReplyTray] = useState(false);
+  const [quickReplyTrayPos, setQuickReplyTrayPos] = useState<{ top: number; left: number } | null>(null);
+  const quickReplyButtonRef = useRef<HTMLButtonElement>(null);
+  const quickReplyTrayRef = useRef<HTMLDivElement>(null);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [editingQuickReplyId, setEditingQuickReplyId] = useState<string | null>(null);
+  const [qrShortcutDraft, setQrShortcutDraft] = useState('');
+  const [qrTitleDraft, setQrTitleDraft] = useState('');
+  const [qrContentDraft, setQrContentDraft] = useState('');
+  const [qrSaving, setQrSaving] = useState(false);
+  const [qrAutocompleteOpen, setQrAutocompleteOpen] = useState(false);
+  const [qrAutocompleteMatches, setQrAutocompleteMatches] = useState<QuickReply[]>([]);
+  const [qrAutocompleteIndex, setQrAutocompleteIndex] = useState(0);
   const [emojiPos, setEmojiPos] = useState<{ top: number; left: number } | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const emojiPopoverRef = useRef<HTMLDivElement>(null);
@@ -254,8 +274,8 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     void loadConversations();
-    void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags')])
-      .then(([users, deps, projs, incs, tags]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); })
+    void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags'), apiFetch<QuickReply[]>('/quick-replies')])
+      .then(([users, deps, projs, incs, tags, replies]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); setQuickReplies(replies); })
       .catch(() => undefined);
   }, [loadConversations]);
 
@@ -356,6 +376,24 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [showStickerTray]);
 
+  useEffect(() => {
+    if (!showQuickReplyTray) { setQuickReplyTrayPos(null); return; }
+    const button = quickReplyButtonRef.current;
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      setQuickReplyTrayPos({ top: rect.top, left: rect.left });
+    }
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (quickReplyTrayRef.current?.contains(target) || quickReplyButtonRef.current?.contains(target)) return;
+      setShowQuickReplyTray(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showQuickReplyTray]);
+
+  useEffect(() => { setQrAutocompleteOpen(false); resetQuickReplyForm(); setShowQuickReplyTray(false); }, [selectedId]);
+
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
   // get its options cut off and unclickable, exactly like the emoji grid did.
@@ -405,6 +443,7 @@ export default function ConversationsPage() {
       if (openMessageMenuId) { setOpenMessageMenuId(null); return; }
       if (showEmoji) { setShowEmoji(false); return; }
       if (showStickerTray) { setShowStickerTray(false); return; }
+      if (showQuickReplyTray) { setShowQuickReplyTray(false); return; }
       if (forwardMessageId) { setForwardMessageId(null); return; }
       if (lightboxUrl) { setLightboxUrl(null); return; }
       if (incidentModal) { setIncidentModal(false); return; }
@@ -413,7 +452,7 @@ export default function ConversationsPage() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, showEmoji, showStickerTray, forwardMessageId, lightboxUrl, incidentModal, newChatModal, aiPromptModal]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, lightboxUrl, incidentModal, newChatModal, aiPromptModal]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
@@ -453,6 +492,7 @@ export default function ConversationsPage() {
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
   const canDeleteTags = isAdmin || identity.role === 'SUPERVISOR';
+  const canManageQuickReplies = canDeleteTags;
   const myDepartmentIds = useMemo(() => new Set(
     departments.filter((department) => department.users?.some((item) => item.user.id === identity.id)).map((department) => department.id),
   ), [departments, identity.id]);
@@ -479,6 +519,33 @@ export default function ConversationsPage() {
     if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
     setPendingFile(file);
     setPendingPreviewUrl(isImageFile(file) || isVideoFile(file) ? URL.createObjectURL(file) : null);
+  };
+
+  // Lets agents drop an image/video/document straight onto the open chat to attach it,
+  // same as WhatsApp Web. dragCounterRef tracks enter/leave depth because those events also
+  // fire for every child element crossed, not just the outer drop zone.
+  const onChatDragEnter = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setDragActive(true);
+  };
+  const onChatDragOver = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+  };
+  const onChatDragLeave = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragActive(false);
+  };
+  const onChatDrop = (e: DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragActive(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) attachFile(file);
   };
 
   // Lets agents paste a screenshot (Ctrl+V) straight into the composer, same as WhatsApp Web.
@@ -626,6 +693,7 @@ export default function ConversationsPage() {
       });
       await loadConversations();
       setSelectedId(message.conversationId);
+      setMobileChatOpen(true);
       setNewChatModal(false);
     } catch (err) {
       setNewChatError(err instanceof Error ? err.message : 'No se pudo iniciar la conversación');
@@ -732,6 +800,111 @@ export default function ConversationsPage() {
       await apiFetch('/stickers/from-message', { method: 'POST', body: JSON.stringify({ messageId }) });
       setSavedStickerMsgIds((current) => new Set(current).add(messageId));
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar el sticker'); }
+  };
+
+  // Finds the "/shortcut" token the caret is currently inside of, if any — same idea as an
+  // IDE's autocomplete: only triggers right after a "/" that starts the word (line start or
+  // preceded by whitespace), so a bare slash mid-sentence doesn't hijack typing.
+  const findSlashToken = (value: string, caret: number): { start: number; query: string } | null => {
+    const uptoCaret = value.slice(0, caret);
+    const slashIndex = uptoCaret.lastIndexOf('/');
+    if (slashIndex === -1) return null;
+    const before = slashIndex === 0 ? '' : uptoCaret[slashIndex - 1];
+    if (before && !/\s/.test(before)) return null;
+    const query = uptoCaret.slice(slashIndex + 1);
+    if (!/^[a-z0-9_-]*$/i.test(query)) return null;
+    return { start: slashIndex, query: query.toLowerCase() };
+  };
+
+  const onComposerTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setText(value);
+    const caret = e.target.selectionStart ?? value.length;
+    const token = findSlashToken(value, caret);
+    const matches = token ? quickReplies.filter((qr) => qr.active && qr.shortcut.startsWith(token.query)) : [];
+    if (token && matches.length) {
+      setQrAutocompleteMatches(matches);
+      setQrAutocompleteOpen(true);
+      setQrAutocompleteIndex(0);
+    } else {
+      setQrAutocompleteOpen(false);
+    }
+  };
+
+  const insertQuickReplyContent = (content: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) { setText((current) => current + content); return; }
+    const start = textarea.selectionStart ?? text.length;
+    const end = textarea.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + content + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const caret = start + content.length;
+      textarea.setSelectionRange(caret, caret);
+    });
+  };
+
+  const applyQuickReplyAutocomplete = (qr: QuickReply) => {
+    const textarea = textareaRef.current;
+    const caret = textarea?.selectionStart ?? text.length;
+    const token = findSlashToken(text, caret);
+    const start = token ? token.start : caret;
+    const next = text.slice(0, start) + qr.content + text.slice(caret);
+    setText(next);
+    setQrAutocompleteOpen(false);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      const pos = start + qr.content.length;
+      textarea?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const sendQuickReplyFromTray = (qr: QuickReply) => {
+    setShowQuickReplyTray(false);
+    insertQuickReplyContent(qr.content);
+  };
+
+  const resetQuickReplyForm = () => {
+    setEditingQuickReplyId(null);
+    setQrShortcutDraft('');
+    setQrTitleDraft('');
+    setQrContentDraft('');
+  };
+
+  const startEditQuickReply = (qr: QuickReply) => {
+    setEditingQuickReplyId(qr.id);
+    setQrShortcutDraft(qr.shortcut);
+    setQrTitleDraft(qr.title);
+    setQrContentDraft(qr.content);
+  };
+
+  const saveQuickReply = async () => {
+    const shortcut = qrShortcutDraft.trim().toLowerCase();
+    const title = qrTitleDraft.trim();
+    const content = qrContentDraft.trim();
+    if (!shortcut || !title || !content) return;
+    setQrSaving(true);
+    try {
+      if (editingQuickReplyId) {
+        const updated = await apiFetch<QuickReply>(`/quick-replies/${editingQuickReplyId}`, { method: 'PATCH', body: JSON.stringify({ shortcut, title, content }) });
+        setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
+      } else {
+        const created = await apiFetch<QuickReply>('/quick-replies', { method: 'POST', body: JSON.stringify({ shortcut, title, content }) });
+        setQuickReplies((current) => [...current, created].sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
+      }
+      resetQuickReplyForm();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la respuesta rápida'); }
+    finally { setQrSaving(false); }
+  };
+
+  const deleteQuickReply = async (qr: QuickReply) => {
+    if (!window.confirm(`¿Eliminar la respuesta rápida "/${qr.shortcut}"?`)) return;
+    try {
+      await apiFetch(`/quick-replies/${qr.id}`, { method: 'DELETE' });
+      setQuickReplies((current) => current.filter((item) => item.id !== qr.id));
+      if (editingQuickReplyId === qr.id) resetQuickReplyForm();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar la respuesta rápida'); }
   };
 
   const deleteStickerItem = async (id: string) => {
@@ -931,7 +1104,7 @@ export default function ConversationsPage() {
     <>
     <AppShell title="Conversaciones" subtitle="Bandeja en tiempo real para agentes">
       {error && <div className="error-box">{error}</div>}
-      <section className="chat-layout">
+      <section className={`chat-layout ${mobileChatOpen ? 'mobile-chat-open' : ''}`}>
         <aside className="chat-list">
           <div className="chat-list-head">
             <div className="chat-list-title-row">
@@ -984,7 +1157,7 @@ export default function ConversationsPage() {
           </div>
           <div className="chat-list-scroll">
             {filtered.map((conversation) => (
-              <button className={`chat-row ${selectedId === conversation.id ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} onClick={() => setSelectedId(conversation.id)}>
+              <button className={`chat-row ${selectedId === conversation.id ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} onClick={() => { setSelectedId(conversation.id); setMobileChatOpen(true); }}>
                 <div className="chat-avatar">{avatarContent(conversation.contact)}</div>
                 <div className="chat-copy"><strong>{displayName(conversation.contact)}</strong><span>{lastText(conversation)}</span></div>
                 <div>
@@ -1004,9 +1177,35 @@ export default function ConversationsPage() {
           </div>
         </aside>
 
-        <div className="chat-main">
+        <div
+          className="chat-main"
+          onDragEnter={selected ? onChatDragEnter : undefined}
+          onDragOver={selected ? onChatDragOver : undefined}
+          onDragLeave={selected ? onChatDragLeave : undefined}
+          onDrop={selected ? onChatDrop : undefined}
+        >
+          {selected && dragActive && (
+            <div className="chat-drop-overlay">
+              <div className="chat-drop-overlay-box">
+                <Paperclip size={28} />
+                <span>Suelta el archivo para adjuntarlo</span>
+              </div>
+            </div>
+          )}
           {selected ? <>
-            <header className="chat-header"><div className="chat-avatar">{avatarContent(selected.contact, 17)}</div><div className="chat-header-copy"><strong>{displayName(selected.contact)}</strong><span>{selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span></div>{!selected.assignedUser && <button className="button small" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}<button className={`button small ${selected.aiEnabled ? 'ai-toggle-on' : ''}`} onClick={() => void toggleAi()} title={selected.aiEnabled ? 'El agente IA está respondiendo automáticamente aquí. Click para desactivarlo.' : 'Activar respuesta automática con IA en esta conversación'}><Bot size={14} />{selected.aiEnabled ? 'IA activa' : 'Activar IA'}</button>{isAdmin && <button className="icon-button" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}<button className="button small" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={14} />Incidencia</button>{selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}<button className="icon-button"><MoreHorizontal size={17} /></button></header>
+            <header className="chat-header">
+              <button className="chat-back-button" onClick={() => setMobileChatOpen(false)} title="Volver a la lista"><ArrowLeft size={18} /></button>
+              <div className="chat-avatar">{avatarContent(selected.contact, 17)}</div>
+              <div className="chat-header-copy"><strong>{displayName(selected.contact)}</strong><span>{selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span></div>
+              <div className="chat-header-actions">
+                {!selected.assignedUser && <button className="button small" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}
+                <button className={`icon-button ${selected.aiEnabled ? 'ai-toggle-on' : ''}`} onClick={() => void toggleAi()} title={selected.aiEnabled ? 'El agente IA está respondiendo automáticamente aquí. Click para desactivarlo.' : 'Activar respuesta automática con IA en esta conversación'}><Bot size={17} /></button>
+                {isAdmin && <button className="icon-button" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}
+                <button className="icon-button" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
+                {selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
+                <button className="icon-button"><MoreHorizontal size={17} /></button>
+              </div>
+            </header>
             <div className="message-stream" ref={messageStreamRef}>
               <div className="message-stream-inner">
                 {messages.map((message) => (
@@ -1040,6 +1239,21 @@ export default function ConversationsPage() {
             <div className="chat-composer">
               <input ref={fileInputRef} type="file" hidden accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={onFileChange} />
               <input ref={stickerFileInputRef} type="file" hidden accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadSticker(file); }} />
+              {qrAutocompleteOpen && qrAutocompleteMatches.length > 0 && (
+                <div className="quick-reply-autocomplete">
+                  {qrAutocompleteMatches.map((qr, index) => (
+                    <button
+                      key={qr.id}
+                      className={`quick-reply-autocomplete-item ${index === qrAutocompleteIndex ? 'active' : ''}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => applyQuickReplyAutocomplete(qr)}
+                    >
+                      <span className="quick-reply-autocomplete-shortcut">/{qr.shortcut}</span>
+                      <span className="quick-reply-autocomplete-title">{qr.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {recording ? (
                 <div className="recording-indicator">
                   <span className="recording-dot" />
@@ -1051,13 +1265,22 @@ export default function ConversationsPage() {
                   <button className="icon-button ghost" onClick={pickFile} title="Adjuntar archivo"><Paperclip size={17} /></button>
                   <button ref={emojiButtonRef} className="icon-button ghost" onClick={() => setShowEmoji((v) => !v)} title="Emojis"><Smile size={17} /></button>
                   <button ref={stickerButtonRef} className="icon-button ghost" onClick={() => setShowStickerTray((v) => !v)} title="Stickers"><StickerIcon size={17} /></button>
+                  <button ref={quickReplyButtonRef} className="icon-button ghost" onClick={() => setShowQuickReplyTray((v) => !v)} title="Respuestas rápidas"><Zap size={17} /></button>
                   <textarea
                     ref={textareaRef}
                     rows={1}
-                    placeholder={pendingFile ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje...'}
+                    placeholder={pendingFile ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje... ("/" para respuestas rápidas)'}
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+                    onChange={onComposerTextChange}
+                    onKeyDown={(e) => {
+                      if (qrAutocompleteOpen && qrAutocompleteMatches.length) {
+                        if (e.key === 'ArrowDown') { e.preventDefault(); setQrAutocompleteIndex((i) => (i + 1) % qrAutocompleteMatches.length); return; }
+                        if (e.key === 'ArrowUp') { e.preventDefault(); setQrAutocompleteIndex((i) => (i - 1 + qrAutocompleteMatches.length) % qrAutocompleteMatches.length); return; }
+                        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyQuickReplyAutocomplete(qrAutocompleteMatches[qrAutocompleteIndex]); return; }
+                        if (e.key === 'Escape') { e.preventDefault(); setQrAutocompleteOpen(false); return; }
+                      }
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); }
+                    }}
                     onPaste={onComposerPaste}
                   />
                 </>
@@ -1262,6 +1485,40 @@ export default function ConversationsPage() {
           ))}
         </div>
         {!stickers.length && <p className="contact-empty-hint">Sube tu primer sticker con el botón "+".</p>}
+      </div>,
+      document.body,
+    )}
+    {showQuickReplyTray && quickReplyTrayPos && typeof document !== 'undefined' && createPortal(
+      <div ref={quickReplyTrayRef} className="quick-reply-tray" style={{ top: quickReplyTrayPos.top, left: quickReplyTrayPos.left }}>
+        <div className="quick-reply-tray-list">
+          {quickReplies.map((qr) => (
+            <div className="quick-reply-tray-item" key={qr.id}>
+              <button className="quick-reply-tray-body" onClick={() => sendQuickReplyFromTray(qr)}>
+                <span className="quick-reply-tray-shortcut">/{qr.shortcut}{!qr.active && ' · inactiva'}</span>
+                <strong>{qr.title}</strong>
+                <span className="quick-reply-tray-preview">{qr.content}</span>
+              </button>
+              {canManageQuickReplies && (
+                <div className="quick-reply-tray-actions">
+                  <button onClick={() => startEditQuickReply(qr)} title="Editar"><Pencil size={12} /></button>
+                  <button onClick={() => void deleteQuickReply(qr)} title="Eliminar"><Trash2 size={12} /></button>
+                </div>
+              )}
+            </div>
+          ))}
+          {!quickReplies.length && <p className="contact-empty-hint">Aún no hay respuestas rápidas.</p>}
+        </div>
+        {canManageQuickReplies && (
+          <div className="quick-reply-tray-form">
+            <input value={qrShortcutDraft} onChange={(e) => setQrShortcutDraft(e.target.value)} placeholder="atajo (ej: saludo)" />
+            <input value={qrTitleDraft} onChange={(e) => setQrTitleDraft(e.target.value)} placeholder="Título" />
+            <textarea value={qrContentDraft} onChange={(e) => setQrContentDraft(e.target.value)} placeholder="Mensaje..." rows={2} />
+            <div className="quick-reply-tray-form-actions">
+              {editingQuickReplyId && <button onClick={resetQuickReplyForm} disabled={qrSaving}>Cancelar</button>}
+              <button onClick={() => void saveQuickReply()} disabled={qrSaving || !qrShortcutDraft.trim() || !qrTitleDraft.trim() || !qrContentDraft.trim()}>{editingQuickReplyId ? 'Actualizar' : 'Guardar'}</button>
+            </div>
+          </div>
+        )}
       </div>,
       document.body,
     )}
