@@ -118,6 +118,7 @@ if [ ! -f .env ]; then
     POSTGRES_PASSWORD=$(gen_secret 24)
     MINIO_PASSWORD=$(gen_secret 24)
     ADMIN_PASSWORD=$(gen_secret 12)
+    SUPERADMIN_PASSWORD=$(gen_secret 12)
 
     read -p "Nombre de la empresa (para el usuario administrador inicial): " company_name
     company_name=${company_name:-'Mi Empresa'}
@@ -134,6 +135,8 @@ if [ ! -f .env ]; then
     sed -i "s#^SEED_ADMIN_NAME=.*#SEED_ADMIN_NAME=Administrador#" .env
     sed -i "s#^SEED_ADMIN_EMAIL=.*#SEED_ADMIN_EMAIL=$admin_email#" .env
     sed -i "s#^SEED_ADMIN_PASSWORD=.*#SEED_ADMIN_PASSWORD=$ADMIN_PASSWORD#" .env
+    sed -i "s#^SEED_SUPERADMIN_EMAIL=.*#SEED_SUPERADMIN_EMAIL=superadmin@$HOST#" .env
+    sed -i "s#^SEED_SUPERADMIN_PASSWORD=.*#SEED_SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD#" .env
 
     cat << EOF >> .env
 

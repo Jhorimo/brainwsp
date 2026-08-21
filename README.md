@@ -119,12 +119,19 @@ En el primer inicio el contenedor API crea el esquema y ejecuta el seed de desar
 - Swagger: `http://localhost:4000/docs`
 - MinIO Console: `http://localhost:9001`
 
-Credenciales iniciales por defecto:
+Credenciales iniciales por defecto (entorno local, definidas en `.env`/`seed.ts`):
 
 ```text
-Usuario:  admin@braintech.com.pe
-Password: ChangeMe-123456!
+Admin (empresa Brain Tech Peru):
+  Usuario:  admin@braintech.com.pe
+  Password: ChangeMe-123456!
+
+Superadmin (plataforma):
+  Usuario:  superadmin@braintech.com.pe
+  Password: SuperAdmin-123456!
 ```
+
+Estas son solo las de desarrollo local. En producción, `deploy.sh` genera contraseñas aleatorias para ambas cuentas y las muestra al final del despliegue (también quedan guardadas en `../tudominio.com.txt`).
 
 Revisa el log del API para obtener el primer APP KEY / AUTH KEY:
 

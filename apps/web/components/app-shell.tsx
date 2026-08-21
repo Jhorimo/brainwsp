@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   Lightbulb,
   LogOut,
+  Menu,
   MessageSquareText,
   Settings,
   Users,
@@ -34,6 +35,19 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const pathname = usePathname();
   const router = useRouter();
   const [identity, setIdentity] = useState({ company: 'Empresa', role: 'Usuario', initials: 'BW' });
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem('brainwsp_sidebar_collapsed') === '1');
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem('brainwsp_sidebar_collapsed', next ? '1' : '0');
+      return next;
+    });
+  };
 
   useEffect(() => {
     try {
@@ -57,7 +71,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
 
   return (
     <Protected>
-      <div className="app-frame">
+      <div className={`app-frame ${collapsed ? 'collapsed' : ''}`}>
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-mark">B</div>
@@ -97,9 +111,14 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
 
         <main className="main-area">
           <header className="topbar">
-            <div>
-              <h1>{title}</h1>
-              {subtitle && <p>{subtitle}</p>}
+            <div className="topbar-left">
+              <button className="sidebar-toggle" type="button" onClick={toggleCollapsed} title={collapsed ? 'Expandir menú' : 'Reducir menú'} aria-label={collapsed ? 'Expandir menú' : 'Reducir menú'}>
+                <Menu size={18} />
+              </button>
+              <div>
+                <h1>{title}</h1>
+                {subtitle && <p>{subtitle}</p>}
+              </div>
             </div>
             <div className="topbar-actions">
               {actions}
