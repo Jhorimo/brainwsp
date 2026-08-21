@@ -114,6 +114,7 @@ if [ ! -f .env ]; then
 
     JWT_SECRET=$(gen_secret 64)
     PEPPER=$(gen_secret 32)
+    ENCRYPTION_KEY=$(gen_secret 32)
     POSTGRES_PASSWORD=$(gen_secret 24)
     MINIO_PASSWORD=$(gen_secret 24)
     ADMIN_PASSWORD=$(gen_secret 12)
@@ -124,6 +125,7 @@ if [ ! -f .env ]; then
 
     sed -i "s#^JWT_SECRET=.*#JWT_SECRET=$JWT_SECRET#" .env
     sed -i "s#^CREDENTIAL_HASH_PEPPER=.*#CREDENTIAL_HASH_PEPPER=$PEPPER#" .env
+    sed -i "s#^CREDENTIAL_ENCRYPTION_KEY=.*#CREDENTIAL_ENCRYPTION_KEY=$ENCRYPTION_KEY#" .env
     sed -i "s#^WEB_ORIGIN=.*#WEB_ORIGIN=https://$HOST#" .env
     sed -i "s#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=https://$API_HOST/api#" .env
     sed -i "s#^NEXT_PUBLIC_SOCKET_URL=.*#NEXT_PUBLIC_SOCKET_URL=https://$API_HOST#" .env

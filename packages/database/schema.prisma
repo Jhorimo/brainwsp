@@ -153,22 +153,28 @@ model User {
 }
 
 model ApiCredential {
-  id         String            @id @default(uuid())
+  id         String           @id @default(uuid())
   companyId  String
-  instanceId String?
+  instanceId String
   name       String
-  appKey     String            @unique
+  appKey     String           @unique
   authHash   String
-  active     Boolean           @default(true)
+  // Copia reversible (AES-256-GCM) del AUTH KEY, solo para poder mostrarlo de nuevo
+  // desde el panel. `authHash` sigue siendo lo único que autentica peticiones entrantes.
+  // Nula en credenciales creadas antes de esta función — hay que regenerarlas para verlas.
+  authKeyEncrypted String?
+  active     Boolean          @default(true)
   lastUsedAt DateTime?
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  company    Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  instance   WhatsAppInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Cada instancia tiene como máximo una credencial (1:1) — borrar la
+  // instancia se lleva su credencial con ella, ya no tiene sentido sola.
+  instance   WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, name])
+  @@unique([instanceId])
   @@index([companyId])
-  @@index([instanceId])
 }
 
 model WhatsAppInstance {
@@ -190,7 +196,7 @@ model WhatsAppInstance {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  apiCredentials   ApiCredential[]
+  apiCredential    ApiCredential?
   conversations    Conversation[]
   messages         Message[]
   authCredential   WhatsAppAuthCredential?

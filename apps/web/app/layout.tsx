@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'BrainWSP | WhatsApp Business Hub',
-  description: 'Gateway WhatsApp, bandeja de agentes e integraciones BrainPOS / ERP',
+  description: 'Gateway WhatsApp, bandeja de agentes e integraciones con tus sistemas',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

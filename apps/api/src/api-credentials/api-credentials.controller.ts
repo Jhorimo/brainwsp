@@ -27,6 +27,11 @@ export class ApiCredentialsController {
     return this.service.create(user.companyId, dto.name, dto.instanceId);
   }
 
+  @Get(':id/reveal')
+  reveal(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.reveal(user.companyId, id, user.sub);
+  }
+
   @Patch(':id/revoke')
   revoke(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.revoke(user.companyId, id);

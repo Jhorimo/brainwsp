@@ -90,7 +90,7 @@ export function ApiDocs({ appKey }: { appKey?: string }) {
         </div>
 
         <h4 className="doc-subtitle">Enviar mensaje de texto</h4>
-        <p className="doc-desc"><code>POST {API_URL}/create-message</code> — compatible con BrainPOS/ERP, acepta form-data.</p>
+        <p className="doc-desc"><code>POST {API_URL}/create-message</code> — compatible con tus sistemas existentes, acepta form-data.</p>
         <CodeBlock code={textMessageSnippet(lang, key)} />
 
         <h4 className="doc-subtitle">Enviar documento (por URL)</h4>

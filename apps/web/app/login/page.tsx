@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { LockKeyhole, MessageSquareText, Radio, Sparkles } from 'lucide-react';
 import { API_URL } from '@/lib/api';
 
@@ -41,7 +42,7 @@ export default function LoginPage() {
         <div className="login-brand"><div className="brand-mark">B</div><div><strong>BrainWSP</strong><div style={{color:'#a9c0e3',fontSize:11}}>by Brain Tech Perú</div></div></div>
         <div className="login-copy">
           <h1>WhatsApp empresarial, integrado a todo tu ecosistema.</h1>
-          <p>Centraliza BrainPOS, ERP, agentes humanos, conversaciones y automatizaciones en una sola plataforma preparada para crecer.</p>
+          <p>Centraliza tus sistemas de negocio, agentes humanos, conversaciones y automatizaciones en una sola plataforma preparada para crecer.</p>
           <div className="login-features">
             <div className="login-feature"><MessageSquareText size={15} /> Chat en vivo</div>
             <div className="login-feature"><Radio size={15} /> API Gateway</div>
@@ -63,6 +64,9 @@ export default function LoginPage() {
             <button className="button primary" disabled={loading}>{loading ? 'Ingresando...' : 'Ingresar al panel'}</button>
           </div>
           <div className="login-hint">Las credenciales mostradas son las del entorno de desarrollo. Cámbialas antes de publicar el sistema.</div>
+          <div style={{marginTop:14, textAlign:'center', fontSize:11, color:'#6b7690'}}>
+            ¿No tienes cuenta? <Link href="/register" style={{color:'#1258d6', fontWeight:700}}>Regístrate</Link>
+          </div>
         </form>
       </section>
     </div>

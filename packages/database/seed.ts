@@ -74,8 +74,11 @@ async function main() {
     await prisma.plan.upsert({ where: { name: plan.name }, update: {}, create: plan });
   }
 
-  const existingCredential = await prisma.apiCredential.findFirst({
-    where: { companyId: company.id, name: 'BrainPOS / ERP - Desarrollo' },
+  // Cada instancia solo puede tener una credencial: si esta instancia ya tiene una
+  // (con el nombre que sea — el usuario pudo haberla renombrado o recreado desde el
+  // panel), no se crea otra encima, sin importar si coincide con el nombre por defecto.
+  const existingCredential = await prisma.apiCredential.findUnique({
+    where: { instanceId: instance.id },
   });
 
   let appKey = existingCredential?.appKey;
@@ -88,7 +91,7 @@ async function main() {
       data: {
         companyId: company.id,
         instanceId: instance.id,
-        name: 'BrainPOS / ERP - Desarrollo',
+        name: 'Integración Principal - Desarrollo',
         appKey,
         authHash: hashApiSecret(authKey),
       },

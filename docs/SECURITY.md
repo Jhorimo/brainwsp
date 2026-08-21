@@ -2,13 +2,16 @@
 
 ## Credenciales de integración
 
-`APP KEY` identifica públicamente una integración. `AUTH KEY` es un secreto aleatorio de alta entropía. El servidor almacena únicamente:
+`APP KEY` identifica públicamente una integración. `AUTH KEY` es un secreto aleatorio de alta entropía. El servidor almacena dos cosas sobre él:
 
 ```text
-SHA256(CREDENTIAL_HASH_PEPPER + ':' + AUTH_KEY)
+authHash          = SHA256(CREDENTIAL_HASH_PEPPER + ':' + AUTH_KEY)          # autentica las peticiones entrantes, irreversible
+authKeyEncrypted  = AES-256-GCM(SHA256(CREDENTIAL_ENCRYPTION_KEY), AUTH_KEY) # reversible, solo para el botón "ver AUTH KEY" del panel
 ```
 
-El AUTH KEY se entrega una sola vez al crearlo.
+`authHash` es lo único que se usa para validar peticiones de BrainPOS/ERP — nunca se descifra `authKeyEncrypted` en esa ruta. `authKeyEncrypted` solo se descifra cuando un OWNER/ADMIN pide verlo desde el panel (`GET /api-credentials/:id/reveal`), y cada vez que eso pasa se registra en `AuditLog`. Credenciales creadas antes de que existiera esta función no tienen `authKeyEncrypted` — hay que regenerarlas para poder verlas.
+
+Rotar `CREDENTIAL_ENCRYPTION_KEY` invalida la capacidad de ver AUTH KEYs ya guardados (no la autenticación, que sigue dependiendo solo de `authHash`).
 
 ## Sesiones Baileys
 

@@ -9,7 +9,7 @@ Plataforma profesional para centralizar WhatsApp en el ecosistema Brain Tech: **
 - Multiempresa desde base de datos (`companyId`).
 - Login administrativo con JWT.
 - APP KEY + AUTH KEY por integración.
-- AUTH KEY almacenado únicamente como hash SHA-256 + pepper.
+- AUTH KEY autenticado por hash SHA-256 + pepper; se guarda además cifrado (AES-256-GCM) para poder mostrarlo de nuevo desde el panel.
 - Endpoint legacy compatible con la integración PHP actual: `POST /api/create-message`.
 - API v1 para texto y documentos.
 - Instancias WhatsApp por QR con Baileys.
@@ -90,23 +90,27 @@ Para producción cambia obligatoriamente `JWT_SECRET`, `CREDENTIAL_HASH_PEPPER` 
 
 ### 2. Levantar todo
 
-```bash
-docker compose up -d --build
-```
+Un solo comando hace todo el trabajo: arranca Docker Desktop si está apagado, avisa si el puerto 3000 ya está ocupado, y construye/levanta los 6 servicios (postgres, redis, minio, api, worker, web).
 
-O usa:
-
-```bash
-./scripts/setup-local.sh
-```
-
-Windows:
+Windows (PowerShell, desde la raíz del repo):
 
 ```powershell
 ./scripts/setup-local.ps1
 ```
 
-En el primer inicio el contenedor API crea el esquema y ejecuta el seed de desarrollo.
+Linux/macOS:
+
+```bash
+./scripts/setup-local.sh
+```
+
+Equivalente manual si prefieres no usar el script:
+
+```bash
+docker compose up -d --build
+```
+
+En el primer inicio el contenedor API crea el esquema y ejecuta el seed de desarrollo. La primera vez tarda varios minutos (build de las 3 imágenes); las siguientes son mucho más rápidas por el caché de Docker.
 
 ### 3. Abrir
 
@@ -127,6 +131,23 @@ Revisa el log del API para obtener el primer APP KEY / AUTH KEY:
 ```bash
 docker compose logs api
 ```
+
+### Comandos útiles
+
+```bash
+docker compose ps                 # estado de los 6 servicios
+docker compose logs -f worker     # seguir el log del worker de WhatsApp
+docker compose restart api        # reiniciar solo el API (no toca la sesión de WhatsApp)
+docker compose down               # apagar todo (los datos persisten en volúmenes)
+```
+
+> Evita `docker compose restart worker` o `down` mientras haya una sesión de WhatsApp conectada en producción: fuerza una reconexión del socket de Baileys. Es seguro en desarrollo.
+
+### Solución de problemas
+
+- **`docker compose up` falla al construir `api` con `COPY ... apps/api/dist: not found`**: hay un `tsconfig.tsbuildinfo` desactualizado colado en el contexto de build. Debe estar en `.gitignore`/`.dockerignore` (ya corregido); si reaparece, bórralo (`git rm --cached apps/api/tsconfig.tsbuildinfo`) y reconstruye con `docker compose build --no-cache api`.
+- **El API arranca pero lanza `ECONNREFUSED 127.0.0.1:9000`**: el cliente de MinIO está resolviendo `localhost` en vez del servicio `minio` de la red de Docker. Las variables `MINIO_ENDPOINT=minio` (y el resto de `MINIO_*`) ya están fijadas en `docker-compose.yml` para `api` y `worker`; no deben depender del `.env` local.
+- **El puerto 3000 ya está en uso al iniciar `web`**: normalmente es un `next dev` local suelto de una sesión anterior. `./scripts/setup-local.ps1` te avisa con el PID y el nombre del proceso, pero no lo mata automáticamente — en Windows ese puerto también puede estar ocupado por el propio proceso de forwarding de Docker Desktop, y matarlo a ciegas tumba el motor de Docker entero (con cualquier sesión de WhatsApp activa en el worker). Verifica el nombre del proceso antes de cerrarlo: `Get-Process -Id <PID>`.
 
 El AUTH KEY se muestra solamente cuando se crea la credencial.
 

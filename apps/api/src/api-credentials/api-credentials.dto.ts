@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsUUID, MinLength } from 'class-validator';
 
 export class CreateApiCredentialDto {
   @ApiProperty({ example: 'BrainPOS Producción' })
@@ -7,8 +7,7 @@ export class CreateApiCredentialDto {
   @MinLength(3)
   name!: string;
 
-  @ApiPropertyOptional({ description: 'Fija la credencial a una instancia específica de WhatsApp' })
-  @IsOptional()
+  @ApiProperty({ description: 'Instancia de WhatsApp a la que pertenece esta credencial (cada instancia solo puede tener una)' })
   @IsUUID()
-  instanceId?: string;
+  instanceId!: string;
 }
