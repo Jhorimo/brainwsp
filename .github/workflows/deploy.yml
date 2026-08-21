@@ -91,7 +91,53 @@ jobs:
                   script: |
                       set -e
                       cd /root/mipse/brainwsp
-                      docker compose -f docker-compose.prod.yml pull
-                      docker compose -f docker-compose.prod.yml up -d
+                      COMPOSE="docker compose -f docker-compose.prod.yml"
+
+                      # 1. Anotar que imagenes estan corriendo ahora, para poder volver.
+                      PREV_API=$(docker inspect --format '{{.Image}}' brainwsp-api-1 2>/dev/null || true)
+                      PREV_WEB=$(docker inspect --format '{{.Image}}' brainwsp-web-1 2>/dev/null || true)
+                      PREV_WRK=$(docker inspect --format '{{.Image}}' brainwsp-worker-1 2>/dev/null || true)
+                      echo "Version actual -> api=$PREV_API web=$PREV_WEB worker=$PREV_WRK"
+
+                      $COMPOSE pull
+
+                      # 2. Aplicar el esquema en un contenedor aparte.
+                      #    Si falla, salimos aqui y los contenedores viejos siguen sirviendo.
+                      echo "--- Aplicando esquema de base de datos ---"
+                      if ! $COMPOSE run --rm api sh -c "npx prisma db push --schema packages/database/schema.prisma"; then
+                          echo "ERROR: el esquema no se pudo aplicar. No se toca produccion."
+                          exit 1
+                      fi
+
+                      # 3. Recien ahora reemplazamos los contenedores.
+                      $COMPOSE up -d
+
+                      # 4. Esperar hasta 2 minutos a que la API quede saludable.
+                      echo "--- Esperando a que la API responda ---"
+                      ESTADO=""
+                      for i in $(seq 1 24); do
+                          ESTADO=$(docker inspect --format '{{.State.Health.Status}}' brainwsp-api-1 2>/dev/null || echo "ausente")
+                          [ "$ESTADO" = "healthy" ] && break
+                          sleep 5
+                      done
+
+                      # 5. Si no arranco, volver a la version anterior.
+                      if [ "$ESTADO" != "healthy" ]; then
+                          echo "ERROR: la API no quedo saludable (estado: $ESTADO). Revirtiendo."
+                          docker logs --tail 40 brainwsp-api-1 || true
+
+                          if [ -n "$PREV_API" ]; then
+                              docker tag "$PREV_API" ghcr.io/jhorimo/brainwsp-api:latest
+                              [ -n "$PREV_WEB" ] && docker tag "$PREV_WEB" ghcr.io/jhorimo/brainwsp-web:latest
+                              [ -n "$PREV_WRK" ] && docker tag "$PREV_WRK" ghcr.io/jhorimo/brainwsp-worker:latest
+                              $COMPOSE up -d
+                              echo "Revertido a la version anterior."
+                          else
+                              echo "No habia version anterior registrada; no se pudo revertir."
+                          fi
+                          exit 1
+                      fi
+
+                      echo "--- Despliegue correcto ---"
                       docker image prune -f
-                      docker compose -f docker-compose.prod.yml ps
+                      $COMPOSE ps
