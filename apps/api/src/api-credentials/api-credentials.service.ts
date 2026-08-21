@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptApiSecret, encryptApiSecret, generateApiCredential, generateAuthKey, hashApiSecret, verifyApiSecret } from '../common/utils/secret';
 import type { ApiClientContext } from '../common/types/jwt-user';
@@ -37,17 +38,31 @@ export class ApiCredentialsService {
     if (existingForInstance) throw new BadRequestException(`La instancia "${instance.name}" ya tiene una credencial ("${existingForInstance.name}"). Elimínala primero para crear otra.`);
 
     const { appKey, authKey } = generateApiCredential();
-    const credential = await this.prisma.apiCredential.create({
-      data: {
-        companyId,
-        instanceId,
-        name,
-        appKey,
-        authHash: hashApiSecret(authKey),
-        authKeyEncrypted: encryptApiSecret(authKey),
-      },
-      select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
-    });
+    let credential;
+    try {
+      credential = await this.prisma.apiCredential.create({
+        data: {
+          companyId,
+          instanceId,
+          name,
+          appKey,
+          authHash: hashApiSecret(authKey),
+          authKeyEncrypted: encryptApiSecret(authKey),
+        },
+        select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
+      });
+    } catch (error) {
+      // Cierra la ventana de carrera entre los checks de arriba y este insert (dos
+      // peticiones simultáneas para el mismo nombre o la misma instancia).
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = (error.meta?.target as string[] | undefined) ?? [];
+        if (target.includes('instanceId')) {
+          throw new BadRequestException(`La instancia "${instance.name}" ya tiene una credencial. Elimínala primero para crear otra.`);
+        }
+        throw new BadRequestException(`Ya existe una credencial llamada "${name}". Usa otro nombre o elimina la anterior primero.`);
+      }
+      throw error;
+    }
 
     return { ...credential, authKey, warning: 'Guarda el AUTH KEY ahora. También podrás verlo más tarde desde el icono del ojo en la tabla.' };
   }

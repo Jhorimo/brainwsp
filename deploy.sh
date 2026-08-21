@@ -150,6 +150,13 @@ ANTHROPIC_MODEL=claude-sonnet-5
 EOF
 else
     echo ".env ya existe, se conservan las credenciales actuales"
+    # Variables nuevas que versiones anteriores de .env no tenían: si falta, se
+    # genera ahora. Sin esto, una actualización silenciosamente cae al valor
+    # por defecto inseguro definido en el código (ver apps/api/src/common/utils/secret.ts).
+    if ! grep -q "^CREDENTIAL_ENCRYPTION_KEY=" .env; then
+        echo "Agregando CREDENTIAL_ENCRYPTION_KEY (variable nueva) a .env existente"
+        echo "CREDENTIAL_ENCRYPTION_KEY=$(gen_secret 32)" >> .env
+    fi
 fi
 
 # ===== OVERRIDE DE PRODUCCIÓN (routing del proxy + credenciales reales) =====

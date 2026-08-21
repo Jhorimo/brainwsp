@@ -59,6 +59,13 @@ export class AuthService {
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        // Dos registros simultáneos con el mismo nombre de empresa pueden calcular el
+        // mismo slug candidato antes de que cualquiera de los dos se guarde (la
+        // comprobación previa en generateUniqueSlug no cierra esa ventana de carrera).
+        const target = (error.meta?.target as string[] | undefined) ?? [];
+        if (target.includes('slug')) {
+          throw new BadRequestException('Ese nombre de empresa se acaba de registrar. Intenta de nuevo.');
+        }
         throw new BadRequestException('Ya existe una cuenta con ese correo');
       }
       throw error;
