@@ -74,7 +74,7 @@ export default function RegisterPage() {
             <button className="button primary" disabled={loading}>{loading ? 'Creando cuenta...' : 'Crear cuenta'}</button>
           </div>
           <div style={{marginTop:16, textAlign:'center', fontSize:11, color:'#6b7690'}}>
-            ¿Ya tienes cuenta? <Link href="/login" style={{color:'#0855c4', fontWeight:700}}>Inicia sesión</Link>
+            ¿Ya tienes cuenta? <Link href="/login" style={{color:'#213786', fontWeight:700}}>Inicia sesión</Link>
           </div>
         </form>
       </section>

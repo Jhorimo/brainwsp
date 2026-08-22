@@ -29,17 +29,17 @@ export class ConversationsController {
 
   @Post('start')
   start(@CurrentUser() user: JwtUser, @Body() dto: StartConversationDto) {
-    return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text);
+    return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text, user.sub);
   }
 
   @Post(':id/messages')
   send(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendAgentMessageDto) {
-    return this.service.sendText(user.companyId, id, dto.message);
+    return this.service.sendText(user.companyId, id, dto.message, user.sub);
   }
 
   @Post(':id/messages/sticker')
   sendSticker(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendStickerDto) {
-    return this.service.sendSticker(user.companyId, id, dto.stickerId);
+    return this.service.sendSticker(user.companyId, id, dto.stickerId, user.sub);
   }
 
   @Post(':id/messages/media')
@@ -53,7 +53,7 @@ export class ConversationsController {
     @Body('ptt') ptt?: string,
   ) {
     if (!file) throw new BadRequestException('Archivo requerido');
-    return this.service.sendMedia(user.companyId, id, file, caption, ptt === 'true');
+    return this.service.sendMedia(user.companyId, id, file, caption, ptt === 'true', user.sub);
   }
 
   @Patch(':id/messages/:messageId')
@@ -73,7 +73,7 @@ export class ConversationsController {
     @Param('messageId') messageId: string,
     @Body() dto: ForwardMessageDto,
   ) {
-    return this.service.forwardMessage(user.companyId, id, messageId, dto.targetConversationId);
+    return this.service.forwardMessage(user.companyId, id, messageId, dto.targetConversationId, user.sub);
   }
 
   @Patch(':id/notes')

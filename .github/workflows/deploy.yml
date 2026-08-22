@@ -101,11 +101,12 @@ jobs:
 
                       $COMPOSE pull
 
-                      # 2. Aplicar el esquema en un contenedor aparte.
+                      # 2. Aplicar las migraciones en un contenedor aparte (mismo script que
+                      #    corre el CMD del contenedor api, ver packages/database/migrate-deploy.sh).
                       #    Si falla, salimos aqui y los contenedores viejos siguen sirviendo.
-                      echo "--- Aplicando esquema de base de datos ---"
-                      if ! $COMPOSE run --rm api sh -c "npx prisma db push --schema packages/database/schema.prisma"; then
-                          echo "ERROR: el esquema no se pudo aplicar. No se toca produccion."
+                      echo "--- Aplicando migraciones de base de datos ---"
+                      if ! $COMPOSE run --rm api sh packages/database/migrate-deploy.sh; then
+                          echo "ERROR: las migraciones no se pudieron aplicar. No se toca produccion."
                           exit 1
                       fi
 

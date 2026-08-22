@@ -30,6 +30,18 @@ export class StorageService implements OnModuleInit {
     return this.client.getObject(this.bucket, objectName);
   }
 
+  // `length` omitted reads through to the end of the object — used for open-ended Range
+  // requests like `bytes=12345-`, which `<audio>`/`<video>` elements rely on to seek.
+  getPartialObjectStream(objectName: string, offset: number, length?: number) {
+    return length === undefined
+      ? this.client.getPartialObject(this.bucket, objectName, offset)
+      : this.client.getPartialObject(this.bucket, objectName, offset, length);
+  }
+
+  async statObject(objectName: string) {
+    return this.client.statObject(this.bucket, objectName);
+  }
+
   private internalUrl(objectName: string) {
     const scheme = process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http';
     const endpoint = process.env.MINIO_ENDPOINT || 'localhost';

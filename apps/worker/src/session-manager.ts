@@ -409,7 +409,7 @@ export class SessionManager {
         fileSize: content.fileSize,
         mimeType: content.mimeType,
         mediaUrl,
-        metadata: { remoteJid, timestamp: String(message.messageTimestamp || '') },
+        metadata: { remoteJid, timestamp: String(message.messageTimestamp || ''), ...content.metadata },
       },
       include: { author: { select: { id: true, name: true, pushName: true } } },
     });

@@ -1,6 +1,6 @@
-import { Controller, Get, NotFoundException, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
@@ -21,6 +21,7 @@ export class MediaController {
     @CurrentUser() user: JwtUser,
     @Param('messageId') messageId: string,
     @Query('download') download: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
     const message = await this.prisma.message.findFirst({
@@ -31,8 +32,31 @@ export class MediaController {
 
     const objectName = message.mediaUrl.split('/').pop() as string;
     res.setHeader('Content-Type', message.mimeType || 'application/octet-stream');
+    res.setHeader('Accept-Ranges', 'bytes');
     const disposition = download ? 'attachment' : 'inline';
     if (message.fileName) res.setHeader('Content-Disposition', `${disposition}; filename="${message.fileName}"`);
+
+    // <audio>/<video> elements need real Range support to play at all in some browsers
+    // (Safari in particular), not just to seek — without it they may refuse to start
+    // playback rather than falling back to downloading the whole file.
+    const range = req.headers.range;
+    const rangeMatch = range?.match(/^bytes=(\d*)-(\d*)$/);
+    if (rangeMatch) {
+      const stat = await this.storage.statObject(objectName);
+      const size = stat.size;
+      const start = rangeMatch[1] ? Number(rangeMatch[1]) : 0;
+      const end = rangeMatch[2] ? Number(rangeMatch[2]) : size - 1;
+      const length = end - start + 1;
+
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+      res.setHeader('Content-Length', String(length));
+
+      const stream = await this.storage.getPartialObjectStream(objectName, start, length);
+      stream.on('error', () => res.destroy());
+      stream.pipe(res);
+      return;
+    }
 
     const stream = await this.storage.getObjectStream(objectName);
     stream.on('error', () => res.destroy());

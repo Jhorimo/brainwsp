@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Search, Send, Settings, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -31,7 +31,8 @@ type Conversation = {
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; reactions?: Reaction[] };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; contacts?: Array<{ displayName?: string; vcard?: string }> };
+type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
@@ -88,6 +89,8 @@ function lastText(conversation: Conversation) {
     case 'AUDIO': return prefix + '🎤 Audio';
     case 'DOCUMENT': return prefix + '📄 Documento';
     case 'STICKER': return prefix + '😀 Sticker';
+    case 'LOCATION': return prefix + '📍 Ubicación';
+    case 'CONTACT': return prefix + '👤 Contacto';
     default: return prefix + message.type;
   }
 }
@@ -149,6 +152,16 @@ function handleMediaError(e: SyntheticEvent<HTMLImageElement>) {
   const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
   if (fallback) fallback.style.display = 'flex';
 }
+function parseVCard(vcard?: string) {
+  if (!vcard) return { name: undefined as string | undefined, phones: [] as string[] };
+  const lines = vcard.split(/\r?\n/);
+  const name = lines.find((line) => line.startsWith('FN:'))?.slice(3).trim();
+  const phones = lines
+    .filter((line) => line.startsWith('TEL'))
+    .map((line) => line.slice(line.indexOf(':') + 1).trim())
+    .filter(Boolean);
+  return { name, phones };
+}
 function isImageFile(file: File) { return file.type.startsWith('image/'); }
 function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 
@@ -166,6 +179,7 @@ export default function ConversationsPage() {
   const [filterProject, setFilterProject] = useState('');
   const [filterStage, setFilterStage] = useState('');
   const [quickFilter, setQuickFilter] = useState<string>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState('');
@@ -179,6 +193,7 @@ export default function ConversationsPage() {
   const [stagesByDept, setStagesByDept] = useState<Record<string, Stage[]>>({});
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#6b8afd');
   const tagMenuRef = useRef<HTMLDivElement>(null);
   const [aiPromptModal, setAiPromptModal] = useState(false);
   const [aiPromptDraft, setAiPromptDraft] = useState('');
@@ -229,6 +244,9 @@ export default function ConversationsPage() {
   const [forwardMessageId, setForwardMessageId] = useState<string | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSaved, setNotesSaved] = useState(false);
+  const notesSavedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [incidentModal, setIncidentModal] = useState(false);
   const [incidentType, setIncidentType] = useState<IncidentType>('BUG');
@@ -499,7 +517,7 @@ export default function ConversationsPage() {
   const canManageIncident = useCallback((incident: Incident) => isAdmin || myDepartmentIds.has(incident.department.id), [isAdmin, myDepartmentIds]);
   const conversationIncidents = useMemo(() => incidents.filter((incident) => incident.conversation.id === selectedId), [incidents, selectedId]);
 
-  useEffect(() => { setNotesDraft(selected?.contact.notes || ''); }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setNotesDraft(selected?.contact.notes || ''); setNotesSaved(false); }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickFile = () => fileInputRef.current?.click();
 
@@ -757,7 +775,7 @@ export default function ConversationsPage() {
     const name = newTagName.trim();
     if (!name) return;
     try {
-      const tag = await apiFetch<Tag>('/team/tags', { method: 'POST', body: JSON.stringify({ name }) });
+      const tag = await apiFetch<Tag>('/team/tags', { method: 'POST', body: JSON.stringify({ name, color: newTagColor }) });
       setCompanyTags((current) => [...current, tag].sort((a, b) => a.name.localeCompare(b.name)));
       setNewTagName('');
       await addTag(tag.id);
@@ -1024,10 +1042,15 @@ export default function ConversationsPage() {
 
   const saveNotes = async (value: string) => {
     if (!selectedId) return;
+    setNotesSaving(true);
     try {
       await apiFetch(`/conversations/${selectedId}/notes`, { method: 'PATCH', body: JSON.stringify({ notes: value }) });
       setConversations((current) => current.map((item) => item.id === selectedId ? { ...item, contact: { ...item.contact, notes: value } } : item));
+      setNotesSaved(true);
+      if (notesSavedTimeoutRef.current) clearTimeout(notesSavedTimeoutRef.current);
+      notesSavedTimeoutRef.current = setTimeout(() => setNotesSaved(false), 2200);
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la nota'); }
+    finally { setNotesSaving(false); }
   };
 
   const addToNote = (message: Message) => {
@@ -1095,6 +1118,53 @@ export default function ConversationsPage() {
           </div>
         );
       }
+      case 'LOCATION': {
+        const { latitude, longitude, name, address } = message.metadata || {};
+        const hasCoords = typeof latitude === 'number' && typeof longitude === 'number';
+        return (
+          <div className="doc-card">
+            <div className="doc-card-main">
+              <div className="doc-card-icon"><MapPin size={20} /></div>
+              <div className="doc-card-info">
+                <div className="doc-card-name">{name || 'Ubicación compartida'}</div>
+                {address && <div className="doc-card-meta">{address}</div>}
+              </div>
+            </div>
+            {hasCoords && (
+              <div className="doc-card-actions">
+                <a href={`https://www.google.com/maps?q=${latitude},${longitude}`} target="_blank" rel="noreferrer">Ver en el mapa</a>
+              </div>
+            )}
+          </div>
+        );
+      }
+      case 'CONTACT': {
+        const contacts = message.metadata?.contacts?.length ? message.metadata.contacts : [{}];
+        return (
+          <>
+            {contacts.map((c, i) => {
+              const parsed = parseVCard(c.vcard);
+              const name = c.displayName || parsed.name || 'Contacto compartido';
+              return (
+                <div className="doc-card" key={i}>
+                  <div className="doc-card-main">
+                    <div className="doc-card-icon"><Phone size={20} /></div>
+                    <div className="doc-card-info">
+                      <div className="doc-card-name">{name}</div>
+                      {parsed.phones.length > 0 && <div className="doc-card-meta">{parsed.phones.join(' · ')}</div>}
+                    </div>
+                  </div>
+                  {parsed.phones[0] && (
+                    <div className="doc-card-actions">
+                      <a href={`tel:${parsed.phones[0].replace(/[^0-9+]/g, '')}`}>Llamar</a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        );
+      }
       default:
         return formatMessageText(message.body || message.caption || message.type);
     }
@@ -1111,7 +1181,10 @@ export default function ConversationsPage() {
               <h2>Conversaciones</h2>
               <button className="button small" onClick={() => void openNewChatModal()} title="Iniciar una conversación con un número nuevo"><Plus size={14} />Nuevo chat</button>
             </div>
-            <div className="searchbox"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente..." /></div>
+            <div className="searchbox-row">
+              <div className="searchbox"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente..." /></div>
+              <button className={`icon-button ${hasActiveFilters ? 'filters-active' : ''}`} onClick={() => setFiltersOpen((v) => !v)} title="Filtrar por agente, departamento o proyecto"><SlidersHorizontal size={16} /></button>
+            </div>
             <div className="chat-quick-filters">
               <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>
               <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
@@ -1132,6 +1205,7 @@ export default function ConversationsPage() {
                 )}
               </div>
             </div>
+            {filtersOpen && (
             <div className="chat-filters">
               <select value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)}>
                 <option value="">Todos los agentes</option>
@@ -1154,12 +1228,23 @@ export default function ConversationsPage() {
               </select>
               {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); setFilterStage(''); }}>Limpiar filtros</button>}
             </div>
+            )}
           </div>
           <div className="chat-list-scroll">
             {filtered.map((conversation) => (
-              <button className={`chat-row ${selectedId === conversation.id ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} onClick={() => { setSelectedId(conversation.id); setMobileChatOpen(true); }}>
+              <button className={`chat-row ${selectedId === conversation.id ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} style={{ borderLeftColor: conversation.stage?.color || 'transparent' }} onClick={() => { setSelectedId(conversation.id); setMobileChatOpen(true); }}>
                 <div className="chat-avatar">{avatarContent(conversation.contact)}</div>
-                <div className="chat-copy"><strong>{displayName(conversation.contact)}</strong><span>{lastText(conversation)}</span></div>
+                <div className="chat-copy">
+                  <div className="chat-copy-name-row">
+                    <strong>{displayName(conversation.contact)}</strong>
+                    {conversation.contact.tags && conversation.contact.tags.length > 0 && (
+                      <span className="chat-row-tags">
+                        {conversation.contact.tags.slice(0, 4).map(({ tag }) => <span key={tag.id} className="tag-dot" style={{ background: tag.color }} title={tag.name} />)}
+                      </span>
+                    )}
+                  </div>
+                  <span>{lastText(conversation)}</span>
+                </div>
                 <div>
                   <div className="chat-time">{new Date(conversation.lastMessageAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</div>
                   {conversation.unreadCount > 0 && <div className="chat-unread">{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</div>}
@@ -1297,7 +1382,7 @@ export default function ConversationsPage() {
         </div>
 
         <aside className="contact-panel">
-          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><button onClick={() => void addTag(tag.id)}><span className="tag-dot" style={{ background: tag.color }} />{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
+          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><button onClick={() => void addTag(tag.id)}><span className="tag-dot" style={{ background: tag.color }} />{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
               const stages = stagesByDept[selected.department!.id] || [];
               return stages.length ? (
                 <select className="lead-stage-select" style={{ background: `${(selected.stage?.color) || '#eef1f7'}22`, borderColor: `${(selected.stage?.color) || '#dde1ea'}55`, color: selected.stage?.color || '#5b6478' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>
@@ -1305,7 +1390,7 @@ export default function ConversationsPage() {
                   {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
                 </select>
               ) : <p className="contact-empty-hint">"{selected.department.name}" todavía no tiene etapas configuradas. Créalas desde Equipo y agentes.</p>;
-            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">General</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><h4>Notas</h4><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
+            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">General</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
         </aside>
       </section>
 

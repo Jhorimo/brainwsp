@@ -28,7 +28,7 @@ export class ConversationsService {
     return this.prisma.conversation.findMany({
       where: { companyId, ...(status ? { status } : {}) },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
@@ -60,7 +60,7 @@ export class ConversationsService {
     return items;
   }
 
-  async sendText(companyId: string, conversationId: string, text: string) {
+  async sendText(companyId: string, conversationId: string, text: string, sentByUserId?: string) {
     const conversation = await this.getOwned(companyId, conversationId);
     const message = await this.prisma.message.create({
       data: {
@@ -72,6 +72,7 @@ export class ConversationsService {
         type: MessageType.TEXT,
         status: MessageStatus.QUEUED,
         body: text,
+        sentByUserId,
       },
     });
     // A human agent sending anything is the handoff signal — hand control back from the AI.
@@ -95,7 +96,7 @@ export class ConversationsService {
 
   // Agent-initiated first contact: no inbound message exists yet, so the Contact/Conversation
   // rows have to be created here instead of by the worker's `persistIncoming`.
-  async startConversation(companyId: string, instanceId: string, rawPhone: string, text: string) {
+  async startConversation(companyId: string, instanceId: string, rawPhone: string, text: string, sentByUserId?: string) {
     const instance = await this.prisma.whatsAppInstance.findFirst({ where: { id: instanceId, companyId, active: true } });
     if (!instance) throw new NotFoundException('Instancia de WhatsApp no encontrada');
     if (instance.status !== InstanceStatus.CONNECTED) throw new BadRequestException('La instancia de WhatsApp no está conectada');
@@ -116,7 +117,7 @@ export class ConversationsService {
       create: { companyId, instanceId, contactId: contact.id },
     });
 
-    return this.sendText(companyId, conversation.id, text);
+    return this.sendText(companyId, conversation.id, text, sentByUserId);
   }
 
   async sendMedia(
@@ -125,6 +126,7 @@ export class ConversationsService {
     file: Express.Multer.File,
     caption?: string,
     ptt?: boolean,
+    sentByUserId?: string,
   ) {
     const type = messageTypeFromMimetype(file.mimetype);
     if (!type) throw new BadRequestException('Tipo de archivo no soportado');
@@ -145,6 +147,7 @@ export class ConversationsService {
         fileName: file.originalname,
         mimeType: file.mimetype,
         mediaUrl: internalUrl,
+        sentByUserId,
         ...(type === MessageType.AUDIO && ptt ? { metadata: { ptt: true } } : {}),
       },
     });
@@ -166,7 +169,7 @@ export class ConversationsService {
     return message;
   }
 
-  async sendSticker(companyId: string, conversationId: string, stickerId: string) {
+  async sendSticker(companyId: string, conversationId: string, stickerId: string, sentByUserId?: string) {
     const conversation = await this.getOwned(companyId, conversationId);
     const sticker = await this.prisma.stickerItem.findFirst({ where: { id: stickerId, companyId } });
     if (!sticker) throw new NotFoundException('Sticker no encontrado');
@@ -182,6 +185,7 @@ export class ConversationsService {
         status: MessageStatus.QUEUED,
         mimeType: 'image/webp',
         mediaUrl: sticker.mediaUrl,
+        sentByUserId,
       },
     });
     const wasAiEnabled = conversation.aiEnabled;
@@ -215,7 +219,7 @@ export class ConversationsService {
     return updated;
   }
 
-  async forwardMessage(companyId: string, conversationId: string, messageId: string, targetConversationId: string) {
+  async forwardMessage(companyId: string, conversationId: string, messageId: string, targetConversationId: string, sentByUserId?: string) {
     const source = await this.prisma.message.findFirst({ where: { id: messageId, companyId, conversationId } });
     if (!source) throw new NotFoundException('Mensaje no encontrado');
     const target = await this.getOwned(companyId, targetConversationId);
@@ -234,6 +238,7 @@ export class ConversationsService {
         fileName: source.fileName,
         mimeType: source.mimeType,
         mediaUrl: source.mediaUrl,
+        sentByUserId,
       },
     });
     await this.prisma.conversation.update({ where: { id: target.id }, data: { lastMessageAt: new Date() } });
@@ -330,7 +335,7 @@ export class ConversationsService {
     return this.prisma.conversation.findFirst({
       where: { id, companyId },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },

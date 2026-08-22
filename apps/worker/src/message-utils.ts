@@ -20,7 +20,7 @@ function toFileSize(value: number | { toNumber(): number } | null | undefined): 
   return typeof value === 'number' ? value : value.toNumber();
 }
 
-export function extractMessage(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string; fileSize?: number } {
+export function extractMessage(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string; fileSize?: number; metadata?: Record<string, unknown> } {
   // Baileys' getContentType only reads the outermost key — messages sent with
   // disappearing messages on, as "view once", or synced from another device arrive
   // wrapped (ephemeralMessage/viewOnceMessage*/deviceSentMessage) and need unwrapping
@@ -51,11 +51,30 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
       };
     case 'stickerMessage':
       return { type: MessageType.STICKER, mimeType: content.stickerMessage?.mimetype || undefined };
-    case 'locationMessage':
-      return { type: MessageType.LOCATION };
+    case 'locationMessage': {
+      const location = content.locationMessage;
+      return {
+        type: MessageType.LOCATION,
+        metadata: {
+          latitude: location?.degreesLatitude ?? undefined,
+          longitude: location?.degreesLongitude ?? undefined,
+          name: location?.name || undefined,
+          address: location?.address || undefined,
+        },
+      };
+    }
     case 'contactMessage':
+      return {
+        type: MessageType.CONTACT,
+        metadata: { contacts: [{ displayName: content.contactMessage?.displayName || undefined, vcard: content.contactMessage?.vcard || undefined }] },
+      };
     case 'contactsArrayMessage':
-      return { type: MessageType.CONTACT };
+      return {
+        type: MessageType.CONTACT,
+        metadata: {
+          contacts: (content.contactsArrayMessage?.contacts || []).map((c) => ({ displayName: c.displayName || undefined, vcard: c.vcard || undefined })),
+        },
+      };
     default:
       return { type: MessageType.UNKNOWN };
   }

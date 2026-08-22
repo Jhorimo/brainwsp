@@ -147,6 +147,7 @@ model User {
   departments          DepartmentUser[]
   feedback             Feedback[]
   createdIncidents     Incident[]      @relation("IncidentCreatedBy")
+  sentMessages         Message[]       @relation("MessageSentBy")
   auditLogs            AuditLog[]
 
   @@index([companyId])
@@ -400,6 +401,10 @@ model Message {
   error          String?          @db.Text
   metadata       Json?
   authorContactId String?
+  // Which internal agent (User) sent an OUTBOUND message from the panel — null for inbound
+  // messages, API-key/legacy-integration sends, and AI auto-replies, since none of those
+  // are a human agent. Powers the per-agent KPI report on the dashboard.
+  sentByUserId   String?
   pinned         Boolean          @default(false)
   starred        Boolean          @default(false)
   sentAt         DateTime?
@@ -412,11 +417,14 @@ model Message {
   instance       WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   contact        Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
   author         Contact?         @relation("MessageAuthor", fields: [authorContactId], references: [id], onDelete: SetNull)
+  sentByUser     User?            @relation("MessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
   reactions      MessageReaction[]
 
   @@unique([instanceId, waMessageId])
   @@index([conversationId, createdAt])
   @@index([companyId, status, createdAt])
+  @@index([companyId, direction, createdAt])
+  @@index([companyId, sentByUserId, createdAt])
   @@index([authorContactId])
 }
 
