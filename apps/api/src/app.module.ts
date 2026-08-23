@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ApiCredentialsModule } from './api-credentials/api-credentials.module';
+import { CommonModule } from './common/common.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { FeedbackModule } from './feedback/feedback.module';
@@ -29,6 +30,7 @@ import { TeamModule } from './team/team.module';
       envFilePath: [join(__dirname, '../../../.env'), '.env'],
     }),
     PrismaModule,
+    CommonModule,
     QueueModule,
     StorageModule,
     AuthModule,

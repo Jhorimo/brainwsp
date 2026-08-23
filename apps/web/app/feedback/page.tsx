@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Lightbulb, MessageCircle } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getStoredUser } from '@/lib/api';
 
 type FeedbackType = 'SUGGESTION' | 'BUG' | 'OTHER';
 type FeedbackStatus = 'PENDING' | 'IN_REVIEW' | 'RESOLVED';
@@ -40,7 +40,7 @@ export default function FeedbackPage() {
 
   useEffect(() => {
     try {
-      const user = JSON.parse(localStorage.getItem('brainwsp_user') || '{}');
+      const user = getStoredUser<{ role?: string }>();
       setCanManage(['OWNER', 'ADMIN'].includes(String(user.role || '')));
     } catch {}
   }, []);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, MessagesSquare, Radio, Users } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, startImpersonation } from '@/lib/api';
 
 type Owner = { id: string; name: string; email: string };
 type Plan = { id: string; name: string };
@@ -14,6 +14,10 @@ type Company = {
   users: Owner[];
   _count: { instances: number; conversations: number; users: number };
 };
+
+function initialsOf(name: string) {
+  return name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+}
 
 export default function AdminClientsPage() {
   const router = useRouter();
@@ -58,13 +62,11 @@ export default function AdminClientsPage() {
   };
 
   const viewPanel = async (company: Company) => {
-    if (!window.confirm(`Vas a entrar como el panel de "${company.name}". Para volver a tu cuenta de administrador, cierra sesión e ingresa de nuevo.`)) return;
+    if (!window.confirm(`Vas a entrar como el panel de "${company.name}". Podrás volver a tu cuenta de administrador con el botón "Volver a admin".`)) return;
     setBusyId(company.id);
     try {
       const session = await apiFetch<{ accessToken: string; user: unknown; company: unknown }>(`/admin/companies/${company.id}/impersonate`, { method: 'POST' });
-      localStorage.setItem('brainwsp_token', session.accessToken);
-      localStorage.setItem('brainwsp_user', JSON.stringify(session.user));
-      localStorage.setItem('brainwsp_company', JSON.stringify(session.company));
+      startImpersonation(session);
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo entrar al panel de este cliente');
@@ -91,6 +93,7 @@ export default function AdminClientsPage() {
             <tr>
               <th>Nombre</th>
               <th>Correo electrónico</th>
+              <th>Rol</th>
               <th>Estado</th>
               <th>Plan</th>
               <th>Teléfono</th>
@@ -104,8 +107,14 @@ export default function AdminClientsPage() {
               const owner = company.users[0];
               return (
                 <tr key={company.id}>
-                  <td><span className="row-main">{company.name}</span><span className="row-sub">Cliente</span></td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div className="chat-avatar" style={{ width: 32, height: 32, fontSize: 11, flexShrink: 0 }}>{initialsOf(company.name)}</div>
+                      <span className="row-main">{company.name}</span>
+                    </div>
+                  </td>
                   <td>{owner?.email || '—'}</td>
+                  <td><span className="status-pill neutral">Cliente</span></td>
                   <td><span className={`status-pill ${company.active ? 'success' : 'neutral'}`}><span className="status-dot" />{company.active ? 'Activo' : 'Suspendido'}</span></td>
                   <td>
                     <select className="status-select" value={company.planId || ''} onChange={(e) => void changePlan(company, e.target.value)}>
@@ -117,8 +126,8 @@ export default function AdminClientsPage() {
                   <td><Radio size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.instances} inst. · <MessagesSquare size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.conversations} conv.</td>
                   <td>{new Date(company.createdAt).toLocaleDateString('es-PE')}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button className="button small" disabled={busyId === company.id} onClick={() => void viewPanel(company)}>{busyId === company.id ? '...' : 'Ver panel'}</button>{' '}
-                    <button className={`button small ${company.active ? '' : 'primary'}`} onClick={() => void toggleActive(company)}>{company.active ? 'Suspender' : 'Activar'}</button>
+                    <button className="button small info" disabled={busyId === company.id} onClick={() => void viewPanel(company)}>{busyId === company.id ? '...' : 'Ver panel'}</button>{' '}
+                    <button className={`button small ${company.active ? 'danger' : 'primary'}`} onClick={() => void toggleActive(company)}>{company.active ? 'Suspender' : 'Activar'}</button>
                   </td>
                 </tr>
               );

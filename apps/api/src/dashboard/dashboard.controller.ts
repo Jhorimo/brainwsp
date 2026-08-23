@@ -2,13 +2,16 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ConversationStatus, InstanceStatus, MessageDirection } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('Dashboard')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ModuleAccessGuard)
+@RequireModule('dashboard')
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly prisma: PrismaService) {}

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Building2, MessageSquareText, Radio, Sparkles } from 'lucide-react';
-import { API_URL } from '@/lib/api';
+import { API_URL, setAuthSession } from '@/lib/api';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -19,6 +19,18 @@ export default function RegisterPage() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+    if (!companyName.trim() || !name.trim() || !email.trim() || !password || !confirmPassword) {
+      setError('Completa todos los campos para continuar.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Ingresa un correo electrónico válido.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Las contraseñas no coinciden');
       return;
@@ -32,9 +44,7 @@ export default function RegisterPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudo crear la cuenta');
-      localStorage.setItem('brainwsp_token', data.accessToken);
-      localStorage.setItem('brainwsp_user', JSON.stringify(data.user));
-      localStorage.setItem('brainwsp_company', JSON.stringify(data.company));
+      setAuthSession(data, true);
       router.replace('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
@@ -60,17 +70,17 @@ export default function RegisterPage() {
       </section>
 
       <section className="login-form-wrap">
-        <form className="login-card" onSubmit={submit}>
+        <form className="login-card" onSubmit={submit} noValidate>
           <div className="stat-icon" style={{marginBottom:18}}><Building2 size={19} /></div>
           <h2>Crea tu empresa</h2>
           <p>Registra tu empresa en BrainWSP y empieza a operar en minutos.</p>
           {error && <div className="error-box">{error}</div>}
           <div className="form-grid">
-            <div className="field"><label>Nombre de la empresa</label><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} type="text" required minLength={2} /></div>
-            <div className="field"><label>Tu nombre</label><input value={name} onChange={(e) => setName(e.target.value)} type="text" required minLength={2} /></div>
-            <div className="field"><label>Correo electrónico</label><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></div>
-            <div className="field"><label>Contraseña</label><input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required minLength={8} /></div>
-            <div className="field"><label>Confirmar contraseña</label><input value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} type="password" required minLength={8} /></div>
+            <div className="field"><label>Nombre de la empresa</label><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} type="text" /></div>
+            <div className="field"><label>Tu nombre</label><input value={name} onChange={(e) => setName(e.target.value)} type="text" /></div>
+            <div className="field"><label>Correo electrónico</label><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" /></div>
+            <div className="field"><label>Contraseña</label><input value={password} onChange={(e) => setPassword(e.target.value)} type="password" /></div>
+            <div className="field"><label>Confirmar contraseña</label><input value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} type="password" /></div>
             <button className="button primary" disabled={loading}>{loading ? 'Creando cuenta...' : 'Crear cuenta'}</button>
           </div>
           <div style={{marginTop:16, textAlign:'center', fontSize:11, color:'#6b7690'}}>

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { MODULE_KEYS, type ModuleKey } from '../common/constants/modules';
 
 export class CreateTeamUserDto {
   @ApiProperty({ example: 'Carlos Soporte' })
@@ -21,6 +22,18 @@ export class CreateTeamUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiPropertyOptional({ type: [String], description: 'Departamentos a los que queda asignado el usuario.' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  departmentIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], enum: MODULE_KEYS, description: 'Módulos del menú visibles para este usuario (solo aplica al rol Agente). Vacío o ausente = sin restricción.' })
+  @IsOptional()
+  @IsArray()
+  @IsIn(MODULE_KEYS, { each: true })
+  allowedModules?: ModuleKey[];
 }
 
 export class UpdateTeamUserDto {
@@ -45,6 +58,18 @@ export class UpdateTeamUserDto {
   @IsString()
   @MinLength(10)
   password?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Reemplaza por completo los departamentos asignados al usuario.' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  departmentIds?: string[];
+
+  @ApiPropertyOptional({ type: [String], enum: MODULE_KEYS, description: 'Reemplaza por completo los módulos visibles (solo aplica al rol Agente). Vacío = sin restricción.' })
+  @IsOptional()
+  @IsArray()
+  @IsIn(MODULE_KEYS, { each: true })
+  allowedModules?: ModuleKey[];
 }
 
 export class CreateDepartmentDto {

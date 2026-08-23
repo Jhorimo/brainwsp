@@ -7,9 +7,13 @@ export class RealtimeBus implements OnModuleDestroy {
     maxRetriesPerRequest: null,
   });
 
-  async publish(companyId: string, event: string, payload: unknown) {
+  // `departmentId` is optional context for events tied to a specific conversation:
+  // undefined = not conversation-scoped (broadcast as before), null = conversation has
+  // no department (unassigned), string = that department. It lets the gateway also
+  // deliver to department-restricted agents without exposing content outside their scope.
+  async publish(companyId: string, event: string, payload: unknown, departmentId?: string | null) {
     try {
-      return await this.publisher.publish('brainwsp.realtime', JSON.stringify({ companyId, event, payload }));
+      return await this.publisher.publish('brainwsp.realtime', JSON.stringify({ companyId, event, payload, departmentId }));
     } catch (error) {
       // Realtime delivery is best-effort; the database remains the source of truth.
       console.error('Realtime publish failed', error);

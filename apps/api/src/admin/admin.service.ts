@@ -1,7 +1,20 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { Prisma } from '@prisma/client';
+import { describeUserAgent } from '../common/utils/user-agent';
 import { PrismaService } from '../prisma/prisma.service';
+
+interface LogActionInput {
+  companyId?: string;
+  userId?: string;
+  action: string;
+  entity: string;
+  entityId?: string;
+  ip?: string;
+  userAgent?: string;
+  success?: boolean;
+  metadata?: Record<string, unknown>;
+}
 
 @Injectable()
 export class AdminService {
@@ -10,12 +23,19 @@ export class AdminService {
     private readonly jwt: JwtService,
   ) {}
 
-  // `AuditLog.companyId` is required, so a platform-admin action logs against the tenant
-  // it was performed on (not the admin's own company) — that's also exactly the context
-  // the "Seguridad" screen needs to show ("Empresa X fue suspendida por...").
-  private logAction(actorUserId: string, targetCompanyId: string, action: string, entity: string, entityId?: string, metadata?: Record<string, unknown>) {
+  private logAction(input: LogActionInput) {
     return this.prisma.auditLog.create({
-      data: { companyId: targetCompanyId, userId: actorUserId, action, entity, entityId, metadata: metadata as Prisma.InputJsonValue | undefined },
+      data: {
+        companyId: input.companyId,
+        userId: input.userId,
+        action: input.action,
+        entity: input.entity,
+        entityId: input.entityId,
+        ip: input.ip,
+        userAgent: input.userAgent,
+        success: input.success ?? true,
+        metadata: input.metadata as Prisma.InputJsonValue | undefined,
+      },
     }).catch(() => undefined);
   }
 
@@ -30,7 +50,7 @@ export class AdminService {
     });
   }
 
-  async updateCompany(actorUserId: string, companyId: string, data: { active?: boolean; planId?: string | null; licenseRenewsAt?: string | null }) {
+  async updateCompany(actorUserId: string, companyId: string, data: { active?: boolean; planId?: string | null; licenseRenewsAt?: string | null }, ip?: string, userAgent?: string) {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) throw new NotFoundException('Empresa no encontrada');
 
@@ -50,16 +70,16 @@ export class AdminService {
     });
 
     if (data.active !== undefined && data.active !== company.active) {
-      await this.logAction(actorUserId, companyId, data.active ? 'COMPANY_ACTIVATED' : 'COMPANY_SUSPENDED', 'Company', companyId);
+      await this.logAction({ companyId, userId: actorUserId, action: data.active ? 'COMPANY_ACTIVATED' : 'COMPANY_SUSPENDED', entity: 'Company', entityId: companyId, ip, userAgent });
     }
     if (data.planId !== undefined && data.planId !== company.planId) {
-      await this.logAction(actorUserId, companyId, 'COMPANY_PLAN_CHANGED', 'Company', companyId, { planId: data.planId });
+      await this.logAction({ companyId, userId: actorUserId, action: 'COMPANY_PLAN_CHANGED', entity: 'Company', entityId: companyId, ip, userAgent, metadata: { planId: data.planId } });
     }
 
     return updated;
   }
 
-  async impersonate(actorUserId: string, companyId: string) {
+  async impersonate(actorUserId: string, actorName: string, companyId: string, ip?: string, userAgent?: string) {
     const owner = await this.prisma.user.findFirst({
       where: { companyId, role: 'OWNER', active: true },
       include: { company: true },
@@ -67,7 +87,11 @@ export class AdminService {
     });
     if (!owner) throw new BadRequestException('Esta empresa no tiene un usuario OWNER activo al cual acceder');
 
-    await this.logAction(actorUserId, companyId, 'COMPANY_IMPERSONATED', 'Company', companyId, { asUserId: owner.id });
+    // A diferencia de las demás acciones de admin (donde `userId` = el admin que actúa),
+    // acá se guarda el usuario IMPERSONADO como `userId` — así "Seguridad" puede mostrar
+    // "Cuenta: {dueño de la empresa}" directamente vía la relación, sin lookups extra. El
+    // admin que lo hizo queda en `metadata.actorName` para el detalle ("por {actorName}").
+    await this.logAction({ companyId, userId: owner.id, action: 'COMPANY_IMPERSONATED', entity: 'Company', entityId: companyId, ip, userAgent, metadata: { actorName, actorId: actorUserId } });
 
     const payload = { sub: owner.id, companyId: owner.companyId, email: owner.email, name: owner.name, role: owner.role };
     return {
@@ -130,14 +154,22 @@ export class AdminService {
     });
   }
 
-  listSecurityLog() {
-    return this.prisma.auditLog.findMany({
+  async listSecurityLog(filters: { q?: string; event?: string; status?: 'success' | 'failed' }) {
+    const items = await this.prisma.auditLog.findMany({
+      where: {
+        ...(filters.event ? { action: filters.event } : {}),
+        ...(filters.status ? { success: filters.status === 'success' } : {}),
+        ...(filters.q
+          ? { OR: [{ ip: { contains: filters.q } }, { user: { email: { contains: filters.q, mode: 'insensitive' } } }] }
+          : {}),
+      },
       orderBy: { createdAt: 'desc' },
-      take: 200,
+      take: 300,
       include: {
         user: { select: { id: true, name: true, email: true } },
         company: { select: { id: true, name: true } },
       },
     });
+    return items.map((item) => ({ ...item, device: describeUserAgent(item.userAgent) }));
   }
 }

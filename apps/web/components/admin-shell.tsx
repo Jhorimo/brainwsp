@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, ChevronDown, CreditCard, KeyRound, Lightbulb, LogOut, ShieldCheck } from 'lucide-react';
-import { getToken } from '@/lib/api';
+import { Building2, ChevronDown, CreditCard, KeyRound, Lightbulb, LogOut, Menu, ShieldCheck } from 'lucide-react';
+import { clearAuthSession, getStoredUser, getToken } from '@/lib/api';
 
 const navigation = [
   { href: '/admin/clients', label: 'Usuarios', icon: Building2 },
@@ -23,7 +23,7 @@ function ProtectedAdmin({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!getToken()) { router.replace('/login'); return; }
     try {
-      const user = JSON.parse(localStorage.getItem('brainwsp_user') || '{}');
+      const user = getStoredUser<{ role?: string }>();
       if (user.role !== 'SUPERADMIN') { router.replace('/dashboard'); return; }
     } catch { router.replace('/login'); return; }
     setReady(true);
@@ -37,24 +37,44 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
   const pathname = usePathname();
   const router = useRouter();
   const [name, setName] = useState('Super Admin');
+  const [collapsed, setCollapsed] = useState(false);
+  // Mismo patrón que AppShell (el panel de cada empresa): abajo de 640px la barra lateral
+  // pasa a ser un cajón oculto en vez de una barra de íconos — este botón controla ambos
+  // casos, cada uno relevante solo en su propio breakpoint.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     try {
-      const user = JSON.parse(localStorage.getItem('brainwsp_user') || '{}');
+      const user = getStoredUser<{ name?: string }>();
       setName(String(user.name || 'Super Admin'));
     } catch {}
+    setCollapsed(localStorage.getItem('brainwsp_admin_sidebar_collapsed') === '1');
   }, []);
 
+  useEffect(() => { setMobileNavOpen(false); }, [pathname]);
+  useEffect(() => {
+    document.body.style.overflow = mobileNavOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileNavOpen]);
+
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem('brainwsp_admin_sidebar_collapsed', next ? '1' : '0');
+      return next;
+    });
+    setMobileNavOpen((current) => !current);
+  };
+
   const logout = () => {
-    localStorage.removeItem('brainwsp_token');
-    localStorage.removeItem('brainwsp_user');
-    localStorage.removeItem('brainwsp_company');
+    clearAuthSession();
     router.replace('/login');
   };
 
   return (
     <ProtectedAdmin>
-      <div className="app-frame">
+      <div className={`app-frame ${collapsed ? 'collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
+        <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} />
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-mark">B</div>
@@ -90,9 +110,14 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
 
         <main className="main-area">
           <header className="topbar">
-            <div>
-              <h1>{title}</h1>
-              {subtitle && <p>{subtitle}</p>}
+            <div className="topbar-left">
+              <button className="sidebar-toggle" type="button" onClick={toggleCollapsed} title={collapsed ? 'Expandir menú' : 'Reducir menú'} aria-label={collapsed ? 'Expandir menú' : 'Reducir menú'}>
+                <Menu size={18} />
+              </button>
+              <div>
+                <h1>{title}</h1>
+                {subtitle && <p>{subtitle}</p>}
+              </div>
             </div>
             <div className="topbar-actions">{actions}</div>
           </header>

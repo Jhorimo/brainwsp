@@ -1,33 +1,54 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { LockKeyhole, MessageSquareText, Radio, Sparkles } from 'lucide-react';
-import { API_URL } from '@/lib/api';
+import { Eye, EyeOff, LockKeyhole, MessageSquareText, Radio, Sparkles } from 'lucide-react';
+import { API_URL, apiFetch, clearAuthSession, getToken, setAuthSession } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@braintech.com.pe');
-  const [password, setPassword] = useState('ChangeMe-123456!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Antes de mostrar el formulario, si ya hay un token guardado (por "Recuérdame" o
+  // porque el de 12h todavía no expiró), se valida contra el backend y se entra directo
+  // al panel — sin esto, /login siempre mostraba el formulario aunque la sesión siguiera
+  // vigente, que era justamente lo que "Recuérdame" debía evitar.
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) { setCheckingSession(false); return; }
+    apiFetch<{ role: string }>('/auth/me')
+      .then((me) => router.replace(me.role === 'SUPERADMIN' ? '/admin/clients' : '/dashboard'))
+      .catch(() => { clearAuthSession(); setCheckingSession(false); });
+  }, [router]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setLoading(true);
     setError('');
+    if (!email.trim() || !password) {
+      setError('Completa tu correo y contraseña para continuar.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Ingresa un correo electrónico válido.');
+      return;
+    }
+    setLoading(true);
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, remember }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudo iniciar sesión');
-      localStorage.setItem('brainwsp_token', data.accessToken);
-      localStorage.setItem('brainwsp_user', JSON.stringify(data.user));
-      localStorage.setItem('brainwsp_company', JSON.stringify(data.company));
+      setAuthSession(data, remember);
       router.replace(data.user.role === 'SUPERADMIN' ? '/admin/clients' : '/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
@@ -35,6 +56,8 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (checkingSession) return <div className="center-screen"><div className="spinner" /></div>;
 
   return (
     <div className="login-shell">
@@ -53,16 +76,28 @@ export default function LoginPage() {
       </section>
 
       <section className="login-form-wrap">
-        <form className="login-card" onSubmit={submit}>
+        <form className="login-card" onSubmit={submit} noValidate>
           <div className="stat-icon" style={{marginBottom:18}}><LockKeyhole size={19} /></div>
           <h2>Bienvenido</h2>
           <p>Ingresa al panel de administración de BrainWSP.</p>
           {error && <div className="error-box">{error}</div>}
-          <div className="form-grid">
-            <div className="field"><label>Correo electrónico</label><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></div>
-            <div className="field"><label>Contraseña</label><input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required /></div>
-            <button className="button primary" disabled={loading}>{loading ? 'Ingresando...' : 'Ingresar al panel'}</button>
+          <div className="field"><label>Correo electrónico</label><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete={remember ? 'username' : 'off'} /></div>
+          <div className="field">
+            <label>Contraseña</label>
+            <div className="password-input">
+              {/* autoComplete="new-password" es el truco estándar para que el navegador no
+                  ofrezca guardar/autocompletar la clave cuando el usuario no marcó "Recuérdame". */}
+              <input value={password} onChange={(e) => setPassword(e.target.value)} type={showPassword ? 'text' : 'password'} autoComplete={remember ? 'current-password' : 'new-password'} />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
           </div>
+          <label className="remember-me">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Recuérdame
+          </label>
+          <button className="button primary" disabled={loading}>{loading ? 'Ingresando...' : 'Ingresar al panel'}</button>
           <div className="login-hint">Las credenciales mostradas son las del entorno de desarrollo. Cámbialas antes de publicar el sistema.</div>
           <div style={{marginTop:14, textAlign:'center', fontSize:11, color:'#6b7690'}}>
             ¿No tienes cuenta? <Link href="/register" style={{color:'#213786', fontWeight:700}}>Regístrate</Link>

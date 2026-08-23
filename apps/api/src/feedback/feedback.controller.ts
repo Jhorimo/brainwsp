@@ -9,6 +9,10 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { CreateFeedbackDto, UpdateFeedbackStatusDto } from './feedback.dto';
 import { FeedbackService } from './feedback.service';
 
+// NOTE: not gated by ModuleAccessGuard/'feedback' — the floating feedback widget
+// (POST /feedback) is rendered globally from AppShell on every page, regardless of
+// whether the agent has the "Sugerencias" nav item enabled. That module permission is
+// enforced as nav visibility only (see AppShell).
 @ApiTags('Feedback')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)

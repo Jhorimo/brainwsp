@@ -9,6 +9,10 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { CreateInstanceDto } from './instances.dto';
 import { InstancesService } from './instances.service';
 
+// NOTE: not gated by ModuleAccessGuard/'instances' — the Conversations page calls
+// GET /instances directly (to pick a WhatsApp number when starting a new chat),
+// regardless of whether the agent has the "WhatsApp" nav item enabled. The 'instances'
+// module permission is enforced as nav visibility only (see AppShell).
 @ApiTags('WhatsApp instances')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)

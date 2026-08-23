@@ -6,6 +6,10 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { CreateIncidentDto, UpdateIncidentStatusDto } from './incidents.dto';
 import { IncidentsService } from './incidents.service';
 
+// NOTE: not gated by ModuleAccessGuard/'incidents' — the Conversations page reads and
+// creates incidents directly from a conversation's panel, regardless of whether the
+// agent has the "Incidencias" nav item enabled. That module permission is enforced as
+// nav visibility only (see AppShell).
 @ApiTags('Incidents')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)

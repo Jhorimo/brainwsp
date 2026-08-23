@@ -7,7 +7,7 @@ import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, ChevronD
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch, getToken, mediaUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
+import { apiFetch, getStoredUser, getToken, mediaUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
@@ -299,7 +299,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     try {
-      const user = JSON.parse(localStorage.getItem('brainwsp_user') || '{}');
+      const user = getStoredUser<{ id?: string; role?: string }>();
       setIdentity({ id: String(user.id || ''), role: String(user.role || '') });
     } catch {}
   }, []);

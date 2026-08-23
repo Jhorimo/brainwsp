@@ -427,7 +427,7 @@ export class SessionManager {
     await this.realtime.publish(instance.companyId, 'message.created', {
       message: created,
       conversation: realtimeConversation ? { ...realtimeConversation, messages: [created] } : { ...conversation, contact, messages: [created] },
-    });
+    }, realtimeConversation?.departmentId ?? conversation.departmentId);
 
     maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id).catch((error) => {
       this.logger.warn({ err: error, conversationId: conversation.id }, 'AI auto-reply failed');
@@ -443,7 +443,7 @@ export class SessionManager {
 
     const message = await this.prisma.message.findUnique({
       where: { instanceId_waMessageId: { instanceId, waMessageId: targetKey.id } },
-      select: { id: true, companyId: true, conversationId: true },
+      select: { id: true, companyId: true, conversationId: true, conversation: { select: { departmentId: true } } },
     });
     if (!message) return;
 
@@ -462,7 +462,7 @@ export class SessionManager {
         conversationId: message.conversationId,
         reactorJid,
         emoji: '',
-      });
+      }, message.conversation.departmentId);
       return;
     }
 
@@ -485,7 +485,7 @@ export class SessionManager {
       messageId: message.id,
       conversationId: message.conversationId,
       reaction: saved,
-    });
+    }, message.conversation.departmentId);
   }
 
   // Fire-and-forget: WhatsApp profile pictures are fetched lazily so they never

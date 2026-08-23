@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Lightbulb, MessageCircle } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getStoredUser } from '@/lib/api';
 
 type IncidentType = 'SUGGESTION' | 'BUG' | 'OTHER';
 type IncidentStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
@@ -57,7 +57,7 @@ export default function IncidentsPage() {
 
   useEffect(() => {
     try {
-      const user = JSON.parse(localStorage.getItem('brainwsp_user') || '{}');
+      const user = getStoredUser<{ id?: string; role?: string }>();
       setIdentity({ id: String(user.id || ''), role: String(user.role || '') });
     } catch {}
   }, []);

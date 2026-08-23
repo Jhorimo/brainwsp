@@ -3,7 +3,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
 import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendStickerDto, StartConversationDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
@@ -12,19 +14,20 @@ const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
 @ApiTags('Conversations')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ModuleAccessGuard)
+@RequireModule('conversations')
 @Controller('conversations')
 export class ConversationsController {
   constructor(private readonly service: ConversationsService) {}
 
   @Get()
   list(@CurrentUser() user: JwtUser, @Query('status') status?: ConversationStatus) {
-    return this.service.list(user.companyId, status);
+    return this.service.list(user, status);
   }
 
   @Get(':id/messages')
   messages(@CurrentUser() user: JwtUser, @Param('id') id: string) {
-    return this.service.messages(user.companyId, id);
+    return this.service.messages(user, id);
   }
 
   @Post('start')
@@ -34,12 +37,12 @@ export class ConversationsController {
 
   @Post(':id/messages')
   send(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendAgentMessageDto) {
-    return this.service.sendText(user.companyId, id, dto.message, user.sub);
+    return this.service.sendText(user, id, dto.message, user.sub);
   }
 
   @Post(':id/messages/sticker')
   sendSticker(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendStickerDto) {
-    return this.service.sendSticker(user.companyId, id, dto.stickerId, user.sub);
+    return this.service.sendSticker(user, id, dto.stickerId, user.sub);
   }
 
   @Post(':id/messages/media')
@@ -53,7 +56,7 @@ export class ConversationsController {
     @Body('ptt') ptt?: string,
   ) {
     if (!file) throw new BadRequestException('Archivo requerido');
-    return this.service.sendMedia(user.companyId, id, file, caption, ptt === 'true', user.sub);
+    return this.service.sendMedia(user, id, file, caption, ptt === 'true', user.sub);
   }
 
   @Patch(':id/messages/:messageId')
@@ -63,7 +66,7 @@ export class ConversationsController {
     @Param('messageId') messageId: string,
     @Body() dto: UpdateMessageFlagsDto,
   ) {
-    return this.service.updateMessageFlags(user.companyId, id, messageId, dto);
+    return this.service.updateMessageFlags(user, id, messageId, dto);
   }
 
   @Post(':id/messages/:messageId/forward')
@@ -73,36 +76,36 @@ export class ConversationsController {
     @Param('messageId') messageId: string,
     @Body() dto: ForwardMessageDto,
   ) {
-    return this.service.forwardMessage(user.companyId, id, messageId, dto.targetConversationId, user.sub);
+    return this.service.forwardMessage(user, id, messageId, dto.targetConversationId, user.sub);
   }
 
   @Patch(':id/notes')
   updateNotes(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateNotesDto) {
-    return this.service.updateContactNotes(user.companyId, id, dto.notes);
+    return this.service.updateContactNotes(user, id, dto.notes);
   }
 
   @Post(':id/tags')
   addTag(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: AttachTagDto) {
-    return this.service.addContactTag(user.companyId, id, dto.tagId);
+    return this.service.addContactTag(user, id, dto.tagId);
   }
 
   @Delete(':id/tags/:tagId')
   removeTag(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('tagId') tagId: string) {
-    return this.service.removeContactTag(user.companyId, id, tagId);
+    return this.service.removeContactTag(user, id, tagId);
   }
 
   @Patch(':id/stage')
   updateStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateStageDto) {
-    return this.service.updateStage(user.companyId, id, dto.stageId);
+    return this.service.updateStage(user, id, dto.stageId);
   }
 
   @Patch(':id')
   update(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateConversationDto) {
-    return this.service.update(user.companyId, id, dto);
+    return this.service.update(user, id, dto);
   }
 
   @Post(':id/take')
   take(@CurrentUser() user: JwtUser, @Param('id') id: string) {
-    return this.service.update(user.companyId, id, { assignedUserId: user.sub, status: ConversationStatus.OPEN });
+    return this.service.update(user, id, { assignedUserId: user.sub, status: ConversationStatus.OPEN });
   }
 }

@@ -9,6 +9,13 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateStageDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateTeamUserDto } from './team.dto';
 import { TeamService } from './team.service';
 
+// NOTE: unlike the other feature controllers, this one is intentionally NOT gated by
+// ModuleAccessGuard/'team'. The Conversations page depends on several of its GET/POST
+// routes (users, departments, projects, tags) to render its own UI (assignee picker,
+// filters, tagging) regardless of whether the agent has the "Equipo y agentes" nav item
+// enabled — and every route an Agent could otherwise reach here is already blocked by
+// @Roles(OWNER, ADMIN) on the real admin actions. The 'team' module permission is
+// enforced purely as nav visibility on the frontend (see AppShell).
 @ApiTags('Team')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)

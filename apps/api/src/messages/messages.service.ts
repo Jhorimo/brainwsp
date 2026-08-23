@@ -146,6 +146,6 @@ export class MessagesService {
         instance: { select: { id: true, name: true, slug: true, status: true } },
       },
     });
-    if (conversation) void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...conversation, messages: [message] } });
+    if (conversation) void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...conversation, messages: [message] } }, conversation.departmentId);
   }
 }

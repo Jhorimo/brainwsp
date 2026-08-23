@@ -5,6 +5,18 @@ import { Building2, Layers, Plus, ShieldCheck, Trash2, UserRoundCog, Users, Work
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
 
+// Debe coincidir con MODULE_KEYS en apps/api/src/common/constants/modules.ts.
+const MODULE_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'conversations', label: 'Conversaciones' },
+  { key: 'instances', label: 'WhatsApp' },
+  { key: 'team', label: 'Equipo y agentes' },
+  { key: 'incidents', label: 'Incidencias' },
+  { key: 'api-settings', label: 'API e integraciones' },
+  { key: 'feedback', label: 'Sugerencias y reportes' },
+];
+const ALL_MODULE_KEYS = MODULE_OPTIONS.map((item) => item.key);
+
 type DepartmentRef = { department: { id: string; name: string } };
 type TeamUser = {
   id: string;
@@ -14,6 +26,7 @@ type TeamUser = {
   active: boolean;
   lastLoginAt?: string | null;
   departments?: DepartmentRef[];
+  allowedModules?: string[];
 };
 type Department = {
   id: string;
@@ -43,14 +56,20 @@ export default function TeamPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState('');
+  // Error propio de lo que esté abierto en un modal — se muestra ahí mismo, no arriba de
+  // la página (donde queda tapado por el fondo oscuro del modal y nadie lo ve).
+  const [modalError, setModalError] = useState('');
   const [agentModal, setAgentModal] = useState(false);
+  const [editModal, setEditModal] = useState<TeamUser | null>(null);
   const [departmentModal, setDepartmentModal] = useState(false);
   const [projectModal, setProjectModal] = useState(false);
   const [membersModal, setMembersModal] = useState<Department | null>(null);
   const [stagesModal, setStagesModal] = useState<Department | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [agentForm, setAgentForm] = useState({ name: '', email: '', password: '', role: 'AGENT' as TeamUser['role'] });
+  const emptyAgentForm = { name: '', email: '', password: '', role: 'AGENT' as TeamUser['role'], departmentIds: [] as string[], allowedModules: [...ALL_MODULE_KEYS] };
+  const [agentForm, setAgentForm] = useState(emptyAgentForm);
+  const [editForm, setEditForm] = useState({ role: 'AGENT' as TeamUser['role'], password: '', departmentIds: [] as string[], allowedModules: [...ALL_MODULE_KEYS] });
   const [departmentForm, setDepartmentForm] = useState({ name: '', description: '' });
   const [projectForm, setProjectForm] = useState({ name: '', description: '' });
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -78,15 +97,32 @@ export default function TeamPage() {
 
   const activeAgents = useMemo(() => users.filter((user) => user.active), [users]);
 
+  // Chequeo instantáneo contra los usuarios ya cargados de esta empresa — evita el viaje
+  // al backend para el caso más común (alguien de la misma empresa). El backend igual
+  // valida de nuevo (el correo es único globalmente, no solo por empresa), así que esto
+  // es solo para dar feedback inmediato, no reemplaza esa validación.
+  const emailTaken = useMemo(() => {
+    const email = agentForm.email.trim().toLowerCase();
+    if (!email) return false;
+    return users.some((user) => user.email.toLowerCase() === email);
+  }, [agentForm.email, users]);
+
+  const openAgentModal = () => {
+    setModalError('');
+    setAgentForm(emptyAgentForm);
+    setAgentModal(true);
+  };
+
   const createAgent = async () => {
-    if (!agentForm.name.trim() || !agentForm.email.trim() || agentForm.password.length < 10) return;
+    if (!agentForm.name.trim() || !agentForm.email.trim() || agentForm.password.length < 10 || emailTaken) return;
+    setModalError('');
     setSaving(true);
     try {
       await apiFetch('/team/users', { method: 'POST', body: JSON.stringify(agentForm) });
       setAgentModal(false);
-      setAgentForm({ name: '', email: '', password: '', role: 'AGENT' });
+      setAgentForm(emptyAgentForm);
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el usuario'); }
+    } catch (err) { setModalError(err instanceof Error ? err.message : 'No se pudo crear el usuario'); }
     finally { setSaving(false); }
   };
 
@@ -97,47 +133,87 @@ export default function TeamPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el usuario'); }
   };
 
+  const openEdit = (user: TeamUser) => {
+    setModalError('');
+    setEditModal(user);
+    setEditForm({
+      role: user.role,
+      password: '',
+      departmentIds: user.departments?.map((item) => item.department.id) ?? [],
+      allowedModules: user.allowedModules?.length ? user.allowedModules : [...ALL_MODULE_KEYS],
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editModal) return;
+    setModalError('');
+    setSaving(true);
+    try {
+      await apiFetch(`/team/users/${editModal.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          role: editForm.role,
+          departmentIds: editForm.departmentIds,
+          allowedModules: editForm.allowedModules,
+          ...(editForm.password ? { password: editForm.password } : {}),
+        }),
+      });
+      setEditModal(null);
+      await load();
+    } catch (err) { setModalError(err instanceof Error ? err.message : 'No se pudo actualizar el usuario'); }
+    finally { setSaving(false); }
+  };
+
+  const openDepartmentModal = () => { setModalError(''); setDepartmentModal(true); };
+
   const createDepartment = async () => {
     if (!departmentForm.name.trim()) return;
+    setModalError('');
     setSaving(true);
     try {
       await apiFetch('/team/departments', { method: 'POST', body: JSON.stringify(departmentForm) });
       setDepartmentModal(false);
       setDepartmentForm({ name: '', description: '' });
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el departamento'); }
+    } catch (err) { setModalError(err instanceof Error ? err.message : 'No se pudo crear el departamento'); }
     finally { setSaving(false); }
   };
 
+  const openProjectModal = () => { setModalError(''); setProjectModal(true); };
+
   const createProject = async () => {
     if (!projectForm.name.trim()) return;
+    setModalError('');
     setSaving(true);
     try {
       await apiFetch('/team/projects', { method: 'POST', body: JSON.stringify(projectForm) });
       setProjectModal(false);
       setProjectForm({ name: '', description: '' });
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el proyecto'); }
+    } catch (err) { setModalError(err instanceof Error ? err.message : 'No se pudo crear el proyecto'); }
     finally { setSaving(false); }
   };
 
   const openMembers = (department: Department) => {
+    setModalError('');
     setMembersModal(department);
     setMemberIds(department.users.map((item) => item.user.id));
   };
 
   const saveMembers = async () => {
     if (!membersModal) return;
+    setModalError('');
     setSaving(true);
     try {
       await apiFetch(`/team/departments/${membersModal.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: memberIds }) });
       setMembersModal(null);
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron guardar los miembros'); }
+    } catch (err) { setModalError(err instanceof Error ? err.message : 'No se pudieron guardar los miembros'); }
     finally { setSaving(false); }
   };
 
   const openStages = async (department: Department) => {
+    setModalError('');
     setStagesModal(department);
     setNewStageName('');
     try { setStages(await apiFetch<Stage[]>(`/team/departments/${department.id}/stages`)); }
@@ -146,12 +222,13 @@ export default function TeamPage() {
 
   const createStage = async () => {
     if (!stagesModal || !newStageName.trim()) return;
+    setModalError('');
     setSaving(true);
     try {
       const stage = await apiFetch<Stage>(`/team/departments/${stagesModal.id}/stages`, { method: 'POST', body: JSON.stringify({ name: newStageName.trim(), color: newStageColor }) });
       setStages((current) => [...current, stage]);
       setNewStageName('');
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear la etapa'); }
+    } catch (err) { setModalError(err instanceof Error ? err.message : 'No se pudo crear la etapa'); }
     finally { setSaving(false); }
   };
 
@@ -165,7 +242,7 @@ export default function TeamPage() {
     <AppShell
       title="Equipo y agentes"
       subtitle="Usuarios, roles y departamentos que atenderán las conversaciones"
-      actions={<button className="button primary" onClick={() => setAgentModal(true)}><Plus size={16} />Nuevo agente</button>}
+      actions={<button className="button primary" onClick={openAgentModal}><Plus size={16} />Nuevo agente</button>}
     >
       {error && <div className="error-box">{error}</div>}
 
@@ -188,7 +265,10 @@ export default function TeamPage() {
                   <td>{roleNames[user.role]}</td>
                   <td>{user.departments?.length ? user.departments.map((item) => item.department.name).join(', ') : '—'}</td>
                   <td><span className={`status-pill ${user.active ? 'success' : 'neutral'}`}><span className="status-dot" />{user.active ? 'Activo' : 'Inactivo'}</span></td>
-                  <td style={{ textAlign: 'right' }}><button className={`button small ${user.active ? '' : 'primary'}`} onClick={() => void toggleUser(user)}>{user.active ? 'Desactivar' : 'Activar'}</button></td>
+                  <td style={{ textAlign: 'right', display: 'flex', gap: '.5rem', justifyContent: 'flex-end' }}>
+                    <button className="button small" onClick={() => openEdit(user)}>Editar</button>
+                    <button className={`button small ${user.active ? '' : 'primary'}`} onClick={() => void toggleUser(user)}>{user.active ? 'Desactivar' : 'Activar'}</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -197,7 +277,7 @@ export default function TeamPage() {
 
         <div className="team-side-stack">
           <section className="card">
-            <div className="card-header"><div><h2>Departamentos</h2><p>Organiza la atención por área.</p></div><button className="button small" onClick={() => setDepartmentModal(true)}><Plus size={14} />Crear</button></div>
+            <div className="card-header"><div><h2>Departamentos</h2><p>Organiza la atención por área.</p></div><button className="button small" onClick={openDepartmentModal}><Plus size={14} />Crear</button></div>
             <div className="card-body department-list">
               {departments.map((department) => (
                 <div className="department-row" key={department.id}>
@@ -214,7 +294,7 @@ export default function TeamPage() {
           </section>
 
           <section className="card">
-            <div className="card-header"><div><h2>Proyectos</h2><p>De qué producto habla el cliente, para dar soporte o vender.</p></div><button className="button small" onClick={() => setProjectModal(true)}><Plus size={14} />Crear</button></div>
+            <div className="card-header"><div><h2>Proyectos</h2><p>De qué producto habla el cliente, para dar soporte o vender.</p></div><button className="button small" onClick={openProjectModal}><Plus size={14} />Crear</button></div>
             <div className="card-body department-list">
               {projects.map((project) => (
                 <div className="department-row" key={project.id}>
@@ -228,19 +308,114 @@ export default function TeamPage() {
         </div>
       </div>
 
-      {agentModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nuevo agente</h2><p>Crea un acceso para una persona que atenderá conversaciones.</p></div><div className="modal-body"><div className="form-grid"><div className="field"><label>Nombre</label><input value={agentForm.name} onChange={(e) => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="Carlos Soporte" /></div><div className="field"><label>Correo</label><input type="email" value={agentForm.email} onChange={(e) => setAgentForm({ ...agentForm, email: e.target.value })} placeholder="carlos@empresa.com" /></div><div className="field"><label>Contraseña inicial</label><input type="password" value={agentForm.password} onChange={(e) => setAgentForm({ ...agentForm, password: e.target.value })} placeholder="Mínimo 10 caracteres" /></div><div className="field"><label>Rol</label><select value={agentForm.role} onChange={(e) => setAgentForm({ ...agentForm, role: e.target.value as TeamUser['role'] })}><option value="AGENT">Agente</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></div></div></div><div className="modal-actions"><button className="button" onClick={() => setAgentModal(false)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void createAgent()}>{saving ? 'Guardando...' : 'Crear usuario'}</button></div></div></div>}
+      {agentModal && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal-header"><h2>Nuevo agente</h2><p>Crea un acceso para una persona que atenderá conversaciones.</p></div>
+            <div className="modal-body">
+              {modalError && <div className="error-box">{modalError}</div>}
+              <div className="form-grid">
+                <div className="field"><label>Nombre</label><input value={agentForm.name} onChange={(e) => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="Carlos Soporte" /></div>
+                <div className="field">
+                  <label>Correo</label>
+                  <input type="email" value={agentForm.email} onChange={(e) => setAgentForm({ ...agentForm, email: e.target.value })} placeholder="carlos@empresa.com" style={emailTaken ? { borderColor: 'var(--danger)' } : undefined} />
+                  {emailTaken && <p className="field-hint" style={{ color: 'var(--danger)' }}>Ya existe un usuario con este correo — usa otro para no duplicar el acceso.</p>}
+                </div>
+                <div className="field"><label>Contraseña inicial</label><input type="password" value={agentForm.password} onChange={(e) => setAgentForm({ ...agentForm, password: e.target.value })} placeholder="Mínimo 10 caracteres" /></div>
+                <div className="field"><label>Rol</label><select value={agentForm.role} onChange={(e) => setAgentForm({ ...agentForm, role: e.target.value as TeamUser['role'] })}><option value="AGENT">Agente</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></div>
+              </div>
+              {agentForm.role === 'AGENT' && (
+                <>
+                  <div className="field" style={{ marginTop: '1rem' }}>
+                    <label>Departamento(s)</label>
+                    <p className="field-hint">El agente solo verá las conversaciones de estos departamentos (además de las que aún no tienen departamento asignado).</p>
+                    <div className="member-picker">
+                      {departments.filter((d) => d.active).map((department) => (
+                        <label className="member-option" key={department.id}>
+                          <input type="checkbox" checked={agentForm.departmentIds.includes(department.id)} onChange={(e) => setAgentForm({ ...agentForm, departmentIds: e.target.checked ? [...agentForm.departmentIds, department.id] : agentForm.departmentIds.filter((id) => id !== department.id) })} />
+                          <div><strong>{department.name}</strong></div>
+                        </label>
+                      ))}
+                      {!departments.length && <p className="contact-empty-hint">Aún no hay departamentos creados.</p>}
+                    </div>
+                  </div>
+                  <div className="field" style={{ marginTop: '1rem' }}>
+                    <label>Módulos visibles</label>
+                    <p className="field-hint">Qué secciones del menú puede ver este agente.</p>
+                    <div className="member-picker">
+                      {MODULE_OPTIONS.map((module) => (
+                        <label className="member-option" key={module.key}>
+                          <input type="checkbox" checked={agentForm.allowedModules.includes(module.key)} onChange={(e) => setAgentForm({ ...agentForm, allowedModules: e.target.checked ? [...agentForm.allowedModules, module.key] : agentForm.allowedModules.filter((key) => key !== module.key) })} />
+                          <div><strong>{module.label}</strong></div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-actions"><button className="button" onClick={() => setAgentModal(false)}>Cancelar</button><button className="button primary" disabled={saving || emailTaken} onClick={() => void createAgent()}>{saving ? 'Guardando...' : 'Crear usuario'}</button></div>
+          </div>
+        </div>
+      )}
 
-      {departmentModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nuevo departamento</h2><p>Permite agrupar agentes y transferir conversaciones por área.</p></div><div className="modal-body"><div className="form-grid"><div className="field"><label>Nombre</label><input value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} placeholder="Soporte" /></div><div className="field"><label>Descripción</label><textarea value={departmentForm.description} onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })} placeholder="Atención técnica de BrainPOS y ERP" /></div></div></div><div className="modal-actions"><button className="button" onClick={() => setDepartmentModal(false)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void createDepartment()}>{saving ? 'Guardando...' : 'Crear departamento'}</button></div></div></div>}
+      {editModal && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal-header"><h2>Editar usuario</h2><p>{editModal.name} · {editModal.email}</p></div>
+            <div className="modal-body">
+              {modalError && <div className="error-box">{modalError}</div>}
+              <div className="form-grid">
+                <div className="field"><label>Rol</label><select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value as TeamUser['role'] })}><option value="AGENT">Agente</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option><option value="OWNER">Propietario</option></select></div>
+                <div className="field"><label>Nueva contraseña (opcional)</label><input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Dejar en blanco para no cambiarla" /></div>
+              </div>
+              {editForm.role === 'AGENT' && (
+                <>
+                  <div className="field" style={{ marginTop: '1rem' }}>
+                    <label>Departamento(s)</label>
+                    <p className="field-hint">El agente solo verá las conversaciones de estos departamentos (además de las que aún no tienen departamento asignado).</p>
+                    <div className="member-picker">
+                      {departments.filter((d) => d.active).map((department) => (
+                        <label className="member-option" key={department.id}>
+                          <input type="checkbox" checked={editForm.departmentIds.includes(department.id)} onChange={(e) => setEditForm({ ...editForm, departmentIds: e.target.checked ? [...editForm.departmentIds, department.id] : editForm.departmentIds.filter((id) => id !== department.id) })} />
+                          <div><strong>{department.name}</strong></div>
+                        </label>
+                      ))}
+                      {!departments.length && <p className="contact-empty-hint">Aún no hay departamentos creados.</p>}
+                    </div>
+                  </div>
+                  <div className="field" style={{ marginTop: '1rem' }}>
+                    <label>Módulos visibles</label>
+                    <p className="field-hint">Qué secciones del menú puede ver este agente.</p>
+                    <div className="member-picker">
+                      {MODULE_OPTIONS.map((module) => (
+                        <label className="member-option" key={module.key}>
+                          <input type="checkbox" checked={editForm.allowedModules.includes(module.key)} onChange={(e) => setEditForm({ ...editForm, allowedModules: e.target.checked ? [...editForm.allowedModules, module.key] : editForm.allowedModules.filter((key) => key !== module.key) })} />
+                          <div><strong>{module.label}</strong></div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-actions"><button className="button" onClick={() => setEditModal(null)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void saveEdit()}>{saving ? 'Guardando...' : 'Guardar cambios'}</button></div>
+          </div>
+        </div>
+      )}
 
-      {projectModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nuevo proyecto</h2><p>Un producto que soportas o vendes (ej. BrainPOS, dominios, VPS).</p></div><div className="modal-body"><div className="form-grid"><div className="field"><label>Nombre</label><input value={projectForm.name} onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} placeholder="BrainPOS" /></div><div className="field"><label>Descripción</label><textarea value={projectForm.description} onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })} placeholder="Sistema de punto de venta" /></div></div></div><div className="modal-actions"><button className="button" onClick={() => setProjectModal(false)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void createProject()}>{saving ? 'Guardando...' : 'Crear proyecto'}</button></div></div></div>}
+      {departmentModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nuevo departamento</h2><p>Permite agrupar agentes y transferir conversaciones por área.</p></div><div className="modal-body">{modalError && <div className="error-box">{modalError}</div>}<div className="form-grid"><div className="field"><label>Nombre</label><input value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} placeholder="Soporte" /></div><div className="field"><label>Descripción</label><textarea value={departmentForm.description} onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })} placeholder="Atención técnica de BrainPOS y ERP" /></div></div></div><div className="modal-actions"><button className="button" onClick={() => setDepartmentModal(false)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void createDepartment()}>{saving ? 'Guardando...' : 'Crear departamento'}</button></div></div></div>}
 
-      {membersModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Miembros de {membersModal.name}</h2><p>Selecciona qué agentes pertenecen a este departamento.</p></div><div className="modal-body"><div className="member-picker">{activeAgents.map((user) => <label className="member-option" key={user.id}><input type="checkbox" checked={memberIds.includes(user.id)} onChange={(e) => setMemberIds((current) => e.target.checked ? [...current, user.id] : current.filter((id) => id !== user.id))} /><div><strong>{user.name}</strong><span>{user.email} · {roleNames[user.role]}</span></div></label>)}</div></div><div className="modal-actions"><button className="button" onClick={() => setMembersModal(null)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void saveMembers()}>{saving ? 'Guardando...' : 'Guardar miembros'}</button></div></div></div>}
+      {projectModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nuevo proyecto</h2><p>Un producto que soportas o vendes (ej. BrainPOS, dominios, VPS).</p></div><div className="modal-body">{modalError && <div className="error-box">{modalError}</div>}<div className="form-grid"><div className="field"><label>Nombre</label><input value={projectForm.name} onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} placeholder="BrainPOS" /></div><div className="field"><label>Descripción</label><textarea value={projectForm.description} onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })} placeholder="Sistema de punto de venta" /></div></div></div><div className="modal-actions"><button className="button" onClick={() => setProjectModal(false)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void createProject()}>{saving ? 'Guardando...' : 'Crear proyecto'}</button></div></div></div>}
+
+      {membersModal && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Miembros de {membersModal.name}</h2><p>Selecciona qué agentes pertenecen a este departamento.</p></div><div className="modal-body">{modalError && <div className="error-box">{modalError}</div>}<div className="member-picker">{activeAgents.map((user) => <label className="member-option" key={user.id}><input type="checkbox" checked={memberIds.includes(user.id)} onChange={(e) => setMemberIds((current) => e.target.checked ? [...current, user.id] : current.filter((id) => id !== user.id))} /><div><strong>{user.name}</strong><span>{user.email} · {roleNames[user.role]}</span></div></label>)}</div></div><div className="modal-actions"><button className="button" onClick={() => setMembersModal(null)}>Cancelar</button><button className="button primary" disabled={saving} onClick={() => void saveMembers()}>{saving ? 'Guardando...' : 'Guardar miembros'}</button></div></div></div>}
 
       {stagesModal && (
         <div className="modal-backdrop" onClick={() => setStagesModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header"><h2>Etapas de {stagesModal.name}</h2><p>El pipeline propio de este departamento. Los agentes solo verán estas etapas al atender conversaciones asignadas a {stagesModal.name}.</p></div>
             <div className="modal-body">
+              {modalError && <div className="error-box">{modalError}</div>}
               <div className="stage-list">
                 {stages.map((stage) => (
                   <div className="stage-row" key={stage.id}>

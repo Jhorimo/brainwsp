@@ -1,6 +1,8 @@
 import { extname } from 'node:path';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InstanceStatus, MessageDirection, MessageStatus, MessageType, type ConversationStatus } from '@prisma/client';
+import { InstanceStatus, MessageDirection, MessageStatus, MessageType, UserRole, type ConversationStatus } from '@prisma/client';
+import { AgentAccessService } from '../common/services/agent-access.service';
+import type { JwtUser } from '../common/types/jwt-user';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -22,11 +24,26 @@ export class ConversationsService {
     private readonly queues: QueueService,
     private readonly realtime: RealtimeBus,
     private readonly storage: StorageService,
+    private readonly agentAccess: AgentAccessService,
   ) {}
 
-  list(companyId: string, status?: ConversationStatus) {
+  // null = no restriction (sees every department, same as today). An array (possibly
+  // empty) means "AGENT restricted to these departments + unassigned conversations" —
+  // only the AGENT role is ever scoped this way, matching the module-permission gate.
+  private async resolveDepartmentRestriction(user: JwtUser): Promise<string[] | null> {
+    if (user.role !== UserRole.AGENT) return null;
+    const { departmentIds } = await this.agentAccess.getAgentAccess(user.sub);
+    return departmentIds;
+  }
+
+  async list(user: JwtUser, status?: ConversationStatus) {
+    const restriction = await this.resolveDepartmentRestriction(user);
     return this.prisma.conversation.findMany({
-      where: { companyId, ...(status ? { status } : {}) },
+      where: {
+        companyId: user.companyId,
+        ...(status ? { status } : {}),
+        ...(restriction ? { OR: [{ departmentId: null }, { departmentId: { in: restriction } }] } : {}),
+      },
       include: {
         contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
@@ -45,10 +62,10 @@ export class ConversationsService {
     });
   }
 
-  async messages(companyId: string, conversationId: string) {
-    await this.getOwned(companyId, conversationId);
+  async messages(user: JwtUser, conversationId: string) {
+    await this.getOwned(user, conversationId);
     const items = await this.prisma.message.findMany({
-      where: { companyId, conversationId },
+      where: { companyId: user.companyId, conversationId },
       orderBy: { createdAt: 'asc' },
       take: 500,
       include: {
@@ -60,38 +77,9 @@ export class ConversationsService {
     return items;
   }
 
-  async sendText(companyId: string, conversationId: string, text: string, sentByUserId?: string) {
-    const conversation = await this.getOwned(companyId, conversationId);
-    const message = await this.prisma.message.create({
-      data: {
-        companyId,
-        conversationId,
-        instanceId: conversation.instanceId,
-        contactId: conversation.contactId,
-        direction: MessageDirection.OUTBOUND,
-        type: MessageType.TEXT,
-        status: MessageStatus.QUEUED,
-        body: text,
-        sentByUserId,
-      },
-    });
-    // A human agent sending anything is the handoff signal — hand control back from the AI.
-    const wasAiEnabled = conversation.aiEnabled;
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
-    await this.queues.outbound.add('send-text', { messageId: message.id }, {
-      jobId: message.id,
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 1500 },
-      removeOnComplete: 5000,
-      removeOnFail: 5000,
-    });
-
-    const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) {
-      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
-      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
-    }
-    return message;
+  async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string) {
+    const conversation = await this.getOwned(user, conversationId);
+    return this.deliverText(user.companyId, conversation, text, sentByUserId);
   }
 
   // Agent-initiated first contact: no inbound message exists yet, so the Contact/Conversation
@@ -117,21 +105,57 @@ export class ConversationsService {
       create: { companyId, instanceId, contactId: contact.id },
     });
 
-    return this.sendText(companyId, conversation.id, text, sentByUserId);
+    return this.deliverText(companyId, conversation, text, sentByUserId);
+  }
+
+  // Shared by `sendText` (ownership already verified by `getOwned`) and `startConversation`
+  // (owns it implicitly — it just created/upserted the conversation itself).
+  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string) {
+    const conversationId = conversation.id;
+    const message = await this.prisma.message.create({
+      data: {
+        companyId,
+        conversationId,
+        instanceId: conversation.instanceId,
+        contactId: conversation.contactId,
+        direction: MessageDirection.OUTBOUND,
+        type: MessageType.TEXT,
+        status: MessageStatus.QUEUED,
+        body: text,
+        sentByUserId,
+      },
+    });
+    const wasAiEnabled = conversation.aiEnabled;
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
+    await this.queues.outbound.add('send-text', { messageId: message.id }, {
+      jobId: message.id,
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 1500 },
+      removeOnComplete: 5000,
+      removeOnFail: 5000,
+    });
+
+    const hydrated = await this.getHydrated(companyId, conversationId);
+    if (hydrated) {
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId);
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
+    }
+    return message;
   }
 
   async sendMedia(
-    companyId: string,
+    user: JwtUser,
     conversationId: string,
     file: Express.Multer.File,
     caption?: string,
     ptt?: boolean,
     sentByUserId?: string,
   ) {
+    const companyId = user.companyId;
     const type = messageTypeFromMimetype(file.mimetype);
     if (!type) throw new BadRequestException('Tipo de archivo no soportado');
 
-    const conversation = await this.getOwned(companyId, conversationId);
+    const conversation = await this.getOwned(user, conversationId);
     const { internalUrl } = await this.storage.uploadBuffer(file.buffer, file.mimetype, extname(file.originalname).replace('.', ''));
 
     const message = await this.prisma.message.create({
@@ -163,14 +187,15 @@ export class ConversationsService {
 
     const hydrated = await this.getHydrated(companyId, conversationId);
     if (hydrated) {
-      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
-      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId);
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     }
     return message;
   }
 
-  async sendSticker(companyId: string, conversationId: string, stickerId: string, sentByUserId?: string) {
-    const conversation = await this.getOwned(companyId, conversationId);
+  async sendSticker(user: JwtUser, conversationId: string, stickerId: string, sentByUserId?: string) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
     const sticker = await this.prisma.stickerItem.findFirst({ where: { id: stickerId, companyId } });
     if (!sticker) throw new NotFoundException('Sticker no encontrado');
 
@@ -200,29 +225,33 @@ export class ConversationsService {
 
     const hydrated = await this.getHydrated(companyId, conversationId);
     if (hydrated) {
-      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
-      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId);
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     }
     return message;
   }
 
   async updateMessageFlags(
-    companyId: string,
+    user: JwtUser,
     conversationId: string,
     messageId: string,
     data: { pinned?: boolean; starred?: boolean },
   ) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
     const message = await this.prisma.message.findFirst({ where: { id: messageId, companyId, conversationId } });
     if (!message) throw new NotFoundException('Mensaje no encontrado');
     const updated = await this.prisma.message.update({ where: { id: messageId }, data });
-    void this.realtime.publish(companyId, 'message.updated', updated);
+    void this.realtime.publish(companyId, 'message.updated', updated, conversation.departmentId);
     return updated;
   }
 
-  async forwardMessage(companyId: string, conversationId: string, messageId: string, targetConversationId: string, sentByUserId?: string) {
+  async forwardMessage(user: JwtUser, conversationId: string, messageId: string, targetConversationId: string, sentByUserId?: string) {
+    const companyId = user.companyId;
+    await this.getOwned(user, conversationId);
     const source = await this.prisma.message.findFirst({ where: { id: messageId, companyId, conversationId } });
     if (!source) throw new NotFoundException('Mensaje no encontrado');
-    const target = await this.getOwned(companyId, targetConversationId);
+    const target = await this.getOwned(user, targetConversationId);
 
     const message = await this.prisma.message.create({
       data: {
@@ -251,18 +280,19 @@ export class ConversationsService {
     });
 
     const hydrated = await this.getHydrated(companyId, target.id);
-    if (hydrated) void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } });
+    if (hydrated) void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId);
     return message;
   }
 
-  async updateContactNotes(companyId: string, conversationId: string, notes: string) {
-    const conversation = await this.getOwned(companyId, conversationId);
+  async updateContactNotes(user: JwtUser, conversationId: string, notes: string) {
+    const conversation = await this.getOwned(user, conversationId);
     await this.prisma.contact.update({ where: { id: conversation.contactId }, data: { notes } });
     return { notes };
   }
 
-  async addContactTag(companyId: string, conversationId: string, tagId: string) {
-    const conversation = await this.getOwned(companyId, conversationId);
+  async addContactTag(user: JwtUser, conversationId: string, tagId: string) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
     const tag = await this.prisma.tag.findFirst({ where: { id: tagId, companyId } });
     if (!tag) throw new NotFoundException('Etiqueta no encontrada');
     await this.prisma.contactTag.upsert({
@@ -271,20 +301,22 @@ export class ConversationsService {
       create: { contactId: conversation.contactId, tagId },
     });
     const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     return hydrated;
   }
 
-  async removeContactTag(companyId: string, conversationId: string, tagId: string) {
-    const conversation = await this.getOwned(companyId, conversationId);
+  async removeContactTag(user: JwtUser, conversationId: string, tagId: string) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
     await this.prisma.contactTag.deleteMany({ where: { contactId: conversation.contactId, tagId } });
     const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     return hydrated;
   }
 
-  async updateStage(companyId: string, conversationId: string, stageId: string | null | undefined) {
-    const conversation = await this.getOwned(companyId, conversationId);
+  async updateStage(user: JwtUser, conversationId: string, stageId: string | null | undefined) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
     if (stageId) {
       // A stage only makes sense within its own department's pipeline — reject silently
       // mismatched stage/department combinations rather than storing a dangling reference.
@@ -294,19 +326,20 @@ export class ConversationsService {
     }
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { stageId: stageId || null } });
     const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     return hydrated;
   }
 
   async update(
-    companyId: string,
+    user: JwtUser,
     conversationId: string,
     data: { status?: ConversationStatus; assignedUserId?: string | null; departmentId?: string | null; projectId?: string | null; pinned?: boolean; aiEnabled?: boolean },
   ) {
-    const current = await this.getOwned(companyId, conversationId);
+    const companyId = user.companyId;
+    const current = await this.getOwned(user, conversationId);
     if (data.assignedUserId) {
-      const user = await this.prisma.user.findFirst({ where: { id: data.assignedUserId, companyId, active: true } });
-      if (!user) throw new NotFoundException('Agente no encontrado');
+      const assignee = await this.prisma.user.findFirst({ where: { id: data.assignedUserId, companyId, active: true } });
+      if (!assignee) throw new NotFoundException('Agente no encontrado');
     }
     if (data.departmentId) {
       const department = await this.prisma.department.findFirst({ where: { id: data.departmentId, companyId, active: true } });
@@ -321,13 +354,22 @@ export class ConversationsService {
     const departmentChanged = data.departmentId !== undefined && data.departmentId !== current.departmentId;
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { ...data, ...(departmentChanged ? { stageId: null } : {}) } });
     const hydrated = await this.getHydrated(companyId, conversationId);
-    if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated);
+    // Notify both the old and new department rooms so an agent watching either side
+    // of a reassignment sees the conversation appear/disappear from their list live.
+    if (hydrated) {
+      void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
+      if (departmentChanged) void this.realtime.publish(companyId, 'conversation.updated', hydrated, current.departmentId);
+    }
     return hydrated;
   }
 
-  private async getOwned(companyId: string, id: string) {
-    const conversation = await this.prisma.conversation.findFirst({ where: { id, companyId } });
+  private async getOwned(user: JwtUser, id: string) {
+    const conversation = await this.prisma.conversation.findFirst({ where: { id, companyId: user.companyId } });
     if (!conversation) throw new NotFoundException('Conversación no encontrada');
+    const restriction = await this.resolveDepartmentRestriction(user);
+    if (restriction && conversation.departmentId && !restriction.includes(conversation.departmentId)) {
+      throw new NotFoundException('Conversación no encontrada');
+    }
     return conversation;
   }
 

@@ -18,6 +18,7 @@ export class TeamService {
         email: true,
         role: true,
         active: true,
+        allowedModules: true,
         lastLoginAt: true,
         createdAt: true,
         departments: {
@@ -28,7 +29,13 @@ export class TeamService {
     });
   }
 
-  async createUser(companyId: string, input: { name: string; email: string; password: string; role?: UserRole }) {
+  private async assertDepartmentsBelongToCompany(companyId: string, departmentIds: string[]) {
+    if (!departmentIds.length) return;
+    const count = await this.prisma.department.count({ where: { id: { in: departmentIds }, companyId } });
+    if (count !== new Set(departmentIds).size) throw new BadRequestException('Uno o más departamentos no pertenecen a la empresa');
+  }
+
+  async createUser(companyId: string, input: { name: string; email: string; password: string; role?: UserRole; departmentIds?: string[]; allowedModules?: string[] }) {
     // SUPERADMIN is a platform-staff role, not a tenant one — it must only ever be
     // granted by seeding/direct DB access, never through a company's own team management,
     // or any OWNER could self-promote a teammate to cross-tenant access.
@@ -38,34 +45,55 @@ export class TeamService {
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) throw new BadRequestException('Ya existe un usuario con ese correo');
 
-    const user = await this.prisma.user.create({
-      data: {
-        companyId,
-        name: input.name.trim(),
-        email,
-        passwordHash: await bcrypt.hash(input.password, 12),
-        role: input.role || UserRole.AGENT,
-      },
-      select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+    const departmentIds = [...new Set(input.departmentIds ?? [])];
+    await this.assertDepartmentsBelongToCompany(companyId, departmentIds);
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          companyId,
+          name: input.name.trim(),
+          email,
+          passwordHash: await bcrypt.hash(input.password, 12),
+          role: input.role || UserRole.AGENT,
+          allowedModules: input.allowedModules ?? [],
+        },
+        select: { id: true, name: true, email: true, role: true, active: true, allowedModules: true, createdAt: true },
+      });
+      if (departmentIds.length) {
+        await tx.departmentUser.createMany({ data: departmentIds.map((departmentId) => ({ departmentId, userId: created.id })) });
+      }
+      return created;
     });
     return user;
   }
 
-  async updateUser(companyId: string, userId: string, input: { name?: string; role?: UserRole; active?: boolean; password?: string }) {
+  async updateUser(companyId: string, userId: string, input: { name?: string; role?: UserRole; active?: boolean; password?: string; departmentIds?: string[]; allowedModules?: string[] }) {
     if (input.role === UserRole.SUPERADMIN) throw new BadRequestException('Rol no permitido');
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     if (user.role === UserRole.SUPERADMIN) throw new BadRequestException('No puedes modificar este usuario desde aquí');
 
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
-        ...(input.role !== undefined ? { role: input.role } : {}),
-        ...(input.active !== undefined ? { active: input.active } : {}),
-        ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}),
-      },
-      select: { id: true, name: true, email: true, role: true, active: true, lastLoginAt: true, createdAt: true },
+    const departmentIds = input.departmentIds !== undefined ? [...new Set(input.departmentIds)] : undefined;
+    if (departmentIds !== undefined) await this.assertDepartmentsBelongToCompany(companyId, departmentIds);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(input.active !== undefined ? { active: input.active } : {}),
+          ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}),
+          ...(input.allowedModules !== undefined ? { allowedModules: input.allowedModules } : {}),
+        },
+        select: { id: true, name: true, email: true, role: true, active: true, allowedModules: true, lastLoginAt: true, createdAt: true },
+      });
+      if (departmentIds !== undefined) {
+        await tx.departmentUser.deleteMany({ where: { userId } });
+        if (departmentIds.length) await tx.departmentUser.createMany({ data: departmentIds.map((departmentId) => ({ departmentId, userId })) });
+      }
+      return updated;
     });
   }
 
