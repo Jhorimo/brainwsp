@@ -74,6 +74,19 @@ export function stickerFileUrl(stickerId: string) {
   return `${API_URL}/stickers/${stickerId}/file?token=${encodeURIComponent(getToken())}`;
 }
 
+export function quickReplyFileUrl(quickReplyId: string) {
+  return `${API_URL}/quick-replies/${quickReplyId}/file?token=${encodeURIComponent(getToken())}`;
+}
+
+// Turns a quick reply's stored attachment back into a real File, so it can flow through
+// the same attach-and-send composer path as a freshly picked file.
+export async function fetchAsFile(url: string, fileName: string, mimeType: string): Promise<File> {
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!response.ok) throw new Error('No se pudo obtener el archivo');
+  const blob = await response.blob();
+  return new File([blob], fileName, { type: mimeType });
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;

@@ -7,6 +7,11 @@ export class SendAgentMessageDto {
   @IsString()
   @MinLength(1)
   message!: string;
+
+  @ApiPropertyOptional({ description: 'Id del mensaje al que se responde ("Responder"), debe pertenecer a la misma conversación.' })
+  @IsOptional()
+  @IsUUID()
+  quotedMessageId?: string;
 }
 
 export class StartConversationDto {
@@ -91,6 +96,13 @@ export class SendStickerDto {
   @ApiProperty()
   @IsUUID()
   stickerId!: string;
+}
+
+export class SendReactionDto {
+  // Empty string removes the agent's own reaction from this message.
+  @ApiProperty({ example: '👍' })
+  @IsString()
+  emoji!: string;
 }
 
 export class UpdateStageDto {

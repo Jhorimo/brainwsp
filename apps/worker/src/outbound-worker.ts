@@ -1,5 +1,5 @@
 import { MessageStatus, MessageType, type PrismaClient } from '@prisma/client';
-import { BufferJSON } from '@whiskeysockets/baileys';
+import { BufferJSON, proto, type WAMessage } from '@whiskeysockets/baileys';
 import { Worker, type Job } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import type { Logger } from 'pino';
@@ -8,6 +8,8 @@ import type { RealtimePublisher } from './realtime.js';
 import type { SessionManager } from './session-manager.js';
 import { downloadObjectBuffer, objectNameFromUrl } from './storage.js';
 import { transcodeToOggOpus } from './audio-transcode.js';
+
+type OutboundJobData = { messageId: string } | { instanceId: string; targetMessageId: string; emoji: string };
 
 export class OutboundWorker {
   private readonly connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
@@ -25,14 +27,20 @@ export class OutboundWorker {
     });
 
     this.worker.on('failed', (job, error) => {
-      this.logger.warn({ err: error, jobId: job?.id, messageId: job?.data?.messageId }, 'outbound job failed');
+      this.logger.warn({ err: error, jobId: job?.id, data: job?.data }, 'outbound job failed');
     });
   }
 
-  private async process(job: Job<{ messageId: string }>) {
+  private async process(job: Job<OutboundJobData>) {
+    if (job.name === 'send-reaction') {
+      const data = job.data as { instanceId: string; targetMessageId: string; emoji: string };
+      return this.sessions.sendReaction(data.instanceId, data.targetMessageId, data.emoji);
+    }
+
+    const { messageId } = job.data as { messageId: string };
     const message = await this.prisma.message.findUnique({
-      where: { id: job.data.messageId },
-      include: { contact: true, instance: true },
+      where: { id: messageId },
+      include: { contact: true, instance: true, quotedMessage: { include: { contact: true } } },
     });
     if (!message) return;
     if (message.status === MessageStatus.SENT || message.status === MessageStatus.DELIVERED || message.status === MessageStatus.READ) return;
@@ -41,10 +49,30 @@ export class OutboundWorker {
 
     try {
       const socket = await this.sessions.ensureConnected(message.instanceId);
+
+      // "Responder" (reply-to): reconstruct the quoted message's original proto from the
+      // raw content the worker keeps (see `rawContent` in persistIncoming / below), so
+      // Baileys can attach a real WhatsApp quote — not just our own DB link. Silently sent
+      // without a quote if the target predates this feature and has no raw content saved.
+      let quoted: WAMessage | undefined;
+      if (message.quotedMessage) {
+        const rawContent = (message.quotedMessage.metadata as { rawContent?: string } | null)?.rawContent;
+        if (rawContent) {
+          quoted = {
+            key: {
+              id: message.quotedMessage.waMessageId,
+              remoteJid: message.quotedMessage.contact.waId,
+              fromMe: message.quotedMessage.direction === 'OUTBOUND',
+            },
+            message: JSON.parse(rawContent, BufferJSON.reviver) as proto.IMessage,
+          };
+        }
+      }
+      const options = quoted ? { quoted } : undefined;
       let response;
 
       if (message.type === MessageType.TEXT) {
-        response = await socket.sendMessage(message.contact.waId, { text: message.body || '' });
+        response = await socket.sendMessage(message.contact.waId, { text: message.body || '' }, options);
       } else if (message.type === MessageType.IMAGE) {
         if (!message.mediaUrl) throw new Error('La imagen no tiene URL');
         const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
@@ -52,7 +80,7 @@ export class OutboundWorker {
           image: buffer,
           mimetype: message.mimeType || 'image/jpeg',
           caption: message.caption || undefined,
-        });
+        }, options);
       } else if (message.type === MessageType.VIDEO) {
         if (!message.mediaUrl) throw new Error('El video no tiene URL');
         const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
@@ -60,7 +88,7 @@ export class OutboundWorker {
           video: buffer,
           mimetype: message.mimeType || 'video/mp4',
           caption: message.caption || undefined,
-        });
+        }, options);
       } else if (message.type === MessageType.AUDIO) {
         if (!message.mediaUrl) throw new Error('El audio no tiene URL');
         const rawBuffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
@@ -72,7 +100,7 @@ export class OutboundWorker {
           audio: buffer,
           mimetype: 'audio/ogg; codecs=opus',
           ptt,
-        });
+        }, options);
       } else if (message.type === MessageType.DOCUMENT) {
         if (!message.mediaUrl) throw new Error('El documento no tiene URL');
         const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
@@ -81,11 +109,11 @@ export class OutboundWorker {
           mimetype: message.mimeType || 'application/pdf',
           fileName: message.fileName || 'documento.pdf',
           caption: message.caption || undefined,
-        });
+        }, options);
       } else if (message.type === MessageType.STICKER) {
         if (!message.mediaUrl) throw new Error('El sticker no tiene URL');
         const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
-        response = await socket.sendMessage(message.contact.waId, { sticker: buffer });
+        response = await socket.sendMessage(message.contact.waId, { sticker: buffer }, options);
       } else {
         throw new Error(`Tipo de mensaje todavía no implementado: ${message.type}`);
       }

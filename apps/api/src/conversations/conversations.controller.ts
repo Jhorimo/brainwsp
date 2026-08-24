@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendStickerDto, StartConversationDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
+import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
@@ -37,7 +37,7 @@ export class ConversationsController {
 
   @Post(':id/messages')
   send(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendAgentMessageDto) {
-    return this.service.sendText(user, id, dto.message, user.sub);
+    return this.service.sendText(user, id, dto.message, user.sub, dto.quotedMessageId);
   }
 
   @Post(':id/messages/sticker')
@@ -54,9 +54,15 @@ export class ConversationsController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('caption') caption?: string,
     @Body('ptt') ptt?: string,
+    @Body('quotedMessageId') quotedMessageId?: string,
   ) {
     if (!file) throw new BadRequestException('Archivo requerido');
-    return this.service.sendMedia(user, id, file, caption, ptt === 'true', user.sub);
+    return this.service.sendMedia(user, id, file, caption, ptt === 'true', user.sub, quotedMessageId);
+  }
+
+  @Post(':id/messages/:messageId/reaction')
+  sendReaction(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('messageId') messageId: string, @Body() dto: SendReactionDto) {
+    return this.service.sendReaction(user, id, messageId, dto.emoji);
   }
 
   @Patch(':id/messages/:messageId')

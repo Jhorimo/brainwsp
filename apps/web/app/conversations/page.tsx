@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch, getStoredUser, getToken, mediaUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
+import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
@@ -32,11 +32,12 @@ type Conversation = {
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
 type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; contacts?: Array<{ displayName?: string; vcard?: string }> };
-type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null };
+type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
+type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
-type QuickReply = { id: string; shortcut: string; title: string; content: string; active: boolean };
+type QuickReply = { id: string; shortcut: string; title: string; content?: string | null; active: boolean; mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null };
 type IncidentType = 'SUGGESTION' | 'BUG' | 'OTHER';
 type IncidentStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
 type Incident = {
@@ -165,6 +166,8 @@ function parseVCard(vcard?: string) {
 function isImageFile(file: File) { return file.type.startsWith('image/'); }
 function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -227,6 +230,11 @@ export default function ConversationsPage() {
   const [qrTitleDraft, setQrTitleDraft] = useState('');
   const [qrContentDraft, setQrContentDraft] = useState('');
   const [qrSaving, setQrSaving] = useState(false);
+  const [qrMediaDraft, setQrMediaDraft] = useState<{ mediaUrl: string; fileName: string; mimeType: string; fileSize: number; previewUrl?: string } | null>(null);
+  const [qrMediaUploading, setQrMediaUploading] = useState(false);
+  const [qrMediaCleared, setQrMediaCleared] = useState(false);
+  const qrFileInputRef = useRef<HTMLInputElement>(null);
+  const [qrSendingId, setQrSendingId] = useState<string | null>(null);
   const [qrAutocompleteOpen, setQrAutocompleteOpen] = useState(false);
   const [qrAutocompleteMatches, setQrAutocompleteMatches] = useState<QuickReply[]>([]);
   const [qrAutocompleteIndex, setQrAutocompleteIndex] = useState(0);
@@ -243,6 +251,23 @@ export default function ConversationsPage() {
   const messageMenuRef = useRef<HTMLDivElement>(null);
   const [forwardMessageId, setForwardMessageId] = useState<string | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
+  const [bulkForwardOpen, setBulkForwardOpen] = useState(false);
+
+  // "Responder" (reply/quote a message), WhatsApp Web style.
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+
+  // "Seleccionar" (multi-select messages to bulk-forward/copy/star).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+
+  // Hover quick-react popover (6 common emojis + "+" for the full picker), same as WA Web.
+  const [reactionMessageId, setReactionMessageId] = useState<string | null>(null);
+  const [reactionPos, setReactionPos] = useState<{ top: number; left: number } | null>(null);
+  const [reactionMoreOpen, setReactionMoreOpen] = useState(false);
+  const reactionButtonRef = useRef<HTMLElement | null>(null);
+  const reactionMenuRef = useRef<HTMLDivElement>(null);
+
   const [notesDraft, setNotesDraft] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesSaved, setNotesSaved] = useState(false);
@@ -410,7 +435,7 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [showQuickReplyTray]);
 
-  useEffect(() => { setQrAutocompleteOpen(false); resetQuickReplyForm(); setShowQuickReplyTray(false); }, [selectedId]);
+  useEffect(() => { setQrAutocompleteOpen(false); resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); }, [selectedId]);
 
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
@@ -430,6 +455,24 @@ export default function ConversationsPage() {
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [openMessageMenuId]);
+
+  // Anchored above the trigger (grows upward via CSS transform) so it reads as "attached to
+  // the message", same spot WhatsApp Web puts its hover react bar.
+  useEffect(() => {
+    if (!reactionMessageId) { setReactionPos(null); return; }
+    const button = reactionButtonRef.current;
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      setReactionPos({ top: rect.top - 6, left: Math.min(rect.left - 90, window.innerWidth - 260) });
+    }
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (reactionMenuRef.current?.contains(target) || reactionButtonRef.current?.contains(target)) return;
+      setReactionMessageId(null);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [reactionMessageId]);
 
   useEffect(() => {
     if (!quickMenuOpen) return;
@@ -459,18 +502,21 @@ export default function ConversationsPage() {
       if (quickMenuOpen) { setQuickMenuOpen(false); return; }
       if (tagMenuOpen) { setTagMenuOpen(false); return; }
       if (openMessageMenuId) { setOpenMessageMenuId(null); return; }
+      if (reactionMessageId) { setReactionMessageId(null); return; }
       if (showEmoji) { setShowEmoji(false); return; }
       if (showStickerTray) { setShowStickerTray(false); return; }
       if (showQuickReplyTray) { setShowQuickReplyTray(false); return; }
-      if (forwardMessageId) { setForwardMessageId(null); return; }
+      if (forwardMessageId || bulkForwardOpen) { setForwardMessageId(null); setBulkForwardOpen(false); return; }
       if (lightboxUrl) { setLightboxUrl(null); return; }
       if (incidentModal) { setIncidentModal(false); return; }
       if (newChatModal) { setNewChatModal(false); return; }
       if (aiPromptModal) { setAiPromptModal(false); return; }
+      if (replyToMessage) { setReplyToMessage(null); return; }
+      if (selectMode) { setSelectMode(false); setSelectedMessageIds(new Set()); return; }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, lightboxUrl, incidentModal, newChatModal, aiPromptModal]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, lightboxUrl, incidentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
@@ -592,16 +638,19 @@ export default function ConversationsPage() {
   const sendMediaFile = async (file: File, opts: { caption?: string; ptt?: boolean } = {}) => {
     if (!selectedId || sending) return;
     setSending(true);
+    const quotedMessageId = replyToMessage?.id;
     try {
       const formData = new FormData();
       formData.append('file', file);
       if (opts.caption) formData.append('caption', opts.caption);
       formData.append('ptt', opts.ptt ? 'true' : 'false');
+      if (quotedMessageId) formData.append('quotedMessageId', quotedMessageId);
       const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
       setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
       void loadConversations();
       removePendingFile();
       setText('');
+      setReplyToMessage(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo enviar el archivo');
     } finally { setSending(false); }
@@ -612,14 +661,17 @@ export default function ConversationsPage() {
     if (pendingFile) { await sendMediaFile(pendingFile, { caption: text.trim() || undefined }); return; }
     if (!text.trim()) return;
     const body = text.trim();
+    const quotedMessage = replyToMessage;
     setText('');
+    setReplyToMessage(null);
     setSending(true);
     try {
-      const created = await apiFetch<Message>(`/conversations/${selectedId}/messages`, { method: 'POST', body: JSON.stringify({ message: body }) });
+      const created = await apiFetch<Message>(`/conversations/${selectedId}/messages`, { method: 'POST', body: JSON.stringify({ message: body, quotedMessageId: quotedMessage?.id }) });
       setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
       void loadConversations();
     } catch (err) {
       setText(body);
+      setReplyToMessage(quotedMessage);
       setError(err instanceof Error ? err.message : 'No se pudo enviar el mensaje');
     } finally { setSending(false); }
   };
@@ -782,6 +834,16 @@ export default function ConversationsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear la etiqueta'); }
   };
 
+  const updateTagColor = async (tagId: string, color: string) => {
+    try {
+      const updated = await apiFetch<Tag>(`/team/tags/${tagId}`, { method: 'PATCH', body: JSON.stringify({ color }) });
+      setCompanyTags((current) => current.map((item) => item.id === tagId ? updated : item));
+      setConversations((current) => current.map((item) => item.contact.tags?.some((t) => t.tag.id === tagId)
+        ? { ...item, contact: { ...item.contact, tags: item.contact.tags!.map((t) => t.tag.id === tagId ? { ...t, tag: updated } : t) } }
+        : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el color'); }
+  };
+
   const deleteCompanyTag = async (tag: Tag) => {
     if (!window.confirm(`¿Eliminar la etiqueta "${tag.name}"? Se quitará de todos los contactos que la tengan.`)) return;
     try {
@@ -868,19 +930,38 @@ export default function ConversationsPage() {
     const caret = textarea?.selectionStart ?? text.length;
     const token = findSlashToken(text, caret);
     const start = token ? token.start : caret;
-    const next = text.slice(0, start) + qr.content + text.slice(caret);
-    setText(next);
     setQrAutocompleteOpen(false);
+
+    if (qr.mediaUrl) {
+      setText(text.slice(0, start) + text.slice(caret));
+      setQrSendingId(qr.id);
+      fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream')
+        .then((file) => { attachFile(file); if (qr.content) insertQuickReplyContent(qr.content); })
+        .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida'))
+        .finally(() => setQrSendingId(null));
+      return;
+    }
+
+    const content = qr.content || '';
+    const next = text.slice(0, start) + content + text.slice(caret);
+    setText(next);
     requestAnimationFrame(() => {
       textarea?.focus();
-      const pos = start + qr.content.length;
+      const pos = start + content.length;
       textarea?.setSelectionRange(pos, pos);
     });
   };
 
-  const sendQuickReplyFromTray = (qr: QuickReply) => {
+  const sendQuickReplyFromTray = async (qr: QuickReply) => {
     setShowQuickReplyTray(false);
-    insertQuickReplyContent(qr.content);
+    if (!qr.mediaUrl) { insertQuickReplyContent(qr.content || ''); return; }
+    setQrSendingId(qr.id);
+    try {
+      const file = await fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream');
+      attachFile(file);
+      if (qr.content) insertQuickReplyContent(qr.content);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida'); }
+    finally { setQrSendingId(null); }
   };
 
   const resetQuickReplyForm = () => {
@@ -888,27 +969,59 @@ export default function ConversationsPage() {
     setQrShortcutDraft('');
     setQrTitleDraft('');
     setQrContentDraft('');
+    setQrMediaDraft((current) => { if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl); return null; });
+    setQrMediaCleared(false);
   };
 
   const startEditQuickReply = (qr: QuickReply) => {
     setEditingQuickReplyId(qr.id);
     setQrShortcutDraft(qr.shortcut);
     setQrTitleDraft(qr.title);
-    setQrContentDraft(qr.content);
+    setQrContentDraft(qr.content || '');
+    setQrMediaDraft(qr.mediaUrl ? { mediaUrl: qr.mediaUrl, fileName: qr.fileName || '', mimeType: qr.mimeType || '', fileSize: qr.fileSize || 0 } : null);
+    setQrMediaCleared(false);
+  };
+
+  const uploadQuickReplyMedia = async (file: File) => {
+    setQrMediaUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const uploaded = await apiFetch<{ mediaUrl: string; fileName: string; mimeType: string; fileSize: number }>('/quick-replies/media', { method: 'POST', body: form });
+      const previewUrl = isImageFile(file) || isVideoFile(file) ? URL.createObjectURL(file) : undefined;
+      setQrMediaDraft((current) => {
+        if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
+        return { ...uploaded, previewUrl };
+      });
+      setQrMediaCleared(false);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo subir el archivo'); }
+    finally { setQrMediaUploading(false); }
+  };
+
+  const removeQuickReplyMedia = () => {
+    setQrMediaDraft((current) => { if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl); return null; });
+    setQrMediaCleared(true);
   };
 
   const saveQuickReply = async () => {
     const shortcut = qrShortcutDraft.trim().toLowerCase();
     const title = qrTitleDraft.trim();
     const content = qrContentDraft.trim();
-    if (!shortcut || !title || !content) return;
+    if (!shortcut || !title || (!content && !qrMediaDraft)) return;
     setQrSaving(true);
     try {
+      const body: Record<string, unknown> = { shortcut, title, content };
+      if (qrMediaDraft || qrMediaCleared) {
+        body.mediaUrl = qrMediaDraft?.mediaUrl ?? null;
+        body.fileName = qrMediaDraft?.fileName ?? null;
+        body.mimeType = qrMediaDraft?.mimeType ?? null;
+        body.fileSize = qrMediaDraft?.fileSize ?? null;
+      }
       if (editingQuickReplyId) {
-        const updated = await apiFetch<QuickReply>(`/quick-replies/${editingQuickReplyId}`, { method: 'PATCH', body: JSON.stringify({ shortcut, title, content }) });
+        const updated = await apiFetch<QuickReply>(`/quick-replies/${editingQuickReplyId}`, { method: 'PATCH', body: JSON.stringify(body) });
         setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
       } else {
-        const created = await apiFetch<QuickReply>('/quick-replies', { method: 'POST', body: JSON.stringify({ shortcut, title, content }) });
+        const created = await apiFetch<QuickReply>('/quick-replies', { method: 'POST', body: JSON.stringify(body) });
         setQuickReplies((current) => [...current, created].sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
       }
       resetQuickReplyForm();
@@ -1069,14 +1182,106 @@ export default function ConversationsPage() {
   };
 
   const confirmForward = async (targetConversationId: string) => {
-    if (!selectedId || !forwardMessageId) return;
+    if (!selectedId) return;
+    const ids = bulkForwardOpen ? Array.from(selectedMessageIds) : forwardMessageId ? [forwardMessageId] : [];
+    if (!ids.length) return;
     try {
-      await apiFetch(`/conversations/${selectedId}/messages/${forwardMessageId}/forward`, { method: 'POST', body: JSON.stringify({ targetConversationId }) });
+      for (const id of ids) {
+        await apiFetch(`/conversations/${selectedId}/messages/${id}/forward`, { method: 'POST', body: JSON.stringify({ targetConversationId }) });
+      }
       void loadConversations();
+      if (bulkForwardOpen) exitSelectMode();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo reenviar el mensaje');
     } finally {
       setForwardMessageId(null);
+      setBulkForwardOpen(false);
+    }
+  };
+
+  // "Responder": quotes a message in the composer, WhatsApp Web style.
+  const startReply = (message: Message) => {
+    setReplyToMessage(message);
+    setOpenMessageMenuId(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+  const cancelReply = () => setReplyToMessage(null);
+
+  const quoteSenderLabel = (quoted: { direction: string; author?: Author | null }) => {
+    if (quoted.direction === 'OUTBOUND') return 'Tú';
+    return authorName(quoted.author) || (selected ? displayName(selected.contact) : 'Contacto');
+  };
+  const quoteTypeLabels: Record<string, string> = { IMAGE: '📷 Foto', VIDEO: '🎥 Video', AUDIO: '🎤 Audio', STICKER: '😊 Sticker' };
+  const quoteSnippet = (quoted: { type: string; body?: string | null; caption?: string | null; fileName?: string | null }) => {
+    if (quoted.body || quoted.caption) return quoted.body || quoted.caption || '';
+    if (quoted.type === 'DOCUMENT') return `📄 ${quoted.fileName || 'Documento'}`;
+    return quoteTypeLabels[quoted.type] || quoted.type;
+  };
+
+  // Scrolls to and briefly highlights the original message when its quote preview is clicked.
+  const scrollToMessage = (id: string) => {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightMessageId(id);
+    setTimeout(() => setHighlightMessageId((current) => current === id ? null : current), 1500);
+  };
+
+  // "Seleccionar": multi-select messages to bulk copy/star/forward, WhatsApp Web style.
+  const enterSelectMode = (messageId: string) => {
+    setSelectMode(true);
+    setSelectedMessageIds(new Set([messageId]));
+    setOpenMessageMenuId(null);
+  };
+  const exitSelectMode = () => { setSelectMode(false); setSelectedMessageIds(new Set()); };
+  const toggleMessageSelected = (messageId: string) => {
+    setSelectedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) next.delete(messageId); else next.add(messageId);
+      return next;
+    });
+  };
+
+  const bulkCopy = async () => {
+    const texts = messages.filter((m) => selectedMessageIds.has(m.id)).map((m) => m.body || m.caption || '').filter(Boolean);
+    if (!texts.length) return;
+    try { await navigator.clipboard.writeText(texts.join('\n')); } catch { setError('No se pudo copiar el texto'); }
+  };
+
+  const bulkStar = async () => {
+    if (!selectedId) return;
+    const ids = Array.from(selectedMessageIds);
+    setMessages((current) => current.map((item) => ids.includes(item.id) ? { ...item, starred: true } : item));
+    try {
+      await Promise.all(ids.map((id) => apiFetch(`/conversations/${selectedId}/messages/${id}`, { method: 'PATCH', body: JSON.stringify({ starred: true }) })));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron destacar los mensajes'); }
+  };
+
+  // Reactions: optimistic local update (clicking your own already-set emoji again removes
+  // it, matching WhatsApp's toggle behavior), reconciled by the `message.reaction` realtime
+  // event once the worker actually confirms the send to WhatsApp.
+  const toggleReactionMenu = (e: { currentTarget: HTMLElement }, messageId: string) => {
+    if (reactionMessageId === messageId) { setReactionMessageId(null); return; }
+    reactionButtonRef.current = e.currentTarget;
+    setReactionMoreOpen(false);
+    setReactionMessageId(messageId);
+  };
+
+  const sendReaction = async (message: Message, emoji: string) => {
+    if (!selectedId) return;
+    const mine = message.reactions?.find((r) => r.reactorJid === 'me');
+    const nextEmoji = mine?.emoji === emoji ? '' : emoji;
+    setReactionMessageId(null);
+    setReactionMoreOpen(false);
+    const previous = message.reactions || [];
+    const withoutMine = previous.filter((r) => r.reactorJid !== 'me');
+    const optimistic = nextEmoji ? [...withoutMine, { id: `optimistic-${message.id}`, emoji: nextEmoji, fromMe: true, reactorJid: 'me' }] : withoutMine;
+    setMessages((current) => current.map((item) => item.id === message.id ? { ...item, reactions: optimistic } : item));
+    try {
+      await apiFetch(`/conversations/${selectedId}/messages/${message.id}/reaction`, { method: 'POST', body: JSON.stringify({ emoji: nextEmoji }) });
+    } catch (err) {
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, reactions: previous } : item));
+      setError(err instanceof Error ? err.message : 'No se pudo enviar la reacción');
     }
   };
 
@@ -1292,11 +1497,36 @@ export default function ConversationsPage() {
               </div>
             </header>
             <div className="message-stream" ref={messageStreamRef}>
-              <div className="message-stream-inner">
+              <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
                 {messages.map((message) => (
-                  <div className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''}`} key={message.id}>
-                    <button className="message-menu-trigger" onClick={(e) => toggleMessageMenu(e, message.id)} title="Más opciones"><ChevronDown size={13} /></button>
+                  <div
+                    id={`msg-${message.id}`}
+                    className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''} ${highlightMessageId === message.id ? 'highlight' : ''} ${selectedMessageIds.has(message.id) ? 'selected' : ''}`}
+                    key={message.id}
+                    onClick={() => { if (selectMode) toggleMessageSelected(message.id); }}
+                  >
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        className="message-select-checkbox"
+                        checked={selectedMessageIds.has(message.id)}
+                        onChange={() => toggleMessageSelected(message.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                    {!selectMode && (
+                      <>
+                        <button className="message-menu-trigger" onClick={(e) => toggleMessageMenu(e, message.id)} title="Más opciones"><ChevronDown size={13} /></button>
+                        <button className="message-react-trigger" onClick={(e) => toggleReactionMenu(e, message.id)} title="Reaccionar"><Smile size={13} /></button>
+                      </>
+                    )}
                     {message.direction === 'INBOUND' && authorName(message.author) && <div className="message-author">{authorName(message.author)}</div>}
+                    {message.quotedMessage && (
+                      <button className="message-quote" onClick={(e) => { e.stopPropagation(); scrollToMessage(message.quotedMessage!.id); }}>
+                        <strong>{quoteSenderLabel(message.quotedMessage)}</strong>
+                        <span>{quoteSnippet(message.quotedMessage)}</span>
+                      </button>
+                    )}
                     {renderMessageBody(message)}
                     {message.reactions && message.reactions.length > 0 && (
                       <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
@@ -1312,6 +1542,27 @@ export default function ConversationsPage() {
               </div>
             </div>
 
+            {selectMode ? (
+              <div className="bulk-select-bar">
+                <button className="icon-button ghost" onClick={exitSelectMode} title="Cancelar"><X size={18} /></button>
+                <span className="bulk-select-count">{selectedMessageIds.size} seleccionado{selectedMessageIds.size === 1 ? '' : 's'}</span>
+                <div className="bulk-select-actions">
+                  <button className="icon-button ghost" onClick={() => void bulkCopy()} disabled={!selectedMessageIds.size} title="Copiar"><Copy size={17} /></button>
+                  <button className="icon-button ghost" onClick={() => void bulkStar()} disabled={!selectedMessageIds.size} title="Destacar"><Star size={17} /></button>
+                  <button className="icon-button ghost" onClick={() => setBulkForwardOpen(true)} disabled={!selectedMessageIds.size} title="Reenviar"><Forward size={17} /></button>
+                </div>
+              </div>
+            ) : <>
+            {replyToMessage && (
+              <div className="composer-reply-preview">
+                <div className="composer-reply-bar" />
+                <div className="composer-reply-body">
+                  <strong>{quoteSenderLabel(replyToMessage)}</strong>
+                  <span>{quoteSnippet(replyToMessage)}</span>
+                </div>
+                <button className="icon-button ghost" onClick={cancelReply}><X size={14} /></button>
+              </div>
+            )}
             {pendingFile && (
               <div className="composer-preview">
                 {pendingPreviewUrl && isImageFile(pendingFile) && <img src={pendingPreviewUrl} alt="preview" />}
@@ -1378,11 +1629,12 @@ export default function ConversationsPage() {
                 <button className="send-button" disabled={sending} onClick={() => void send()}><Send size={17} /></button>
               )}
             </div>
+            </>}
           </> : <div className="empty-state"><div><strong>Selecciona una conversación</strong>Los mensajes aparecerán aquí en tiempo real.</div></div>}
         </div>
 
         <aside className="contact-panel">
-          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><button onClick={() => void addTag(tag.id)}><span className="tag-dot" style={{ background: tag.color }} />{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
+          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label><button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
               const stages = stagesByDept[selected.department!.id] || [];
               return stages.length ? (
                 <select className="lead-stage-select" style={{ background: `${(selected.stage?.color) || '#eef1f7'}22`, borderColor: `${(selected.stage?.color) || '#dde1ea'}55`, color: selected.stage?.color || '#5b6478' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>
@@ -1401,10 +1653,10 @@ export default function ConversationsPage() {
         </div>
       )}
 
-      {forwardMessageId && (
-        <div className="lightbox-overlay" onClick={() => setForwardMessageId(null)}>
+      {(forwardMessageId || bulkForwardOpen) && (
+        <div className="lightbox-overlay" onClick={() => { setForwardMessageId(null); setBulkForwardOpen(false); }}>
           <div className="forward-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Reenviar a...</h3>
+            <h3>{bulkForwardOpen ? `Reenviar ${selectedMessageIds.size} mensaje${selectedMessageIds.size === 1 ? '' : 's'} a...` : 'Reenviar a...'}</h3>
             <div className="searchbox"><Search size={16} /><input autoFocus value={forwardSearch} onChange={(e) => setForwardSearch(e.target.value)} placeholder="Buscar conversación..." /></div>
             <div className="forward-list">
               {conversations
@@ -1578,10 +1830,10 @@ export default function ConversationsPage() {
         <div className="quick-reply-tray-list">
           {quickReplies.map((qr) => (
             <div className="quick-reply-tray-item" key={qr.id}>
-              <button className="quick-reply-tray-body" onClick={() => sendQuickReplyFromTray(qr)}>
-                <span className="quick-reply-tray-shortcut">/{qr.shortcut}{!qr.active && ' · inactiva'}</span>
-                <strong>{qr.title}</strong>
-                <span className="quick-reply-tray-preview">{qr.content}</span>
+              <button className="quick-reply-tray-body" onClick={() => void sendQuickReplyFromTray(qr)} disabled={qrSendingId === qr.id}>
+                <span className="quick-reply-tray-shortcut">/{qr.shortcut}{!qr.active && ' · inactiva'}{qrSendingId === qr.id && ' · cargando…'}</span>
+                <strong>{qr.mediaUrl && <Paperclip size={11} />} {qr.title}</strong>
+                <span className="quick-reply-tray-preview">{qr.content || qr.fileName}</span>
               </button>
               {canManageQuickReplies && (
                 <div className="quick-reply-tray-actions">
@@ -1597,10 +1849,34 @@ export default function ConversationsPage() {
           <div className="quick-reply-tray-form">
             <input value={qrShortcutDraft} onChange={(e) => setQrShortcutDraft(e.target.value)} placeholder="atajo (ej: saludo)" />
             <input value={qrTitleDraft} onChange={(e) => setQrTitleDraft(e.target.value)} placeholder="Título" />
-            <textarea value={qrContentDraft} onChange={(e) => setQrContentDraft(e.target.value)} placeholder="Mensaje..." rows={2} />
+            <textarea value={qrContentDraft} onChange={(e) => setQrContentDraft(e.target.value)} placeholder="Mensaje (opcional si adjuntas un archivo)..." rows={2} />
+            <input
+              ref={qrFileInputRef}
+              type="file"
+              hidden
+              accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
+              onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadQuickReplyMedia(file); }}
+            />
+            {qrMediaDraft ? (() => {
+              const previewSrc = qrMediaDraft.previewUrl || (editingQuickReplyId ? quickReplyFileUrl(editingQuickReplyId) : undefined);
+              const isImage = qrMediaDraft.mimeType.startsWith('image/');
+              const isVideo = qrMediaDraft.mimeType.startsWith('video/');
+              return (
+                <div className="quick-reply-tray-form-media">
+                  {previewSrc && isImage && <img src={previewSrc} alt="" />}
+                  {previewSrc && isVideo && <video src={previewSrc} muted />}
+                  {(!previewSrc || (!isImage && !isVideo)) && <span className="quick-reply-tray-form-media-name"><FileText size={12} /> {qrMediaDraft.fileName}</span>}
+                  <button onClick={removeQuickReplyMedia} title="Quitar archivo"><X size={12} /></button>
+                </div>
+              );
+            })() : (
+              <button className="quick-reply-tray-attach" onClick={() => qrFileInputRef.current?.click()} disabled={qrMediaUploading}>
+                <Paperclip size={13} /> {qrMediaUploading ? 'Subiendo…' : 'Adjuntar imagen, video, PDF o archivo'}
+              </button>
+            )}
             <div className="quick-reply-tray-form-actions">
               {editingQuickReplyId && <button onClick={resetQuickReplyForm} disabled={qrSaving}>Cancelar</button>}
-              <button onClick={() => void saveQuickReply()} disabled={qrSaving || !qrShortcutDraft.trim() || !qrTitleDraft.trim() || !qrContentDraft.trim()}>{editingQuickReplyId ? 'Actualizar' : 'Guardar'}</button>
+              <button onClick={() => void saveQuickReply()} disabled={qrSaving || qrMediaUploading || !qrShortcutDraft.trim() || !qrTitleDraft.trim() || (!qrContentDraft.trim() && !qrMediaDraft)}>{editingQuickReplyId ? 'Actualizar' : 'Guardar'}</button>
             </div>
           </div>
         )}
@@ -1614,11 +1890,34 @@ export default function ConversationsPage() {
         const hasText = !!(message.body || message.caption);
         return (
           <div ref={messageMenuRef} className="message-actions-menu" style={{ top: messageMenuPos.top, left: messageMenuPos.left }}>
+            <button onClick={() => startReply(message)}><Reply size={14} />Responder</button>
             <button disabled={!hasText} onClick={() => void copyMessageText(message)}><Copy size={14} />Copiar</button>
             <button onClick={() => openForward(message.id)}><Forward size={14} />Reenviar</button>
             <button onClick={() => void toggleFlag(message, 'pinned')}><Pin size={14} />{message.pinned ? 'Desfijar' : 'Fijar'}</button>
             <button onClick={() => void toggleFlag(message, 'starred')}><Star size={14} />{message.starred ? 'Quitar destacado' : 'Destacar'}</button>
             <button disabled={!hasText} onClick={() => addToNote(message)}><StickyNote size={14} />Añadir texto a la nota</button>
+            <button onClick={() => enterSelectMode(message.id)}><CheckSquare size={14} />Seleccionar</button>
+          </div>
+        );
+      })(),
+      document.body,
+    )}
+    {reactionMessageId && reactionPos && typeof document !== 'undefined' && createPortal(
+      (() => {
+        const message = messages.find((m) => m.id === reactionMessageId);
+        if (!message) return null;
+        return (
+          <div ref={reactionMenuRef} className={`reaction-picker ${reactionMoreOpen ? 'expanded' : ''}`} style={{ top: reactionPos.top, left: reactionPos.left }}>
+            {reactionMoreOpen ? (
+              <EmojiPicker onEmojiClick={(data) => void sendReaction(message, data.emoji)} />
+            ) : (
+              <>
+                {QUICK_REACTIONS.map((emoji) => (
+                  <button key={emoji} className="reaction-picker-emoji" onClick={() => void sendReaction(message, emoji)}>{emoji}</button>
+                ))}
+                <button className="reaction-picker-more" onClick={() => setReactionMoreOpen(true)} title="Más emojis">+</button>
+              </>
+            )}
           </div>
         );
       })(),

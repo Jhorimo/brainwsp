@@ -296,6 +296,12 @@ export class SessionManager {
 
   private async persistIncoming(instanceId: string, message: WAMessage, socket: WASocket) {
     if (message.key.fromMe || !message.key.remoteJid || !message.key.id || !message.message) return;
+    // Reactions and protocol envelopes (revokes, edits, app-state sync notices) ride the
+    // same `messages.upsert` stream as real messages. Reactions are already handled by the
+    // dedicated `messages.reaction` event above (see persistReaction); neither carries real
+    // chat content, so without this guard they fell through `extractMessage` to
+    // MessageType.UNKNOWN and showed up as an empty "UNKNOWN" bubble in the chat.
+    if (message.message.reactionMessage || message.message.protocolMessage) return;
     const remoteJid = message.key.remoteJid;
     if (remoteJid === 'status@broadcast') return;
 
@@ -375,6 +381,20 @@ export class SessionManager {
 
     const content = extractMessage(message);
 
+    // The contact replied to one of our messages from their phone — resolve WhatsApp's
+    // `stanzaId` back to our own Message row so the panel shows the same quote WhatsApp does.
+    // Nothing to resolve for a reply to a message this instance has never seen (e.g. the
+    // history predates this deployment), so it's left unquoted rather than failing the whole
+    // inbound message.
+    let quotedMessageId: string | undefined;
+    if (content.quotedStanzaId) {
+      const quoted = await this.prisma.message.findUnique({
+        where: { instanceId_waMessageId: { instanceId, waMessageId: content.quotedStanzaId } },
+        select: { id: true },
+      });
+      quotedMessageId = quoted?.id;
+    }
+
     let mediaUrl: string | undefined;
     const downloadableTypes: MessageType[] = [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT, MessageType.STICKER];
     if (downloadableTypes.includes(content.type)) {
@@ -409,9 +429,21 @@ export class SessionManager {
         fileSize: content.fileSize,
         mimeType: content.mimeType,
         mediaUrl,
-        metadata: { remoteJid, timestamp: String(message.messageTimestamp || ''), ...content.metadata },
+        // `rawContent` is the same proto payload the outbound worker keeps after sending
+        // (see OutboundWorker) — storing it for inbound messages too means any message,
+        // in either direction, can later be used as a `quoted` target for "Responder".
+        metadata: {
+          remoteJid,
+          timestamp: String(message.messageTimestamp || ''),
+          rawContent: JSON.stringify(message.message, BufferJSON.replacer),
+          ...content.metadata,
+        },
+        quotedMessageId,
       },
-      include: { author: { select: { id: true, name: true, pushName: true } } },
+      include: {
+        author: { select: { id: true, name: true, pushName: true } },
+        quotedMessage: { select: { id: true, type: true, body: true, caption: true, fileName: true, direction: true, author: { select: { id: true, name: true, pushName: true } } } },
+      },
     });
 
     const realtimeConversation = await this.prisma.conversation.findUnique({
@@ -440,17 +472,21 @@ export class SessionManager {
   // A falsy `reaction.text` means the person removed their reaction.
   private async persistReaction(instanceId: string, targetKey: proto.IMessageKey, reaction: proto.IReaction) {
     if (!targetKey.id) return;
-
-    const message = await this.prisma.message.findUnique({
-      where: { instanceId_waMessageId: { instanceId, waMessageId: targetKey.id } },
-      select: { id: true, companyId: true, conversationId: true, conversation: { select: { departmentId: true } } },
-    });
-    if (!message) return;
-
     const reactorKey = reaction.key;
     const fromMe = !!reactorKey?.fromMe;
     const reactorJid = fromMe ? 'me' : reactorKey?.participant || reactorKey?.remoteJid || 'unknown';
-    const emoji = reaction.text || '';
+    await this.applyReaction(instanceId, targetKey.id, reactorJid, fromMe, reaction.text || '');
+  }
+
+  // Shared by the incoming path above (a contact/our-other-device reacted, reported via
+  // Baileys' `messages.reaction` event) and `sendReaction` below (an agent reacted from the
+  // panel). A falsy `emoji` means the reaction was removed.
+  private async applyReaction(instanceId: string, waMessageId: string, reactorJid: string, fromMe: boolean, emoji: string) {
+    const message = await this.prisma.message.findUnique({
+      where: { instanceId_waMessageId: { instanceId, waMessageId } },
+      select: { id: true, companyId: true, conversationId: true, conversation: { select: { departmentId: true } } },
+    });
+    if (!message) return;
 
     if (!emoji) {
       const { count } = await this.prisma.messageReaction.deleteMany({
@@ -486,6 +522,29 @@ export class SessionManager {
       conversationId: message.conversationId,
       reaction: saved,
     }, message.conversation.departmentId);
+  }
+
+  // An agent reacting from the panel — actually sends the reaction to WhatsApp (so the
+  // customer's phone shows it too), then persists/broadcasts it the same way an incoming
+  // reaction would be. `reactorJid: 'me'` matches what `persistReaction` derives for our own
+  // `fromMe` reactions, so if WhatsApp ever echoes this back through `messages.reaction` it
+  // just upserts the same row instead of creating a duplicate.
+  async sendReaction(instanceId: string, messageId: string, emoji: string) {
+    const target = await this.prisma.message.findFirst({
+      where: { id: messageId, instanceId },
+      select: { waMessageId: true, direction: true, contact: { select: { waId: true } } },
+    });
+    if (!target) throw new Error('Mensaje no encontrado');
+
+    const socket = await this.ensureConnected(instanceId);
+    await socket.sendMessage(target.contact.waId, {
+      react: {
+        text: emoji,
+        key: { remoteJid: target.contact.waId, fromMe: target.direction === 'OUTBOUND', id: target.waMessageId },
+      },
+    });
+
+    await this.applyReaction(instanceId, target.waMessageId, 'me', true, emoji);
   }
 
   // Fire-and-forget: WhatsApp profile pictures are fetched lazily so they never

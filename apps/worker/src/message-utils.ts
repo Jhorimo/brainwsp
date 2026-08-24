@@ -20,7 +20,7 @@ function toFileSize(value: number | { toNumber(): number } | null | undefined): 
   return typeof value === 'number' ? value : value.toNumber();
 }
 
-export function extractMessage(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string; fileSize?: number; metadata?: Record<string, unknown> } {
+export function extractMessage(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string; fileSize?: number; metadata?: Record<string, unknown>; quotedStanzaId?: string } {
   // Baileys' getContentType only reads the outermost key — messages sent with
   // disappearing messages on, as "view once", or synced from another device arrive
   // wrapped (ephemeralMessage/viewOnceMessage*/deviceSentMessage) and need unwrapping
@@ -34,13 +34,13 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
     case 'conversation':
       return { type: MessageType.TEXT, body: content.conversation || '' };
     case 'extendedTextMessage':
-      return { type: MessageType.TEXT, body: content.extendedTextMessage?.text || '' };
+      return { type: MessageType.TEXT, body: content.extendedTextMessage?.text || '', quotedStanzaId: content.extendedTextMessage?.contextInfo?.stanzaId || undefined };
     case 'imageMessage':
-      return { type: MessageType.IMAGE, caption: content.imageMessage?.caption || undefined, mimeType: content.imageMessage?.mimetype || undefined, fileSize: toFileSize(content.imageMessage?.fileLength) };
+      return { type: MessageType.IMAGE, caption: content.imageMessage?.caption || undefined, mimeType: content.imageMessage?.mimetype || undefined, fileSize: toFileSize(content.imageMessage?.fileLength), quotedStanzaId: content.imageMessage?.contextInfo?.stanzaId || undefined };
     case 'audioMessage':
-      return { type: MessageType.AUDIO, mimeType: content.audioMessage?.mimetype || undefined, fileSize: toFileSize(content.audioMessage?.fileLength) };
+      return { type: MessageType.AUDIO, mimeType: content.audioMessage?.mimetype || undefined, fileSize: toFileSize(content.audioMessage?.fileLength), quotedStanzaId: content.audioMessage?.contextInfo?.stanzaId || undefined };
     case 'videoMessage':
-      return { type: MessageType.VIDEO, caption: content.videoMessage?.caption || undefined, mimeType: content.videoMessage?.mimetype || undefined, fileSize: toFileSize(content.videoMessage?.fileLength) };
+      return { type: MessageType.VIDEO, caption: content.videoMessage?.caption || undefined, mimeType: content.videoMessage?.mimetype || undefined, fileSize: toFileSize(content.videoMessage?.fileLength), quotedStanzaId: content.videoMessage?.contextInfo?.stanzaId || undefined };
     case 'documentMessage':
       return {
         type: MessageType.DOCUMENT,
@@ -48,9 +48,10 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
         fileName: content.documentMessage?.fileName || undefined,
         mimeType: content.documentMessage?.mimetype || undefined,
         fileSize: toFileSize(content.documentMessage?.fileLength),
+        quotedStanzaId: content.documentMessage?.contextInfo?.stanzaId || undefined,
       };
     case 'stickerMessage':
-      return { type: MessageType.STICKER, mimeType: content.stickerMessage?.mimetype || undefined };
+      return { type: MessageType.STICKER, mimeType: content.stickerMessage?.mimetype || undefined, quotedStanzaId: content.stickerMessage?.contextInfo?.stanzaId || undefined };
     case 'locationMessage': {
       const location = content.locationMessage;
       return {

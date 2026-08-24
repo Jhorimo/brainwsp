@@ -8,6 +8,18 @@ import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { StorageService } from '../storage/storage.service';
 
+// What the "Responder" quote preview needs to render — both in the composer's reply bar
+// and above the quoting message's own bubble.
+const quotedMessageSelect = {
+  id: true,
+  type: true,
+  body: true,
+  caption: true,
+  fileName: true,
+  direction: true,
+  author: { select: { id: true, name: true, pushName: true } },
+} as const;
+
 function messageTypeFromMimetype(mimetype: string): MessageType | null {
   if (mimetype === 'image/webp') return MessageType.STICKER;
   if (mimetype.startsWith('image/')) return MessageType.IMAGE;
@@ -71,15 +83,16 @@ export class ConversationsService {
       include: {
         author: { select: { id: true, name: true, pushName: true } },
         reactions: { select: { id: true, emoji: true, fromMe: true, reactorJid: true, contactId: true } },
+        quotedMessage: { select: quotedMessageSelect },
       },
     });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
     return items;
   }
 
-  async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string) {
+  async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string, quotedMessageId?: string) {
     const conversation = await this.getOwned(user, conversationId);
-    return this.deliverText(user.companyId, conversation, text, sentByUserId);
+    return this.deliverText(user.companyId, conversation, text, sentByUserId, await this.resolveQuote(user.companyId, conversationId, quotedMessageId));
   }
 
   // Agent-initiated first contact: no inbound message exists yet, so the Contact/Conversation
@@ -108,9 +121,18 @@ export class ConversationsService {
     return this.deliverText(companyId, conversation, text, sentByUserId);
   }
 
+  // A quote only makes sense pointing at a message already in this same conversation —
+  // silently drop anything else (stale id from a since-switched chat, cross-conversation id)
+  // instead of failing the whole send, since the message itself is still perfectly valid.
+  private async resolveQuote(companyId: string, conversationId: string, quotedMessageId?: string) {
+    if (!quotedMessageId) return undefined;
+    const quoted = await this.prisma.message.findFirst({ where: { id: quotedMessageId, companyId, conversationId }, select: { id: true } });
+    return quoted?.id;
+  }
+
   // Shared by `sendText` (ownership already verified by `getOwned`) and `startConversation`
   // (owns it implicitly — it just created/upserted the conversation itself).
-  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string) {
+  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string, quotedMessageId?: string) {
     const conversationId = conversation.id;
     const message = await this.prisma.message.create({
       data: {
@@ -123,7 +145,9 @@ export class ConversationsService {
         status: MessageStatus.QUEUED,
         body: text,
         sentByUserId,
+        quotedMessageId,
       },
+      include: { quotedMessage: { select: quotedMessageSelect } },
     });
     const wasAiEnabled = conversation.aiEnabled;
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
@@ -150,6 +174,7 @@ export class ConversationsService {
     caption?: string,
     ptt?: boolean,
     sentByUserId?: string,
+    quotedMessageId?: string,
   ) {
     const companyId = user.companyId;
     const type = messageTypeFromMimetype(file.mimetype);
@@ -172,8 +197,10 @@ export class ConversationsService {
         mimeType: file.mimetype,
         mediaUrl: internalUrl,
         sentByUserId,
+        quotedMessageId: await this.resolveQuote(companyId, conversationId, quotedMessageId),
         ...(type === MessageType.AUDIO && ptt ? { metadata: { ptt: true } } : {}),
       },
+      include: { quotedMessage: { select: quotedMessageSelect } },
     });
     const wasAiEnabled = conversation.aiEnabled;
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
@@ -229,6 +256,24 @@ export class ConversationsService {
       if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     }
     return message;
+  }
+
+  // No Message row to create here — a reaction rides on an existing one. The actual send
+  // (and persisting/broadcasting the result) happens in the worker, mirroring how an incoming
+  // reaction is handled; this just validates ownership and hands off the job.
+  async sendReaction(user: JwtUser, conversationId: string, messageId: string, emoji: string) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
+    const message = await this.prisma.message.findFirst({ where: { id: messageId, companyId, conversationId } });
+    if (!message) throw new NotFoundException('Mensaje no encontrado');
+
+    await this.queues.outbound.add('send-reaction', { instanceId: conversation.instanceId, targetMessageId: messageId, emoji }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    });
+    return { success: true };
   }
 
   async updateMessageFlags(

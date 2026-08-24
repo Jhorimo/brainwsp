@@ -221,6 +221,18 @@ export class TeamService {
     });
   }
 
+  async updateTag(companyId: string, tagId: string, input: { name?: string; color?: string }) {
+    const tag = await this.prisma.tag.findFirst({ where: { id: tagId, companyId } });
+    if (!tag) throw new NotFoundException('Etiqueta no encontrada');
+    return this.prisma.tag.update({
+      where: { id: tagId },
+      data: { name: input.name?.trim() || undefined, color: input.color || undefined },
+    }).catch((error: unknown) => {
+      if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una etiqueta con ese nombre');
+      throw error;
+    });
+  }
+
   async deleteTag(companyId: string, tagId: string) {
     const tag = await this.prisma.tag.findFirst({ where: { id: tagId, companyId } });
     if (!tag) throw new NotFoundException('Etiqueta no encontrada');

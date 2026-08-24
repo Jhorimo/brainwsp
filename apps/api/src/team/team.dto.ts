@@ -145,6 +145,19 @@ export class CreateTagDto {
   color?: string;
 }
 
+export class UpdateTagDto {
+  @ApiPropertyOptional({ example: 'Cliente VIP' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  name?: string;
+
+  @ApiPropertyOptional({ example: '#6b8afd' })
+  @IsOptional()
+  @IsString()
+  color?: string;
+}
+
 export class UpdateAiSettingsDto {
   @ApiPropertyOptional({ description: 'Instrucciones del sistema para el agente IA. Vacío = usa el prompt por defecto.' })
   @IsOptional()

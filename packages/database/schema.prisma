@@ -407,6 +407,7 @@ model Message {
   // messages, API-key/legacy-integration sends, and AI auto-replies, since none of those
   // are a human agent. Powers the per-agent KPI report on the dashboard.
   sentByUserId   String?
+  quotedMessageId String?
   pinned         Boolean          @default(false)
   starred        Boolean          @default(false)
   sentAt         DateTime?
@@ -421,6 +422,10 @@ model Message {
   author         Contact?         @relation("MessageAuthor", fields: [authorContactId], references: [id], onDelete: SetNull)
   sentByUser     User?            @relation("MessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
   reactions      MessageReaction[]
+  // "Responder" (reply-to/quote), WhatsApp Web style. Self-relation is nullable + SetNull
+  // so deleting the quoted message never cascades into deleting the reply that quotes it.
+  quotedMessage  Message?         @relation("MessageQuote", fields: [quotedMessageId], references: [id], onDelete: SetNull)
+  quotedBy       Message[]        @relation("MessageQuote")
 
   @@unique([instanceId, waMessageId])
   @@index([conversationId, createdAt])
@@ -428,6 +433,7 @@ model Message {
   @@index([companyId, direction, createdAt])
   @@index([companyId, sentByUserId, createdAt])
   @@index([authorContactId])
+  @@index([quotedMessageId])
 }
 
 // One row per person reacting to a message, keyed by their WhatsApp JID rather than
@@ -472,8 +478,12 @@ model QuickReply {
   companyId String
   shortcut  String
   title     String
-  content   String   @db.Text
+  content   String?  @db.Text
   active    Boolean  @default(true)
+  mediaUrl  String?  @db.Text
+  fileName  String?
+  mimeType  String?
+  fileSize  Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
