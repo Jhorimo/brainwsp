@@ -7,6 +7,7 @@ import {
   Activity,
   AlertTriangle,
   Bot,
+  CalendarDays,
   ChevronDown,
   Eye,
   Handshake,
@@ -36,7 +37,6 @@ const roleLabels: Record<string, string> = {
 
 const navigation = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, module: 'dashboard' },
-  { href: '/conversations', label: 'Conversaciones', icon: MessageSquareText, module: 'conversations' },
   { href: '/instances', label: 'WhatsApp', icon: Wifi, module: 'instances' },
   { href: '/team', label: 'Equipo y agentes', icon: Users, module: 'team' },
   { href: '/incidents', label: 'Incidencias', icon: AlertTriangle, module: 'incidents' },
@@ -45,6 +45,8 @@ const navigation = [
 ];
 
 const crmNavigation = [
+  { href: '/conversations', label: 'Conversaciones', icon: MessageSquareText, module: 'conversations' },
+  { href: '/calendar', label: 'Calendario', icon: CalendarDays, module: 'calendar' },
   { href: '/crm/leads', label: 'Prospectos', icon: UserPlus, module: 'crm' },
   { href: '/crm/deals', label: 'Tratos', icon: Handshake, module: 'crm' },
   { href: '/crm/pipelines', label: 'Pipelines', icon: Kanban, module: 'crm' },
@@ -204,6 +206,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                     <Link className={`nav-item ${active ? 'active' : ''}`} href={item.href} key={item.href}>
                       <Icon size={19} />
                       <span>{item.label}</span>
+                      {item.href === '/conversations' && <span className="nav-badge">Live</span>}
                     </Link>
                   );
                 })}

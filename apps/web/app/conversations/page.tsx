@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Info, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Info, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -50,6 +50,17 @@ type Incident = {
   conversation: { id: string };
   department: { id: string; name: string };
   createdByUser: { id: string; name: string };
+};
+
+type Appointment = {
+  id: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  startAt: string;
+  endAt: string;
+  conversation?: { id: string } | null;
+  createdByUser?: { id: string; name: string } | null;
 };
 
 const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: typeof Lightbulb }> = [
@@ -138,6 +149,12 @@ function fileExtLabel(fileName?: string | null, mimeType?: string | null) {
   if (fromName && fromName.length <= 5 && !fromName.includes(' ')) return fromName.toUpperCase();
   const subtype = mimeType?.split('/')[1]?.split(';')[0];
   return subtype ? subtype.replace(/^x-/, '').toUpperCase() : 'ARCHIVO';
+}
+// For pre-filling a <input type="datetime-local">, which needs local time with no
+// timezone suffix — `toISOString()` would shift it to UTC and show the wrong hour.
+function toDatetimeLocalValue(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 function formatFileSize(bytes?: number | null) {
   if (!bytes) return '';
@@ -286,6 +303,16 @@ export default function ConversationsPage() {
   const [incidentError, setIncidentError] = useState('');
   const [incidentSent, setIncidentSent] = useState(false);
 
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointmentModal, setAppointmentModal] = useState(false);
+  const [appointmentTitle, setAppointmentTitle] = useState('');
+  const [appointmentDescription, setAppointmentDescription] = useState('');
+  const [appointmentLocation, setAppointmentLocation] = useState('');
+  const [appointmentStart, setAppointmentStart] = useState('');
+  const [appointmentEnd, setAppointmentEnd] = useState('');
+  const [appointmentSaving, setAppointmentSaving] = useState(false);
+  const [appointmentError, setAppointmentError] = useState('');
+
   const [newChatModal, setNewChatModal] = useState(false);
   const [newChatInstances, setNewChatInstances] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [newChatInstanceId, setNewChatInstanceId] = useState('');
@@ -321,8 +348,8 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     void loadConversations();
-    void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags'), apiFetch<QuickReply[]>('/quick-replies')])
-      .then(([users, deps, projs, incs, tags, replies]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); setQuickReplies(replies); })
+    void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags'), apiFetch<QuickReply[]>('/quick-replies'), apiFetch<Appointment[]>('/calendar/appointments')])
+      .then(([users, deps, projs, incs, tags, replies, appts]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); setQuickReplies(replies); setAppointments(appts); })
       .catch(() => undefined);
   }, [loadConversations]);
 
@@ -529,6 +556,7 @@ export default function ConversationsPage() {
       if (forwardMessageId || bulkForwardOpen) { setForwardMessageId(null); setBulkForwardOpen(false); return; }
       if (lightboxUrl) { setLightboxUrl(null); return; }
       if (incidentModal) { setIncidentModal(false); return; }
+      if (appointmentModal) { setAppointmentModal(false); return; }
       if (newChatModal) { setNewChatModal(false); return; }
       if (aiPromptModal) { setAiPromptModal(false); return; }
       if (replyToMessage) { setReplyToMessage(null); return; }
@@ -536,7 +564,7 @@ export default function ConversationsPage() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, lightboxUrl, incidentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
@@ -545,13 +573,13 @@ export default function ConversationsPage() {
   const selected = conversations.find((item) => item.id === selectedId) || null;
 
   useEffect(() => {
-    const departmentIds = [selected?.department?.id, filterDept].filter((id): id is string => !!id && !stagesByDept[id]);
+    const departmentIds = departments.map((department) => department.id).filter((id) => !stagesByDept[id]);
     for (const departmentId of new Set(departmentIds)) {
       void apiFetch<Stage[]>(`/team/departments/${departmentId}/stages`)
         .then((stages) => setStagesByDept((current) => ({ ...current, [departmentId]: stages })))
         .catch(() => undefined);
     }
-  }, [selected?.department?.id, filterDept, stagesByDept]);
+  }, [departments, stagesByDept]);
 
   const baseFiltered = useMemo(() => conversations.filter((item) =>
     `${displayName(item.contact)} ${item.contact.phone || ''} ${lastText(item)}`.toLowerCase().includes(search.toLowerCase())
@@ -582,6 +610,10 @@ export default function ConversationsPage() {
   ), [departments, identity.id]);
   const canManageIncident = useCallback((incident: Incident) => isAdmin || myDepartmentIds.has(incident.department.id), [isAdmin, myDepartmentIds]);
   const conversationIncidents = useMemo(() => incidents.filter((incident) => incident.conversation.id === selectedId), [incidents, selectedId]);
+  const conversationAppointments = useMemo(
+    () => appointments.filter((a) => a.conversation?.id === selectedId).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
+    [appointments, selectedId],
+  );
 
   useEffect(() => { setNotesDraft(selected?.contact.notes || ''); setNotesSaved(false); }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -815,6 +847,63 @@ export default function ConversationsPage() {
       setIncidentError(err instanceof Error ? err.message : 'No se pudo crear la incidencia');
     } finally {
       setIncidentSaving(false);
+    }
+  };
+
+  const openAppointmentModal = () => {
+    const start = new Date();
+    start.setMinutes(0, 0, 0);
+    start.setHours(start.getHours() + 1);
+    const end = new Date(start.getTime() + 30 * 60_000);
+    setAppointmentTitle('');
+    setAppointmentDescription('');
+    setAppointmentLocation('');
+    setAppointmentStart(toDatetimeLocalValue(start));
+    setAppointmentEnd(toDatetimeLocalValue(end));
+    setAppointmentError('');
+    setAppointmentModal(true);
+  };
+
+  const closeAppointmentModal = () => setAppointmentModal(false);
+
+  const submitAppointment = async () => {
+    if (!selectedId) return;
+    if (!appointmentTitle.trim()) { setAppointmentError('Escribe un título para la cita'); return; }
+    if (!appointmentStart || !appointmentEnd) { setAppointmentError('Completa el inicio y el fin de la cita'); return; }
+    const startAt = new Date(appointmentStart);
+    const endAt = new Date(appointmentEnd);
+    if (endAt <= startAt) { setAppointmentError('La hora de fin debe ser después del inicio'); return; }
+    setAppointmentSaving(true);
+    setAppointmentError('');
+    try {
+      const created = await apiFetch<Appointment>('/calendar/appointments', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversationId: selectedId,
+          title: appointmentTitle.trim(),
+          description: appointmentDescription.trim() || undefined,
+          location: appointmentLocation.trim() || undefined,
+          startAt: startAt.toISOString(),
+          endAt: endAt.toISOString(),
+        }),
+      });
+      setAppointments((current) => [...current, created]);
+      setAppointmentModal(false);
+    } catch (err) {
+      setAppointmentError(err instanceof Error ? err.message : 'No se pudo agendar la cita');
+    } finally {
+      setAppointmentSaving(false);
+    }
+  };
+
+  const cancelAppointment = async (appointment: Appointment) => {
+    if (!window.confirm(`¿Cancelar la cita "${appointment.title}"? También se elimina de Google Calendar.`)) return;
+    setAppointments((current) => current.filter((item) => item.id !== appointment.id));
+    try {
+      await apiFetch(`/calendar/appointments/${appointment.id}`, { method: 'DELETE' });
+    } catch (err) {
+      setAppointments((current) => [...current, appointment]);
+      setError(err instanceof Error ? err.message : 'No se pudo cancelar la cita');
     }
   };
 
@@ -1437,19 +1526,25 @@ export default function ConversationsPage() {
                 <option value="unassigned">Sin asignar</option>
                 {teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}
               </select>
-              <select value={filterDept} onChange={(e) => { setFilterDept(e.target.value); setFilterStage(''); }}>
+              <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
                 <option value="">Todos los departamentos</option>
                 {departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}
               </select>
-              {filterDept && (
-                <select value={filterStage} onChange={(e) => setFilterStage(e.target.value)}>
-                  <option value="">Todas las etapas</option>
-                  {(stagesByDept[filterDept] || []).map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
-                </select>
-              )}
               <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
                 <option value="">Todos los proyectos</option>
                 {projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
+              </select>
+              <select value={filterStage} onChange={(e) => setFilterStage(e.target.value)}>
+                <option value="">Todas las etapas</option>
+                {departments.map((department) => {
+                  const stages = stagesByDept[department.id] || [];
+                  if (!stages.length) return null;
+                  return (
+                    <optgroup label={department.name} key={department.id}>
+                      {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
+                    </optgroup>
+                  );
+                })}
               </select>
               {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); setFilterStage(''); }}>Limpiar filtros</button>}
             </div>
@@ -1512,6 +1607,7 @@ export default function ConversationsPage() {
                 <button className={`icon-button ${selected.aiEnabled ? 'ai-toggle-on' : ''}`} onClick={() => void toggleAi()} title={selected.aiEnabled ? 'El agente IA está respondiendo automáticamente aquí. Click para desactivarlo.' : 'Activar respuesta automática con IA en esta conversación'}><Bot size={17} /></button>
                 {isAdmin && <button className="icon-button" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}
                 <button className="icon-button" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
+                <button className="icon-button" onClick={openAppointmentModal} title="Agendar una cita con este cliente"><CalendarDays size={16} /></button>
                 {selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
                 <button className="icon-button contact-panel-toggle" onClick={() => setContactPanelOpen(true)} title="Ver etiquetas, notas e incidencias"><Info size={16} /></button>
                 <button className="icon-button"><MoreHorizontal size={17} /></button>
@@ -1665,7 +1761,7 @@ export default function ConversationsPage() {
                   {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
                 </select>
               ) : <p className="contact-empty-hint">"{selected.department.name}" todavía no tiene etapas configuradas. Créalas desde Equipo y agentes.</p>;
-            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">Sin departamento</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div></> : null}
+            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">Sin departamento</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Citas</h4><button className="button small" onClick={openAppointmentModal}><CalendarDays size={13} />Nueva</button></div>{conversationAppointments.map((appointment) => (<div className="incident-row" key={appointment.id}><div className="incident-row-copy"><strong>{appointment.title}</strong><span>{new Date(appointment.startAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span></div><button className="icon-button" onClick={() => void cancelAppointment(appointment)} title="Cancelar cita"><Trash2 size={12} /></button></div>))}{!conversationAppointments.length && <p className="contact-empty-hint">Sin citas agendadas para este cliente.</p>}</div></> : null}
         </aside>
       </section>
 
@@ -1820,6 +1916,43 @@ export default function ConversationsPage() {
                   <button className="button primary" disabled={incidentSaving} onClick={() => void submitIncident()}>{incidentSaving ? 'Enviando...' : 'Crear incidencia'}</button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {appointmentModal && selected && (
+        <div className="modal-backdrop" onClick={closeAppointmentModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={closeAppointmentModal} title="Cerrar"><X size={16} /></button>
+            <div className="modal-header"><h2>Agendar cita</h2><p>Cliente: {displayName(selected.contact)}. Se creará en Google Calendar si el calendario está conectado.</p></div>
+            <div className="modal-body">
+              {appointmentError && <div className="error-box">{appointmentError}</div>}
+              <div className="form-grid">
+                <div className="field">
+                  <label>Título</label>
+                  <input value={appointmentTitle} onChange={(e) => setAppointmentTitle(e.target.value)} placeholder="Ej: Llamada de seguimiento" />
+                </div>
+                <div className="field">
+                  <label>Inicio</label>
+                  <input type="datetime-local" value={appointmentStart} onChange={(e) => setAppointmentStart(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Fin</label>
+                  <input type="datetime-local" value={appointmentEnd} onChange={(e) => setAppointmentEnd(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Lugar (opcional)</label>
+                  <input value={appointmentLocation} onChange={(e) => setAppointmentLocation(e.target.value)} placeholder="Ej: Oficina, videollamada, etc." />
+                </div>
+                <div className="field">
+                  <label>Detalle (opcional)</label>
+                  <textarea value={appointmentDescription} onChange={(e) => setAppointmentDescription(e.target.value)} placeholder="Notas sobre la cita..." rows={3} />
+                </div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={closeAppointmentModal}>Cancelar</button>
+              <button className="button primary" disabled={appointmentSaving} onClick={() => void submitAppointment()}>{appointmentSaving ? 'Agendando...' : 'Agendar cita'}</button>
             </div>
           </div>
         </div>
