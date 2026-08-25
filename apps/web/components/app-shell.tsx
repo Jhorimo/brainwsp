@@ -9,6 +9,8 @@ import {
   Bot,
   ChevronDown,
   Eye,
+  Handshake,
+  Kanban,
   KeyRound,
   LayoutDashboard,
   Lightbulb,
@@ -16,6 +18,7 @@ import {
   Menu,
   MessageSquareText,
   Settings,
+  UserPlus,
   Users,
   Wifi,
 } from 'lucide-react';
@@ -39,6 +42,12 @@ const navigation = [
   { href: '/incidents', label: 'Incidencias', icon: AlertTriangle, module: 'incidents' },
   { href: '/api-settings', label: 'API e integraciones', icon: KeyRound, module: 'api-settings' },
   { href: '/feedback', label: 'Sugerencias y reportes', icon: Lightbulb, module: 'feedback' },
+];
+
+const crmNavigation = [
+  { href: '/crm/leads', label: 'Prospectos', icon: UserPlus, module: 'crm' },
+  { href: '/crm/deals', label: 'Tratos', icon: Handshake, module: 'crm' },
+  { href: '/crm/pipelines', label: 'Pipelines', icon: Kanban, module: 'crm' },
 ];
 
 export function AppShell({ title, subtitle, children, actions }: { title: string; subtitle?: string; children: React.ReactNode; actions?: React.ReactNode }) {
@@ -135,16 +144,17 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   }, []);
 
   const visibleNavigation = allowedModules ? navigation.filter((item) => allowedModules.includes(item.module)) : navigation;
+  const visibleCrmNavigation = allowedModules ? crmNavigation.filter((item) => allowedModules.includes(item.module)) : crmNavigation;
 
   // Si el agente navega directo a una ruta que ya no tiene permitida, lo saca de ahí
   // en vez de dejarlo viendo una página vacía o rebotando contra el backend.
   useEffect(() => {
     if (!allowedModules) return;
-    const current = navigation.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+    const current = [...navigation, ...crmNavigation].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
     if (current && !allowedModules.includes(current.module)) {
-      router.replace(visibleNavigation[0]?.href || '/login');
+      router.replace(visibleNavigation[0]?.href || visibleCrmNavigation[0]?.href || '/login');
     }
-  }, [allowedModules, pathname, router, visibleNavigation]);
+  }, [allowedModules, pathname, router, visibleNavigation, visibleCrmNavigation]);
 
   const logout = () => {
     clearAuthSession();
@@ -184,6 +194,21 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                 </Link>
               );
             })}
+            {visibleCrmNavigation.length > 0 && (
+              <>
+                <div className="nav-caption nav-gap">CRM</div>
+                {visibleCrmNavigation.map((item) => {
+                  const Icon = item.icon;
+                  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  return (
+                    <Link className={`nav-item ${active ? 'active' : ''}`} href={item.href} key={item.href}>
+                      <Icon size={19} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </>
+            )}
             <div className="nav-caption nav-gap">PRÓXIMAMENTE</div>
             <div className="nav-item muted"><Bot size={19} /><span>Agentes IA</span></div>
             <div className="nav-item muted"><Activity size={19} /><span>Automatizaciones</span></div>
@@ -212,7 +237,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
             </div>
             <div className="topbar-actions">
               {actions}
-              <button className="icon-button" type="button" aria-label="Configuración"><Settings size={19} /></button>
+              <button className="icon-button" type="button" aria-label="Configuración" title="Mi perfil y configuración" onClick={openProfile}><Settings size={19} /></button>
             </div>
           </header>
           <div className="page-content">{children}</div>

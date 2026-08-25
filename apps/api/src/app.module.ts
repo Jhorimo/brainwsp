@@ -6,6 +6,7 @@ import { AdminModule } from './admin/admin.module';
 import { ApiCredentialsModule } from './api-credentials/api-credentials.module';
 import { CommonModule } from './common/common.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { CrmModule } from './crm/crm.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { HealthModule } from './health/health.module';
@@ -41,6 +42,7 @@ import { TeamModule } from './team/team.module';
     RealtimeModule,
     MediaModule,
     TeamModule,
+    CrmModule,
     DashboardModule,
     FeedbackModule,
     IncidentsModule,

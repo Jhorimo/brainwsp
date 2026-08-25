@@ -83,6 +83,13 @@ enum IncidentStatus {
   RESOLVED
 }
 
+enum LeadStatus {
+  NONE
+  COLD
+  INTERESTED
+  VERY_INTERESTED
+}
+
 model Company {
   id             String             @id @default(uuid())
   name           String
@@ -113,6 +120,8 @@ model Company {
   knowledgeEntries KnowledgeEntry[]
   stickers       StickerItem[]
   pipelineStages PipelineStage[]
+  leads          Lead[]
+  deals          Deal[]
 }
 
 // Platform-level catalog, managed by SUPERADMIN users — not scoped to any one company.
@@ -150,6 +159,8 @@ model User {
   createdIncidents     Incident[]      @relation("IncidentCreatedBy")
   sentMessages         Message[]       @relation("MessageSentBy")
   auditLogs            AuditLog[]
+  assignedLeads        Lead[]          @relation("LeadAssignee")
+  assignedDeals        Deal[]          @relation("DealAssignee")
 
   @@index([companyId])
 }
@@ -242,6 +253,8 @@ model Department {
   feedback    Feedback[]
   incidents   Incident[]
   stages      PipelineStage[]
+  leads       Lead[]
+  deals       Deal[]
 
   @@unique([companyId, name])
 }
@@ -256,10 +269,13 @@ model PipelineStage {
   departmentId String
   name         String
   color        String        @default("#6b8afd")
+  order        Int           @default(0)
+  isWon        Boolean       @default(false)
   createdAt    DateTime      @default(now())
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   department   Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  deals        Deal[]
 
   @@unique([departmentId, name])
   @@index([companyId])
@@ -308,6 +324,8 @@ model Contact {
   authoredMessages Message[]   @relation("MessageAuthor")
   reactions     MessageReaction[]
   tags          ContactTag[]
+  leads         Lead[]
+  deals         Deal[]
 
   @@unique([companyId, waId])
   @@index([companyId, phone])
@@ -321,6 +339,7 @@ model Tag {
   createdAt DateTime     @default(now())
   company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   contacts  ContactTag[]
+  deals     DealTag[]
 
   @@unique([companyId, name])
 }
@@ -377,6 +396,8 @@ model Conversation {
   stage          PipelineStage?     @relation(fields: [stageId], references: [id], onDelete: SetNull)
   messages       Message[]
   incidents      Incident[]
+  leads          Lead[]
+  deals          Deal[]
 
   @@unique([instanceId, contactId])
   @@index([companyId, status, lastMessageAt])
@@ -561,4 +582,84 @@ model Incident {
 
   @@index([companyId, status])
   @@index([departmentId, status])
+}
+
+// --- CRM (Prospectos / Tratos / Pipelines) ---
+// Fusionado con el pipeline por departamento de arriba (`PipelineStage`, usado también por
+// `Conversation`): cada Departamento ES un Pipeline de CRM, y sus Etapas son las mismas que
+// se gestionan en "Equipo y agentes → Etapas". No hay un pipeline de ventas separado.
+
+// Un prospecto entrante, antes de convertirse en trato. Puede venir de una conversación de
+// WhatsApp (contactId/conversationId) o de otro canal/carga manual (sin ninguno de los dos).
+// Sin departamento todavía al llegar — se asigna a mano o hereda el de la conversación.
+model Lead {
+  id              String        @id @default(uuid())
+  companyId       String
+  departmentId    String?
+  title           String
+  personName      String?
+  personEmail     String?
+  personPhone     String?
+  companyName     String?
+  status          LeadStatus    @default(NONE)
+  channel         String?
+  source          String?
+  score           Int?
+  value           Int?
+  assignedUserId  String?
+  contactId       String?
+  conversationId  String?
+  convertedDealId String?       @unique
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department      Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  assignedUser    User?         @relation("LeadAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  contact         Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation    Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  convertedDeal   Deal?         @relation("LeadConvertedDeal", fields: [convertedDealId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+  @@index([companyId, departmentId])
+}
+
+model Deal {
+  id              String        @id @default(uuid())
+  companyId       String
+  departmentId    String
+  title           String
+  value           Int?          @default(0)
+  stageId         String
+  probability     Int?
+  expectedCloseAt DateTime?
+  assignedUserId  String?
+  companyName     String?
+  personName      String?
+  personEmail     String?
+  personPhone     String?
+  contactId       String?
+  conversationId  String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Sin onDelete: SetNull en departamento/etapa — un trato siempre necesita ambos.
+  // TeamService.deleteDepartment/deleteStage rechazan borrar mientras tengan tratos.
+  department      Department    @relation(fields: [departmentId], references: [id])
+  stage           PipelineStage @relation(fields: [stageId], references: [id])
+  assignedUser    User?         @relation("DealAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  contact         Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation    Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  tags            DealTag[]
+  fromLead        Lead?         @relation("LeadConvertedDeal")
+
+  @@index([companyId, departmentId, stageId])
+}
+
+model DealTag {
+  dealId String
+  tagId  String
+  deal   Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([dealId, tagId])
 }

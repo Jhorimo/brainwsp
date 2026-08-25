@@ -132,6 +132,22 @@ export class TeamService {
     });
   }
 
+  async deleteDepartment(companyId: string, departmentId: string) {
+    const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
+    if (!department) throw new NotFoundException('Departamento no encontrado');
+    const [memberCount, conversationCount, incidentCount, dealCount] = await Promise.all([
+      this.prisma.departmentUser.count({ where: { departmentId } }),
+      this.prisma.conversation.count({ where: { departmentId } }),
+      this.prisma.incident.count({ where: { departmentId } }),
+      this.prisma.deal.count({ where: { departmentId } }),
+    ]);
+    if (memberCount > 0 || conversationCount > 0 || incidentCount > 0 || dealCount > 0) {
+      throw new BadRequestException('Este departamento tiene miembros, conversaciones, incidentes o tratos asociados y no se puede eliminar. Puedes desactivarlo en su lugar.');
+    }
+    await this.prisma.department.delete({ where: { id: departmentId } });
+    return { success: true };
+  }
+
   async setDepartmentMembers(companyId: string, departmentId: string, userIds: string[]) {
     const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
     if (!department) throw new NotFoundException('Departamento no encontrado');
@@ -184,17 +200,46 @@ export class TeamService {
     });
   }
 
+  async deleteProject(companyId: string, projectId: string) {
+    const project = await this.prisma.project.findFirst({ where: { id: projectId, companyId } });
+    if (!project) throw new NotFoundException('Proyecto no encontrado');
+    const conversationCount = await this.prisma.conversation.count({ where: { projectId } });
+    if (conversationCount > 0) {
+      throw new BadRequestException('Este proyecto tiene conversaciones asociadas y no se puede eliminar. Puedes desactivarlo en su lugar.');
+    }
+    await this.prisma.project.delete({ where: { id: projectId } });
+    return { success: true };
+  }
+
   async listStages(companyId: string, departmentId: string) {
     const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
     if (!department) throw new NotFoundException('Departamento no encontrado');
-    return this.prisma.pipelineStage.findMany({ where: { companyId, departmentId }, orderBy: { createdAt: 'asc' } });
+    return this.prisma.pipelineStage.findMany({ where: { companyId, departmentId }, orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] });
   }
 
   async createStage(companyId: string, departmentId: string, input: { name: string; color?: string }) {
     const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
     if (!department) throw new NotFoundException('Departamento no encontrado');
+    const order = await this.prisma.pipelineStage.count({ where: { departmentId } });
     return this.prisma.pipelineStage.create({
-      data: { companyId, departmentId, name: input.name.trim(), color: input.color || undefined },
+      data: { companyId, departmentId, name: input.name.trim(), color: input.color || undefined, order },
+    }).catch((error: unknown) => {
+      if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una etapa con ese nombre en este departamento');
+      throw error;
+    });
+  }
+
+  async updateStage(companyId: string, id: string, input: { name?: string; color?: string; order?: number; isWon?: boolean }) {
+    const stage = await this.prisma.pipelineStage.findFirst({ where: { id, companyId } });
+    if (!stage) throw new NotFoundException('Etapa no encontrada');
+    return this.prisma.pipelineStage.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.color !== undefined ? { color: input.color } : {}),
+        ...(input.order !== undefined ? { order: input.order } : {}),
+        ...(input.isWon !== undefined ? { isWon: input.isWon } : {}),
+      },
     }).catch((error: unknown) => {
       if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una etapa con ese nombre en este departamento');
       throw error;
@@ -204,6 +249,8 @@ export class TeamService {
   async deleteStage(companyId: string, id: string) {
     const stage = await this.prisma.pipelineStage.findFirst({ where: { id, companyId } });
     if (!stage) throw new NotFoundException('Etapa no encontrada');
+    const dealCount = await this.prisma.deal.count({ where: { stageId: id } });
+    if (dealCount > 0) throw new BadRequestException('Esta etapa todavía tiene tratos — muévelos a otra etapa antes de eliminarla');
     await this.prisma.pipelineStage.delete({ where: { id } });
     return { success: true };
   }

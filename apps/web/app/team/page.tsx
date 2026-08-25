@@ -36,7 +36,7 @@ type Department = {
   users: Array<{ user: Pick<TeamUser, 'id' | 'name' | 'email' | 'role' | 'active'> }>;
   _count?: { conversations: number };
 };
-type Stage = { id: string; name: string; color: string };
+type Stage = { id: string; name: string; color: string; isWon: boolean };
 type Project = {
   id: string;
   name: string;
@@ -66,6 +66,9 @@ export default function TeamPage() {
   const [membersModal, setMembersModal] = useState<Department | null>(null);
   const [stagesModal, setStagesModal] = useState<Department | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'department' | 'project'; id: string; name: string } | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const emptyAgentForm = { name: '', email: '', password: '', role: 'AGENT' as TeamUser['role'], departmentIds: [] as string[], allowedModules: [...ALL_MODULE_KEYS] };
   const [agentForm, setAgentForm] = useState(emptyAgentForm);
@@ -131,6 +134,35 @@ export default function TeamPage() {
       await apiFetch(`/team/users/${user.id}`, { method: 'PATCH', body: JSON.stringify({ active: !user.active }) });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el usuario'); }
+  };
+
+  const toggleDepartment = async (department: Department) => {
+    try {
+      await apiFetch(`/team/departments/${department.id}`, { method: 'PATCH', body: JSON.stringify({ active: !department.active }) });
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el departamento'); }
+  };
+
+  const toggleProject = async (project: Project) => {
+    try {
+      await apiFetch(`/team/projects/${project.id}`, { method: 'PATCH', body: JSON.stringify({ active: !project.active }) });
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el proyecto'); }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteError('');
+    setDeleting(true);
+    try {
+      await apiFetch(`/team/${deleteTarget.kind === 'department' ? 'departments' : 'projects'}/${deleteTarget.id}`, { method: 'DELETE' });
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'No se pudo eliminar');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const openEdit = (user: TeamUser) => {
@@ -238,6 +270,15 @@ export default function TeamPage() {
     catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar la etapa'); }
   };
 
+  const toggleStageWon = async (stage: Stage) => {
+    setStages((current) => current.map((item) => item.id === stage.id ? { ...item, isWon: !item.isWon } : item));
+    try { await apiFetch(`/team/stages/${stage.id}`, { method: 'PATCH', body: JSON.stringify({ isWon: !stage.isWon }) }); }
+    catch (err) {
+      setStages((current) => current.map((item) => item.id === stage.id ? { ...item, isWon: stage.isWon } : item));
+      setError(err instanceof Error ? err.message : 'No se pudo actualizar la etapa');
+    }
+  };
+
   return (
     <AppShell
       title="Equipo y agentes"
@@ -280,12 +321,14 @@ export default function TeamPage() {
             <div className="card-header"><div><h2>Departamentos</h2><p>Organiza la atención por área.</p></div><button className="button small" onClick={openDepartmentModal}><Plus size={14} />Crear</button></div>
             <div className="card-body department-list">
               {departments.map((department) => (
-                <div className="department-row" key={department.id}>
+                <div className={`department-row ${department.active ? '' : 'inactive'}`} key={department.id}>
                   <div className="department-icon"><Building2 size={17} /></div>
-                  <div className="department-copy"><strong>{department.name}</strong><span>{department.description || 'Sin descripción'} · {department.users.length} miembro(s)</span></div>
+                  <div className="department-copy"><strong>{department.name}</strong><span>{department.description || 'Sin descripción'} · {department.users.length} miembro(s){!department.active && ' · Inactivo'}</span></div>
                   <div className="department-row-actions">
                     <button className="button small" onClick={() => void openStages(department)}><Workflow size={13} />Etapas</button>
                     <button className="button small" onClick={() => openMembers(department)}>Miembros</button>
+                    <button className={`button small ${department.active ? 'danger' : 'primary'}`} onClick={() => void toggleDepartment(department)}>{department.active ? 'Desactivar' : 'Activar'}</button>
+                    <button className="icon-button" title="Eliminar departamento" onClick={() => { setDeleteError(''); setDeleteTarget({ kind: 'department', id: department.id, name: department.name }); }}><Trash2 size={14} /></button>
                   </div>
                 </div>
               ))}
@@ -297,9 +340,13 @@ export default function TeamPage() {
             <div className="card-header"><div><h2>Proyectos</h2><p>De qué producto habla el cliente, para dar soporte o vender.</p></div><button className="button small" onClick={openProjectModal}><Plus size={14} />Crear</button></div>
             <div className="card-body department-list">
               {projects.map((project) => (
-                <div className="department-row" key={project.id}>
+                <div className={`department-row ${project.active ? '' : 'inactive'}`} key={project.id}>
                   <div className="department-icon"><Layers size={17} /></div>
-                  <div className="department-copy"><strong>{project.name}</strong><span>{project.description || 'Sin descripción'} · {project._count?.conversations || 0} conversación(es)</span></div>
+                  <div className="department-copy"><strong>{project.name}</strong><span>{project.description || 'Sin descripción'} · {project._count?.conversations || 0} conversación(es){!project.active && ' · Inactivo'}</span></div>
+                  <div className="department-row-actions">
+                    <button className={`button small ${project.active ? 'danger' : 'primary'}`} onClick={() => void toggleProject(project)}>{project.active ? 'Desactivar' : 'Activar'}</button>
+                    <button className="icon-button" title="Eliminar proyecto" onClick={() => { setDeleteError(''); setDeleteTarget({ kind: 'project', id: project.id, name: project.name }); }}><Trash2 size={14} /></button>
+                  </div>
                 </div>
               ))}
               {!projects.length && <div className="empty-state"><div><strong>Aún no hay proyectos</strong>Crea mipse, misire, tuefact, brainpos, dominios, vps, etc.</div></div>}
@@ -421,6 +468,10 @@ export default function TeamPage() {
                   <div className="stage-row" key={stage.id}>
                     <span className="stage-row-dot" style={{ background: stage.color }} />
                     <strong>{stage.name}</strong>
+                    <label className="stage-won-toggle" title="Marcar como ganada en el Kanban de Pipelines">
+                      <input type="checkbox" checked={stage.isWon} onChange={() => void toggleStageWon(stage)} />
+                      Ganada
+                    </label>
                     <button className="icon-button" onClick={() => void removeStage(stage.id)} title="Eliminar etapa"><Trash2 size={14} /></button>
                   </div>
                 ))}
@@ -434,6 +485,23 @@ export default function TeamPage() {
             </div>
             <div className="modal-actions">
               <button className="button primary" onClick={() => setStagesModal(null)}>Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Eliminar {deleteTarget.kind === 'department' ? 'departamento' : 'proyecto'}</h2>
+              <p>¿Eliminar &quot;{deleteTarget.name}&quot;? Esta acción no se puede deshacer.</p>
+            </div>
+            <div className="modal-body">
+              {deleteError && <div className="error-box">{deleteError}</div>}
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => setDeleteTarget(null)}>Cancelar</button>
+              <button className="button danger" disabled={deleting} onClick={() => void confirmDelete()}>{deleting ? 'Eliminando...' : 'Eliminar'}</button>
             </div>
           </div>
         </div>

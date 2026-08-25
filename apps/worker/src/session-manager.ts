@@ -367,17 +367,44 @@ export class SessionManager {
       this.refreshAvatar(socket, author.id, participantJid, author.avatarUrl);
     }
 
-    const conversation = await this.prisma.conversation.upsert({
+    // `upsert` can't tell us whether this was a brand-new conversation — and only a truly
+    // new one (a real prospect's first message) should spawn a Lead in the CRM inbox below.
+    const existingConversation = await this.prisma.conversation.findUnique({
       where: { instanceId_contactId: { instanceId, contactId: contact.id } },
-      update: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
-      create: {
-        companyId: instance.companyId,
-        instanceId,
-        contactId: contact.id,
-        unreadCount: 1,
-        lastMessageAt: new Date(),
-      },
+      select: { id: true },
     });
+    const conversation = existingConversation
+      ? await this.prisma.conversation.update({
+          where: { id: existingConversation.id },
+          data: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
+        })
+      : await this.prisma.conversation.create({
+          data: {
+            companyId: instance.companyId,
+            instanceId,
+            contactId: contact.id,
+            unreadCount: 1,
+            lastMessageAt: new Date(),
+          },
+        });
+
+    // Cliente nuevo escribiendo por primera vez = prospecto entrante. Los grupos no son
+    // prospectos de venta, así que se excluyen. Sin departamento todavía — un agente lo
+    // asigna al revisar la conversación (ver ConversationsService.update, que además hereda
+    // el departamento del agente asignado hacia la propia conversación).
+    if (!existingConversation && !isGroup) {
+      await this.prisma.lead.create({
+        data: {
+          companyId: instance.companyId,
+          title: contact.name || contact.pushName || contact.phone || 'Prospecto de WhatsApp',
+          personName: contact.name || contact.pushName || undefined,
+          personPhone: contact.phone || undefined,
+          channel: 'whatsapp',
+          contactId: contact.id,
+          conversationId: conversation.id,
+        },
+      });
+    }
 
     const content = extractMessage(message);
 

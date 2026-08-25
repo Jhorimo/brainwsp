@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateStageDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateTagDto, UpdateTeamUserDto } from './team.dto';
+import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateStageDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateStageDto, UpdateTagDto, UpdateTeamUserDto } from './team.dto';
 import { TeamService } from './team.service';
 
 // NOTE: unlike the other feature controllers, this one is intentionally NOT gated by
@@ -58,6 +58,12 @@ export class TeamController {
     return this.service.updateDepartment(user.companyId, id, dto);
   }
 
+  @Delete('departments/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  deleteDepartment(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.deleteDepartment(user.companyId, id);
+  }
+
   @Put('departments/:id/members')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   setMembers(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SetDepartmentMembersDto) {
@@ -81,6 +87,12 @@ export class TeamController {
     return this.service.updateProject(user.companyId, id, dto);
   }
 
+  @Delete('projects/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  deleteProject(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.deleteProject(user.companyId, id);
+  }
+
   @Get('departments/:id/stages')
   stages(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.listStages(user.companyId, id);
@@ -90,6 +102,12 @@ export class TeamController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   createStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: CreateStageDto) {
     return this.service.createStage(user.companyId, id, dto);
+  }
+
+  @Patch('stages/:id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  updateStage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateStageDto) {
+    return this.service.updateStage(user.companyId, id, dto);
   }
 
   @Delete('stages/:id')

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Bot, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Info, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -175,6 +175,10 @@ export default function ConversationsPage() {
   // pattern): only one is visible at a time, this tracks which. Starts closed so a phone
   // lands on the conversation list first, not whatever conversation auto-selected on load.
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  // Debajo de 1200px el panel de contacto (etiquetas, notas, incidencias, asignación) no
+  // cabe como tercera columna y se oculta por completo en el CSS — este estado lo muestra
+  // como un panel deslizable bajo demanda en vez de dejarlo inalcanzable en tablet/celular.
+  const [contactPanelOpen, setContactPanelOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [search, setSearch] = useState('');
   const [filterAgent, setFilterAgent] = useState('');
@@ -329,6 +333,7 @@ export default function ConversationsPage() {
     } catch {}
   }, []);
   useEffect(() => { if (selectedId) void loadMessages(selectedId); }, [selectedId, loadMessages]);
+  useEffect(() => { setContactPanelOpen(false); }, [selectedId]);
 
   // Land ready to type the moment an agent opens/switches a conversation, same as WhatsApp Web.
   useEffect(() => {
@@ -391,7 +396,11 @@ export default function ConversationsPage() {
     const button = emojiButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
-      setEmojiPos({ top: rect.top, left: rect.left });
+      // emoji-picker-react mide ~350px de ancho por defecto — anclarlo al borde
+      // izquierdo del botón lo saca de la pantalla en un celular angosto.
+      const margin = 12;
+      const left = Math.min(rect.left, Math.max(margin, window.innerWidth - 350 - margin));
+      setEmojiPos({ top: rect.top, left });
     }
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -407,7 +416,9 @@ export default function ConversationsPage() {
     const button = stickerButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
-      setStickerTrayPos({ top: rect.top, left: rect.left });
+      const margin = 12;
+      const left = Math.min(rect.left, Math.max(margin, window.innerWidth - 280 - margin));
+      setStickerTrayPos({ top: rect.top, left });
     }
     void apiFetch<Array<{ id: string }>>('/stickers').then(setStickers).catch(() => undefined);
     const onClickOutside = (e: MouseEvent) => {
@@ -424,7 +435,12 @@ export default function ConversationsPage() {
     const button = quickReplyButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
-      setQuickReplyTrayPos({ top: rect.top, left: rect.left });
+      // El tray mide hasta 320px — anclarlo siempre al borde izquierdo del botón lo saca
+      // de la pantalla en un celular angosto (el botón vive cerca del centro-izquierda
+      // del compositor). Se recorta contra el viewport dejando un margen de 12px.
+      const margin = 12;
+      const left = Math.min(rect.left, Math.max(margin, window.innerWidth - 320 - margin));
+      setQuickReplyTrayPos({ top: rect.top, left });
     }
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -1493,6 +1509,7 @@ export default function ConversationsPage() {
                 {isAdmin && <button className="icon-button" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}
                 <button className="icon-button" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
                 {selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
+                <button className="icon-button contact-panel-toggle" onClick={() => setContactPanelOpen(true)} title="Ver etiquetas, notas e incidencias"><Info size={16} /></button>
                 <button className="icon-button"><MoreHorizontal size={17} /></button>
               </div>
             </header>
@@ -1633,7 +1650,9 @@ export default function ConversationsPage() {
           </> : <div className="empty-state"><div><strong>Selecciona una conversación</strong>Los mensajes aparecerán aquí en tiempo real.</div></div>}
         </div>
 
-        <aside className="contact-panel">
+        <div className={`contact-panel-backdrop ${contactPanelOpen ? 'open' : ''}`} onClick={() => setContactPanelOpen(false)} />
+        <aside className={`contact-panel ${contactPanelOpen ? 'mobile-open' : ''}`}>
+          <button className="icon-button ghost contact-panel-close" onClick={() => setContactPanelOpen(false)} title="Cerrar"><X size={18} /></button>
           {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label><button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
               const stages = stagesByDept[selected.department!.id] || [];
               return stages.length ? (

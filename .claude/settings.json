@@ -23,7 +23,14 @@
       "Bash(docker compose *)",
       "Read(//tmp/**)",
       "Bash(curl -s http://localhost:4000/api/conversations -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
-      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const arr=JSON.parse\\(d\\);console.log\\('total conversations \\(admin view\\):', arr.length\\); console.log\\(arr.slice\\(0,5\\).map\\(c=>\\({id:c.id,dept:c.department?.name||null}\\)\\)\\);}\\)\")"
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const arr=JSON.parse\\(d\\);console.log\\('total conversations \\(admin view\\):', arr.length\\); console.log\\(arr.slice\\(0,5\\).map\\(c=>\\({id:c.id,dept:c.department?.name||null}\\)\\)\\);}\\)\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const arr=JSON.parse\\(d\\);console.log\\(JSON.stringify\\(arr.map\\(p=>\\({name:p.name,stages:p.stages.map\\(s=>s.name\\)}\\)\\),null,2\\)\\);}\\)\")",
+      "PowerShell(Start-Process \"http://localhost:3000/crm/leads\")",
+      "Bash(curl -s http://localhost:4000/api/team/departments/4337c788-d331-4698-84cd-05b3f40d2360/stages -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const arr=JSON.parse\\(d\\);arr.forEach\\(s=>console.log\\(s.name, '->', Buffer.from\\(s.name\\).toString\\('hex'\\)\\)\\);}\\)\")",
+      "Bash(sed -i \"s/admin@brainwsp.com/admin@braintech.com.pe/; s/admin1234/ChangeMe-123456!/\" test_delete.js)",
+      "Bash(node test_delete.js)",
+      "Bash(DATABASE_URL=\"postgresql://brainwsp:brainwsp@localhost:5432/brainwsp?schema=public\" npx -y prisma@6.19.0 migrate dev --schema schema.prisma --name merge_crm_pipeline_into_department_stages)"
     ]
   }
 }

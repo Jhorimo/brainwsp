@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { MODULE_KEYS, type ModuleKey } from '../common/constants/modules';
 
 export class CreateTeamUserDto {
@@ -131,6 +131,29 @@ export class CreateStageDto {
   @IsOptional()
   @IsString()
   color?: string;
+}
+
+export class UpdateStageDto {
+  @ApiPropertyOptional({ example: 'Calificado' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  name?: string;
+
+  @ApiPropertyOptional({ example: '#6b8afd' })
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @ApiPropertyOptional({ description: 'Orden de la columna en el Kanban de Pipelines' })
+  @IsOptional()
+  @IsInt()
+  order?: number;
+
+  @ApiPropertyOptional({ description: 'Marca esta etapa como "Ganado" en el Kanban de Pipelines' })
+  @IsOptional()
+  @IsBoolean()
+  isWon?: boolean;
 }
 
 export class CreateTagDto {

@@ -386,18 +386,41 @@ export class ConversationsService {
       const assignee = await this.prisma.user.findFirst({ where: { id: data.assignedUserId, companyId, active: true } });
       if (!assignee) throw new NotFoundException('Agente no encontrado');
     }
-    if (data.departmentId) {
-      const department = await this.prisma.department.findFirst({ where: { id: data.departmentId, companyId, active: true } });
+
+    // Al asignar un agente sin indicar departamento a la vez, hereda el departamento del
+    // agente — solo si pertenece a exactamente uno (si tiene varios o ninguno, se deja la
+    // asignación manual tal cual, sin adivinar).
+    let resolvedDepartmentId = data.departmentId;
+    if (data.assignedUserId && resolvedDepartmentId === undefined) {
+      const memberships = await this.prisma.departmentUser.findMany({ where: { userId: data.assignedUserId }, select: { departmentId: true } });
+      if (memberships.length === 1) resolvedDepartmentId = memberships[0].departmentId;
+    }
+
+    if (resolvedDepartmentId) {
+      const department = await this.prisma.department.findFirst({ where: { id: resolvedDepartmentId, companyId, active: true } });
       if (!department) throw new NotFoundException('Departamento no encontrado');
     }
     if (data.projectId) {
       const project = await this.prisma.project.findFirst({ where: { id: data.projectId, companyId, active: true } });
       if (!project) throw new NotFoundException('Proyecto no encontrado');
     }
-    // The stage belongs to the old department's pipeline — carrying it over to a
-    // different department would leave it pointing at a stage that no longer applies.
-    const departmentChanged = data.departmentId !== undefined && data.departmentId !== current.departmentId;
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { ...data, ...(departmentChanged ? { stageId: null } : {}) } });
+    // La etapa pertenece al pipeline del departamento anterior — al cambiar de
+    // departamento, se reemplaza por la primera etapa del nuevo (o ninguna si no tiene).
+    const departmentChanged = resolvedDepartmentId !== undefined && resolvedDepartmentId !== current.departmentId;
+    let nextStageId: string | null | undefined;
+    if (departmentChanged) {
+      nextStageId = resolvedDepartmentId
+        ? (await this.prisma.pipelineStage.findFirst({ where: { departmentId: resolvedDepartmentId }, orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] }))?.id ?? null
+        : null;
+    }
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        ...data,
+        ...(resolvedDepartmentId !== undefined ? { departmentId: resolvedDepartmentId } : {}),
+        ...(departmentChanged ? { stageId: nextStageId } : {}),
+      },
+    });
     const hydrated = await this.getHydrated(companyId, conversationId);
     // Notify both the old and new department rooms so an agent watching either side
     // of a reassignment sees the conversation appear/disappear from their list live.
