@@ -126,4 +126,28 @@ export class ApiCredentialsService {
       appKey: credential.appKey,
     };
   }
+
+  // Variante solo-AUTH-KEY (Bearer), sin APP KEY: la usa la integración legacy de BrainPOS
+  // Restaurante (ver apps/api/src/user-device), que autentica con `Authorization: Bearer
+  // {authKey}` antes de conocer el APP KEY. `authHash` es determinístico (SHA-256 + pepper,
+  // ver common/utils/secret.ts), así que se puede buscar directo por hash sin appKey.
+  async authenticateByToken(token: string): Promise<ApiClientContext> {
+    if (!token) throw new UnauthorizedException('AUTH KEY requerido');
+
+    const authHash = hashApiSecret(token);
+    const credential = await this.prisma.apiCredential.findFirst({ where: { authHash, active: true } });
+    if (!credential) throw new UnauthorizedException('AUTH KEY inválido');
+
+    await this.prisma.apiCredential.update({
+      where: { id: credential.id },
+      data: { lastUsedAt: new Date() },
+    });
+
+    return {
+      credentialId: credential.id,
+      companyId: credential.companyId,
+      instanceId: credential.instanceId,
+      appKey: credential.appKey,
+    };
+  }
 }

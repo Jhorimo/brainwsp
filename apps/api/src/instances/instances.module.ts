@@ -8,5 +8,6 @@ import { InstancesService } from './instances.service';
   imports: [AuthModule],
   controllers: [InstancesController],
   providers: [InstancesService, RolesGuard],
+  exports: [InstancesService],
 })
 export class InstancesModule {}

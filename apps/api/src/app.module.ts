@@ -22,6 +22,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { StickersModule } from './stickers/stickers.module';
 import { StorageModule } from './storage/storage.module';
 import { TeamModule } from './team/team.module';
+import { UserDeviceModule } from './user-device/user-device.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { TeamModule } from './team/team.module';
     ApiCredentialsModule,
     InstancesModule,
     MessagesModule,
+    UserDeviceModule,
     ConversationsModule,
     RealtimeModule,
     MediaModule,
