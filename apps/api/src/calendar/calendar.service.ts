@@ -88,6 +88,60 @@ export class CalendarService {
     });
   }
 
+  // Full view of the shared Google Calendar for a date range — not just what BrainWSP
+  // created. Other tools/vendors book directly on the same account, so the calendar page
+  // reads the calendar itself and cross-references our own rows by googleEventId to tell
+  // which ones we can show contact/agent details for and let the user cancel.
+  async listRange(companyId: string, from: Date, to: Date) {
+    const integration = await this.prisma.googleCalendarIntegration.findUnique({ where: { companyId } });
+    if (!integration) return [];
+
+    const { events, refreshedTokens } = await this.google.listEvents(this.tokensOf(integration), integration.calendarId, from, to);
+    await this.persistRefresh(companyId, refreshedTokens);
+
+    const ours = await this.prisma.calendarEvent.findMany({
+      where: { companyId, startAt: { gte: from, lt: to } },
+      include: appointmentInclude,
+    });
+    const byGoogleId = new Map(ours.map((a) => [a.googleEventId, a]));
+
+    return events
+      .filter((e) => e.start?.dateTime && e.end?.dateTime)
+      .map((e) => {
+        const match = byGoogleId.get(e.id!);
+        const startAt = e.start!.dateTime!;
+        const endAt = e.end!.dateTime!;
+        if (match) {
+          return {
+            id: match.id,
+            title: match.title,
+            description: match.description,
+            location: match.location,
+            startAt,
+            endAt,
+            conversation: match.conversation,
+            createdByUser: match.createdByUser,
+            creatorEmail: null as string | null,
+            source: 'brainwsp' as const,
+            cancellable: true,
+          };
+        }
+        return {
+          id: `google:${e.id}`,
+          title: e.summary || '(Sin título)',
+          description: e.description || null,
+          location: e.location || null,
+          startAt,
+          endAt,
+          conversation: null,
+          createdByUser: null,
+          creatorEmail: e.creator?.email || e.organizer?.email || null,
+          source: 'google' as const,
+          cancellable: false,
+        };
+      });
+  }
+
   async createAppointment(
     companyId: string,
     userId: string,

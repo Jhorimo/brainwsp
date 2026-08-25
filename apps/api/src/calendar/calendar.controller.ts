@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
@@ -70,6 +70,20 @@ export class CalendarController {
   @Get('appointments')
   list(@CurrentUser() user: JwtUser) {
     return this.service.listAppointments(user.companyId);
+  }
+
+  // Full shared-calendar view (BrainWSP appointments + anything booked directly on Google)
+  // for the given range — used by the week-grid on the Calendario page.
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('events')
+  listRange(@CurrentUser() user: JwtUser, @Query('from') from: string, @Query('to') to: string) {
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+      throw new BadRequestException('Rango de fechas inválido');
+    }
+    return this.service.listRange(user.companyId, fromDate, toDate);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -79,6 +79,24 @@ export class GoogleCalendarService {
     return { googleEventId: data.id as string, htmlLink: data.htmlLink || undefined, refreshedTokens: getRefreshed() };
   }
 
+  // Lists everything on the calendar in range, not just what BrainWSP created — used to
+  // render the full shared calendar (other tools/vendors book directly on the same Google
+  // account). `singleEvents: true` expands recurring events into concrete instances so we
+  // don't have to parse RRULEs ourselves.
+  async listEvents(tokens: StoredTokens, calendarId: string, timeMin: Date, timeMax: Date) {
+    const { client, getRefreshed } = this.authorizedClient(tokens);
+    const calendar = google.calendar({ version: 'v3', auth: client });
+    const { data } = await calendar.events.list({
+      calendarId,
+      timeMin: timeMin.toISOString(),
+      timeMax: timeMax.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 250,
+    });
+    return { events: data.items || [], refreshedTokens: getRefreshed() };
+  }
+
   async deleteEvent(tokens: StoredTokens, calendarId: string, googleEventId: string) {
     const { client, getRefreshed } = this.authorizedClient(tokens);
     const calendar = google.calendar({ version: 'v3', auth: client });
