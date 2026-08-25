@@ -393,7 +393,7 @@ export class SessionManager {
     // asigna al revisar la conversación (ver ConversationsService.update, que además hereda
     // el departamento del agente asignado hacia la propia conversación).
     if (!existingConversation && !isGroup) {
-      await this.prisma.lead.create({
+      const lead = await this.prisma.lead.create({
         data: {
           companyId: instance.companyId,
           title: contact.name || contact.pushName || contact.phone || 'Prospecto de WhatsApp',
@@ -404,6 +404,7 @@ export class SessionManager {
           conversationId: conversation.id,
         },
       });
+      await this.realtime.publish(instance.companyId, 'lead.created', lead);
     }
 
     const content = extractMessage(message);

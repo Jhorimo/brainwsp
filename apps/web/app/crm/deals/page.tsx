@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type TeamUser = { id: string; name: string };
 type Stage = { id: string; name: string; color: string; isWon: boolean };
@@ -45,6 +46,18 @@ export default function DealsPage() {
     apiFetch<Deal[]>(`/crm/deals${query ? `?${query}` : ''}`).then(setDeals).catch((err) => setError(err instanceof Error ? err.message : 'No se pudieron cargar los tratos'));
   };
   useEffect(load, [q, departmentId]);
+
+  // Un trato puede moverse de etapa desde Conversaciones o desde el Kanban de Pipelines —
+  // se refresca en vivo en vez de requerir recargar la página para ver el cambio acá.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
+  useEffect(() => {
+    const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    socket.on('deal.created', () => loadRef.current());
+    socket.on('deal.updated', () => loadRef.current());
+    socket.on('deal.removed', () => loadRef.current());
+    return () => { socket.disconnect(); };
+  }, []);
 
   const currentDepartment = departments.find((d) => d.id === departmentId);
 

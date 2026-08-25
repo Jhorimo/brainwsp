@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InstanceStatus, MessageDirection, MessageStatus, MessageType, UserRole, type ConversationStatus } from '@prisma/client';
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
+import { DealsService } from '../crm/deals.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -37,6 +38,7 @@ export class ConversationsService {
     private readonly realtime: RealtimeBus,
     private readonly storage: StorageService,
     private readonly agentAccess: AgentAccessService,
+    private readonly deals: DealsService,
   ) {}
 
   // null = no restriction (sees every department, same as today). An array (possibly
@@ -372,6 +374,7 @@ export class ConversationsService {
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { stageId: stageId || null } });
     const hydrated = await this.getHydrated(companyId, conversationId);
     if (hydrated) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
+    void this.deals.syncStageFromConversation(companyId, conversationId, stageId || null);
     return hydrated;
   }
 
@@ -428,6 +431,7 @@ export class ConversationsService {
       void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
       if (departmentChanged) void this.realtime.publish(companyId, 'conversation.updated', hydrated, current.departmentId);
     }
+    if (departmentChanged) void this.deals.syncStageFromConversation(companyId, conversationId, nextStageId ?? null);
     return hydrated;
   }
 

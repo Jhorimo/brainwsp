@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2, UserPlus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type LeadStatus = 'NONE' | 'COLD' | 'INTERESTED' | 'VERY_INTERESTED';
 type TeamUser = { id: string; name: string };
@@ -46,6 +47,19 @@ export default function LeadsPage() {
     apiFetch<Lead[]>(`/crm/leads${query ? `?${query}` : ''}`).then(setLeads).catch((err) => setError(err instanceof Error ? err.message : 'No se pudieron cargar los prospectos'));
   };
   useEffect(load, [q, filterStatus]);
+
+  // Un prospecto puede llegar solo (mensaje nuevo de WhatsApp) o cambiar desde otra
+  // pestaña/usuario (Conversaciones, Tratos) — se refresca la lista en vivo en vez de
+  // requerir que el agente recargue la página para verlo.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
+  useEffect(() => {
+    const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    socket.on('lead.created', () => loadRef.current());
+    socket.on('lead.updated', () => loadRef.current());
+    socket.on('lead.removed', () => loadRef.current());
+    return () => { socket.disconnect(); };
+  }, []);
 
   const updateLead = async (lead: Lead, data: Partial<{ status: LeadStatus; assignedUserId: string | null; departmentId: string | null }>) => {
     setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, ...data } : item));

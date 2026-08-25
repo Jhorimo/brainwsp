@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeBus } from '../realtime/realtime.bus';
 
 export interface DealFilters {
   q?: string;
@@ -17,7 +18,10 @@ const DEAL_INCLUDE = {
 
 @Injectable()
 export class DealsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeBus,
+  ) {}
 
   async list(companyId: string, filters: DealFilters) {
     const where: Prisma.DealWhereInput = {
@@ -59,7 +63,9 @@ export class DealsService {
       },
       include: DEAL_INCLUDE,
     });
-    return this.serialize(deal);
+    const serialized = this.serialize(deal);
+    void this.realtime.publish(companyId, 'deal.created', serialized);
+    return serialized;
   }
 
   async update(companyId: string, id: string, input: Partial<{
@@ -87,14 +93,36 @@ export class DealsService {
       }
     });
     const updated = await this.prisma.deal.findUniqueOrThrow({ where: { id }, include: DEAL_INCLUDE });
-    return this.serialize(updated);
+    const serialized = this.serialize(updated);
+    void this.realtime.publish(companyId, 'deal.updated', serialized);
+
+    // La Etapa de la conversación de origen (si tiene una) es la misma etiqueta que ve el
+    // agente en Conversaciones — moverla acá en el Kanban debe reflejarse allá también.
+    if (input.stageId && updated.conversationId) {
+      await this.prisma.conversation.updateMany({ where: { id: updated.conversationId }, data: { stageId: input.stageId } });
+      void this.realtime.publish(companyId, 'conversation.updated', { id: updated.conversationId, stage: updated.stage }, updated.departmentId);
+    }
+    return serialized;
   }
 
   async remove(companyId: string, id: string) {
     const deal = await this.prisma.deal.findFirst({ where: { id, companyId } });
     if (!deal) throw new NotFoundException('Trato no encontrado');
     await this.prisma.deal.delete({ where: { id } });
+    void this.realtime.publish(companyId, 'deal.removed', { id });
     return { success: true };
+  }
+
+  // Dirección inversa: la Etapa de la conversación cambió (a mano o por auto-asignación de
+  // departamento) — si tiene un Trato enganchado, sigue el mismo movimiento en el Kanban.
+  async syncStageFromConversation(companyId: string, conversationId: string, stageId: string | null) {
+    if (!stageId) return;
+    const deal = await this.prisma.deal.findFirst({ where: { companyId, conversationId } });
+    if (!deal || deal.stageId === stageId) return;
+    const stage = await this.prisma.pipelineStage.findFirst({ where: { id: stageId, companyId, departmentId: deal.departmentId } });
+    if (!stage) return;
+    const updated = await this.prisma.deal.update({ where: { id: deal.id }, data: { stageId }, include: DEAL_INCLUDE });
+    void this.realtime.publish(companyId, 'deal.updated', this.serialize(updated));
   }
 
   private serialize(deal: Prisma.DealGetPayload<{ include: typeof DEAL_INCLUDE }>) {

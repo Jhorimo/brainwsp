@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { LeadStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeBus } from '../realtime/realtime.bus';
 
 export interface LeadFilters {
   q?: string;
@@ -11,7 +12,10 @@ export interface LeadFilters {
 
 @Injectable()
 export class LeadsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeBus,
+  ) {}
 
   list(companyId: string, filters: LeadFilters) {
     const where: Prisma.LeadWhereInput = {
@@ -38,10 +42,12 @@ export class LeadsService {
   }) {
     if (input.assignedUserId) await this.assertUserBelongs(companyId, input.assignedUserId);
     if (input.departmentId) await this.assertDepartmentBelongs(companyId, input.departmentId);
-    return this.prisma.lead.create({
+    const lead = await this.prisma.lead.create({
       data: { companyId, ...input, title: input.title.trim() },
       include: { assignedUser: { select: { id: true, name: true } } },
     });
+    void this.realtime.publish(companyId, 'lead.created', lead);
+    return lead;
   }
 
   async update(companyId: string, id: string, input: Partial<{
@@ -53,17 +59,20 @@ export class LeadsService {
     if (!lead) throw new NotFoundException('Prospecto no encontrado');
     if (input.assignedUserId) await this.assertUserBelongs(companyId, input.assignedUserId);
     if (input.departmentId) await this.assertDepartmentBelongs(companyId, input.departmentId);
-    return this.prisma.lead.update({
+    const updated = await this.prisma.lead.update({
       where: { id },
       data: { ...input, ...(input.title !== undefined ? { title: input.title.trim() } : {}) },
       include: { assignedUser: { select: { id: true, name: true } } },
     });
+    void this.realtime.publish(companyId, 'lead.updated', updated);
+    return updated;
   }
 
   async remove(companyId: string, id: string) {
     const lead = await this.prisma.lead.findFirst({ where: { id, companyId } });
     if (!lead) throw new NotFoundException('Prospecto no encontrado');
     await this.prisma.lead.delete({ where: { id } });
+    void this.realtime.publish(companyId, 'lead.removed', { id });
     return { success: true };
   }
 
@@ -98,7 +107,13 @@ export class LeadsService {
         conversationId: lead.conversationId,
       },
     });
-    await this.prisma.lead.update({ where: { id }, data: { convertedDealId: deal.id } });
+    const updatedLead = await this.prisma.lead.update({
+      where: { id },
+      data: { convertedDealId: deal.id },
+      include: { assignedUser: { select: { id: true, name: true } } },
+    });
+    void this.realtime.publish(companyId, 'lead.updated', updatedLead);
+    void this.realtime.publish(companyId, 'deal.created', deal);
     return deal;
   }
 

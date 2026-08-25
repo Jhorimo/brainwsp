@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { io } from 'socket.io-client';
 import { Kanban, Plus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type TeamUser = { id: string; name: string };
 type Stage = { id: string; name: string; color: string; isWon: boolean; order: number };
@@ -76,6 +77,18 @@ export default function PipelinesPage() {
     apiFetch<Deal[]>(`/crm/deals?departmentId=${departmentId}`).then(setDeals).catch((err) => setError(err instanceof Error ? err.message : 'No se pudieron cargar los tratos'));
   };
   useEffect(load, [departmentId]);
+
+  // Un trato puede moverse de etapa desde Conversaciones o desde Tratos — se refresca el
+  // Kanban en vivo en vez de requerir recargar la página para ver la tarjeta en su columna.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
+  useEffect(() => {
+    const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    socket.on('deal.created', () => loadRef.current());
+    socket.on('deal.updated', () => loadRef.current());
+    socket.on('deal.removed', () => loadRef.current());
+    return () => { socket.disconnect(); };
+  }, []);
 
   const currentDepartment = departments.find((d) => d.id === departmentId);
 
