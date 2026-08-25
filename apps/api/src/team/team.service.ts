@@ -7,6 +7,11 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TeamService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async updateCompanyName(companyId: string, name: string) {
+    const company = await this.prisma.company.update({ where: { id: companyId }, data: { name: name.trim() } });
+    return { id: company.id, name: company.name, slug: company.slug };
+  }
+
   listUsers(companyId: string) {
     return this.prisma.user.findMany({
       // Platform staff seeded into this company (SUPERADMIN) aren't part of anyone's

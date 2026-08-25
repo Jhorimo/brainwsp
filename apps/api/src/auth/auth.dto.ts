@@ -28,6 +28,14 @@ export class ChangePasswordDto {
   newPassword!: string;
 }
 
+export class UpdateProfileDto {
+  @ApiProperty({ example: 'Ana Torres' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name!: string;
+}
+
 export class RegisterDto {
   @ApiProperty({ example: 'Brain Tech Perú' })
   @IsString()

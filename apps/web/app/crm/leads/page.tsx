@@ -6,6 +6,7 @@ import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2, UserPlus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { NoteButton } from '@/components/note-button';
+import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type LeadStatus = 'NONE' | 'COLD' | 'INTERESTED' | 'VERY_INTERESTED';
@@ -25,6 +26,7 @@ const statusLabels: Record<LeadStatus, string> = { NONE: 'Sin estado', COLD: 'Fr
 const emptyForm = { title: '', personName: '', personEmail: '', personPhone: '', companyName: '', channel: '', source: '', value: '' };
 
 export default function LeadsPage() {
+  const confirm = useConfirm();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [teamUsers, setTeamUsers] = useState<TeamUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -95,7 +97,7 @@ export default function LeadsPage() {
   };
 
   const remove = async (lead: Lead) => {
-    if (!window.confirm(`¿Eliminar el prospecto "${lead.title}"?`)) return;
+    if (!(await confirm(`¿Eliminar el prospecto "${lead.title}"?`, { confirmText: 'Eliminar' }))) return;
     setBusyId(lead.id + 'delete');
     try { await apiFetch(`/crm/leads/${lead.id}`, { method: 'DELETE' }); load(); }
     catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar el prospecto'); }

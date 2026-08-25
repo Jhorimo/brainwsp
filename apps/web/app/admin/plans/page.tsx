@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CreditCard, Plus } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
+import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch } from '@/lib/api';
 
 type Plan = {
@@ -19,6 +20,7 @@ function formatPrice(cents: number) {
 }
 
 export default function AdminPlansPage() {
+  const confirm = useConfirm();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState('');
   const [modal, setModal] = useState(false);
@@ -60,7 +62,7 @@ export default function AdminPlansPage() {
   };
 
   const removePlan = async (plan: Plan) => {
-    if (!window.confirm(`¿Eliminar el plan "${plan.name}"? Los clientes que lo tengan quedarán sin plan.`)) return;
+    if (!(await confirm(`¿Eliminar el plan "${plan.name}"? Los clientes que lo tengan quedarán sin plan.`, { confirmText: 'Eliminar' }))) return;
     setPlans((current) => current.filter((item) => item.id !== plan.id));
     try { await apiFetch(`/admin/plans/${plan.id}`, { method: 'DELETE' }); }
     catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar el plan'); await load(); }

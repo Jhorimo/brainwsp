@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateStageDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateStageDto, UpdateTagDto, UpdateTeamUserDto } from './team.dto';
+import { CreateDepartmentDto, CreateKnowledgeEntryDto, CreateProjectDto, CreateStageDto, CreateTagDto, CreateTeamUserDto, SetDepartmentMembersDto, UpdateAiSettingsDto, UpdateCompanyDto, UpdateDepartmentDto, UpdateKnowledgeEntryDto, UpdateProjectDto, UpdateStageDto, UpdateTagDto, UpdateTeamUserDto } from './team.dto';
 import { TeamService } from './team.service';
 
 // NOTE: unlike the other feature controllers, this one is intentionally NOT gated by
@@ -39,6 +39,12 @@ export class TeamController {
   updateUser(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateTeamUserDto) {
     if (id === user.sub && dto.active === false) throw new ForbiddenException('No puedes desactivar tu propio usuario');
     return this.service.updateUser(user.companyId, id, dto);
+  }
+
+  @Patch('company')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  updateCompany(@CurrentUser() user: JwtUser, @Body() dto: UpdateCompanyDto) {
+    return this.service.updateCompanyName(user.companyId, dto.name);
   }
 
   @Get('departments')

@@ -87,6 +87,11 @@ export class AuthService {
     };
   }
 
+  async updateProfile(userId: string, name: string) {
+    const user = await this.prisma.user.update({ where: { id: userId }, data: { name: name.trim() } });
+    return { id: user.id, name: user.name };
+  }
+
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {

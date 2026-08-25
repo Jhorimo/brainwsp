@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { ConfirmProvider } from '@/components/confirm-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body><ConfirmProvider>{children}</ConfirmProvider></body>
     </html>
   );
 }

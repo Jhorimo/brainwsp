@@ -7,6 +7,7 @@ import { AlertCircle, AlertTriangle, ArrowLeft, Bot, CalendarDays, Check, CheckC
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
+import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -186,6 +187,7 @@ function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 export default function ConversationsPage() {
+  const confirm = useConfirm();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Below ~850px the list and the open chat can't share the screen (WhatsApp's own mobile
@@ -897,7 +899,7 @@ export default function ConversationsPage() {
   };
 
   const cancelAppointment = async (appointment: Appointment) => {
-    if (!window.confirm(`¿Cancelar la cita "${appointment.title}"? También se elimina de Google Calendar.`)) return;
+    if (!(await confirm(`¿Cancelar la cita "${appointment.title}"? También se elimina de Google Calendar.`, { confirmText: 'Cancelar cita', cancelText: 'Volver' }))) return;
     setAppointments((current) => current.filter((item) => item.id !== appointment.id));
     try {
       await apiFetch(`/calendar/appointments/${appointment.id}`, { method: 'DELETE' });
@@ -954,7 +956,7 @@ export default function ConversationsPage() {
   };
 
   const deleteCompanyTag = async (tag: Tag) => {
-    if (!window.confirm(`¿Eliminar la etiqueta "${tag.name}"? Se quitará de todos los contactos que la tengan.`)) return;
+    if (!(await confirm(`¿Eliminar la etiqueta "${tag.name}"? Se quitará de todos los contactos que la tengan.`, { confirmText: 'Eliminar' }))) return;
     try {
       await apiFetch(`/team/tags/${tag.id}`, { method: 'DELETE' });
       setCompanyTags((current) => current.filter((item) => item.id !== tag.id));
@@ -1139,7 +1141,7 @@ export default function ConversationsPage() {
   };
 
   const deleteQuickReply = async (qr: QuickReply) => {
-    if (!window.confirm(`¿Eliminar la respuesta rápida "/${qr.shortcut}"?`)) return;
+    if (!(await confirm(`¿Eliminar la respuesta rápida "/${qr.shortcut}"?`, { confirmText: 'Eliminar' }))) return;
     try {
       await apiFetch(`/quick-replies/${qr.id}`, { method: 'DELETE' });
       setQuickReplies((current) => current.filter((item) => item.id !== qr.id));

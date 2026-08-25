@@ -5,6 +5,7 @@ import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { NoteButton } from '@/components/note-button';
+import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type TeamUser = { id: string; name: string };
@@ -21,6 +22,7 @@ type Deal = {
 const emptyForm = { title: '', companyName: '', personName: '', personEmail: '', personPhone: '', value: '' };
 
 export default function DealsPage() {
+  const confirm = useConfirm();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [teamUsers, setTeamUsers] = useState<TeamUser[]>([]);
@@ -86,7 +88,7 @@ export default function DealsPage() {
   };
 
   const remove = async (deal: Deal) => {
-    if (!window.confirm(`¿Eliminar el trato "${deal.title}"?`)) return;
+    if (!(await confirm(`¿Eliminar el trato "${deal.title}"?`, { confirmText: 'Eliminar' }))) return;
     setBusyId(deal.id);
     try { await apiFetch(`/crm/deals/${deal.id}`, { method: 'DELETE' }); load(); }
     catch (err) { setError(err instanceof Error ? err.message : 'No se pudo eliminar el trato'); }

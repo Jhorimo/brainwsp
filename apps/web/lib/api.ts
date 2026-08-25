@@ -35,6 +35,18 @@ export function setAuthSession(data: { accessToken: string; user: unknown; compa
   if (data.company !== undefined) writeAuthItem('brainwsp_company', JSON.stringify(data.company), persist);
 }
 
+// Patches the stored user/company object in place (same storage it was already in) so a
+// profile edit shows up immediately without forcing a re-login to refresh the JWT payload.
+function patchAuthItem(key: string, patch: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  const persist = localStorage.getItem(key) !== null;
+  const current = JSON.parse(readAuthItem(key) || '{}');
+  writeAuthItem(key, JSON.stringify({ ...current, ...patch }), persist);
+}
+
+export function updateStoredUser(patch: Record<string, unknown>) { patchAuthItem('brainwsp_user', patch); }
+export function updateStoredCompany(patch: Record<string, unknown>) { patchAuthItem('brainwsp_company', patch); }
+
 export function clearAuthSession() {
   for (const key of AUTH_KEYS) { localStorage.removeItem(key); sessionStorage.removeItem(key); }
 }

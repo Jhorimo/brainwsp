@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Bot,
   CalendarDays,
+  Check,
   ChevronDown,
   Eye,
   Handshake,
@@ -25,7 +26,7 @@ import {
 } from 'lucide-react';
 import { Protected } from './protected';
 import { FeedbackWidget } from './feedback-widget';
-import { apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation } from '@/lib/api';
+import { apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
 
 const roleLabels: Record<string, string> = {
   SUPERADMIN: 'Super administrador',
@@ -61,6 +62,14 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const [companyDraft, setCompanyDraft] = useState('');
+  const [companySaving, setCompanySaving] = useState(false);
+  const [companySaved, setCompanySaved] = useState(false);
+  const [companyError, setCompanyError] = useState('');
   // null = ver todo (rol no restringido, o aún no se resolvió /auth/me). Un array = lista
   // de módulos permitidos para un Agente restringido — ver AppShell más abajo.
   const [allowedModules, setAllowedModules] = useState<string[] | null>(null);
@@ -117,7 +126,53 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
     setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     setPasswordError('');
     setPasswordSuccess(false);
+    setNameDraft(identity.name);
+    setNameError('');
+    setNameSaved(false);
+    setCompanyDraft(identity.company);
+    setCompanyError('');
+    setCompanySaved(false);
     setProfileModal(true);
+  };
+
+  const saveName = async () => {
+    const trimmed = nameDraft.trim();
+    if (!trimmed || trimmed === identity.name) return;
+    setNameSaving(true);
+    setNameError('');
+    setNameSaved(false);
+    try {
+      const updated = await apiFetch<{ name: string }>('/auth/me', { method: 'PATCH', body: JSON.stringify({ name: trimmed }) });
+      updateStoredUser({ name: updated.name });
+      setIdentity((current) => ({ ...current, name: updated.name }));
+      setNameSaved(true);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : 'No se pudo actualizar el nombre');
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  const saveCompany = async () => {
+    const trimmed = companyDraft.trim();
+    if (!trimmed || trimmed === identity.company) return;
+    setCompanySaving(true);
+    setCompanyError('');
+    setCompanySaved(false);
+    try {
+      const updated = await apiFetch<{ name: string }>('/team/company', { method: 'PATCH', body: JSON.stringify({ name: trimmed }) });
+      updateStoredCompany({ name: updated.name });
+      setIdentity((current) => ({
+        ...current,
+        company: updated.name,
+        initials: updated.name.split(' ').slice(0, 2).map((part: string) => part[0]).join('').toUpperCase() || 'BW',
+      }));
+      setCompanySaved(true);
+    } catch (err) {
+      setCompanyError(err instanceof Error ? err.message : 'No se pudo actualizar la empresa');
+    } finally {
+      setCompanySaving(false);
+    }
   };
 
   const changePassword = async () => {
@@ -157,6 +212,8 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
       router.replace(visibleNavigation[0]?.href || visibleCrmNavigation[0]?.href || '/login');
     }
   }, [allowedModules, pathname, router, visibleNavigation, visibleCrmNavigation]);
+
+  const isAccountManager = identity.role === 'OWNER' || identity.role === 'ADMIN';
 
   const logout = () => {
     clearAuthSession();
@@ -252,11 +309,37 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header"><h2>Mi perfil</h2><p>Tus datos de acceso a BrainWSP.</p></div>
             <div className="modal-body">
+              {nameError && <div className="error-box">{nameError}</div>}
+              {companyError && <div className="error-box">{companyError}</div>}
               <div className="form-grid">
-                <div className="field"><label>Nombre</label><input value={identity.name} disabled /></div>
-                <div className="field"><label>Correo</label><input value={identity.email} disabled /></div>
-                <div className="field"><label>Empresa</label><input value={identity.company} disabled /></div>
-                <div className="field"><label>Rol</label><input value={roleLabels[identity.role] || identity.role} disabled /></div>
+                <div className="field">
+                  <label>Nombre</label>
+                  <div className="field-with-action">
+                    <input value={nameDraft} onChange={(e) => { setNameDraft(e.target.value); setNameSaved(false); }} onKeyDown={(e) => { if (e.key === 'Enter') void saveName(); }} />
+                    {nameDraft.trim() && nameDraft.trim() !== identity.name && (
+                      <button className={`button small notes-save-button ${nameSaved ? 'saved' : ''}`} disabled={nameSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveName()} title="Guardar nombre">
+                        {nameSaving ? '...' : <Check size={13} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="field"><label>Correo</label><input value={identity.email} disabled title="El correo no se puede cambiar desde aquí" /></div>
+                <div className="field">
+                  <label>Empresa</label>
+                  {isAccountManager ? (
+                    <div className="field-with-action">
+                      <input value={companyDraft} onChange={(e) => { setCompanyDraft(e.target.value); setCompanySaved(false); }} onKeyDown={(e) => { if (e.key === 'Enter') void saveCompany(); }} />
+                      {companyDraft.trim() && companyDraft.trim() !== identity.company && (
+                        <button className={`button small notes-save-button ${companySaved ? 'saved' : ''}`} disabled={companySaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveCompany()} title="Guardar empresa">
+                          {companySaving ? '...' : <Check size={13} />}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <input value={identity.company} disabled title="Solo el propietario o un administrador puede cambiar el nombre de la empresa" />
+                  )}
+                </div>
+                <div className="field"><label>Rol</label><input value={roleLabels[identity.role] || identity.role} disabled title="El rol lo asigna un administrador desde Equipo y agentes" /></div>
               </div>
 
               <div className="field" style={{ marginTop: '1.25rem' }}>

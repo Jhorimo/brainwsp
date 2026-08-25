@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { MODULE_KEYS, type ModuleKey } from '../common/constants/modules';
 
 export class CreateTeamUserDto {
@@ -179,6 +179,14 @@ export class UpdateTagDto {
   @IsOptional()
   @IsString()
   color?: string;
+}
+
+export class UpdateCompanyDto {
+  @ApiProperty({ example: 'Brain Tech Perú' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name!: string;
 }
 
 export class UpdateAiSettingsDto {

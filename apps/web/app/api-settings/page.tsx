@@ -6,6 +6,7 @@ import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
 import { ApiDocs } from '@/components/api-docs';
 import { StatusPill } from '@/components/status-pill';
+import { useConfirm } from '@/components/confirm-provider';
 import { API_URL, apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type Credential = { id: string; name: string; appKey: string; hasAuthKey: boolean; instanceId: string | null; active: boolean; lastUsedAt?: string | null; createdAt: string; instance?: { id: string; name: string; slug: string; status: string } | null };
@@ -15,6 +16,7 @@ type CreatedCredential = Credential & { authKey: string; warning: string };
 type Instance = { id: string; name: string; slug: string; status: string };
 
 export default function ApiSettingsPage() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<Credential[]>([]);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [search, setSearch] = useState('');
@@ -84,7 +86,7 @@ export default function ApiSettingsPage() {
   };
 
   const remove = async (item: Credential) => {
-    if (!window.confirm(`¿Eliminar la credencial "${item.name}"? Cualquier sistema que la use dejará de poder conectarse. Esta acción no se puede deshacer.`)) return;
+    if (!(await confirm(`¿Eliminar la credencial "${item.name}"? Cualquier sistema que la use dejará de poder conectarse. Esta acción no se puede deshacer.`, { confirmText: 'Eliminar' }))) return;
     setBusyId(item.id); setError('');
     try {
       await apiFetch(`/api-credentials/${item.id}`, { method: 'DELETE' });
@@ -94,7 +96,7 @@ export default function ApiSettingsPage() {
   };
 
   const regenerate = async (item: Credential) => {
-    if (!window.confirm(`¿Generar un nuevo AUTH KEY para "${item.name}"? El AUTH KEY actual dejará de funcionar de inmediato.`)) return;
+    if (!(await confirm(`¿Generar un nuevo AUTH KEY para "${item.name}"? El AUTH KEY actual dejará de funcionar de inmediato.`, { title: 'Regenerar AUTH KEY', confirmText: 'Regenerar' }))) return;
     setBusyId(item.id); setError('');
     try {
       const data = await apiFetch<CreatedCredential>(`/api-credentials/${item.id}/regenerate`, { method: 'PATCH' });

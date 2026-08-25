@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, MessagesSquare, Radio, Users } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
+import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch, startImpersonation } from '@/lib/api';
 
 type Owner = { id: string; name: string; email: string };
@@ -21,6 +22,7 @@ function initialsOf(name: string) {
 
 export default function AdminClientsPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState('');
@@ -62,7 +64,7 @@ export default function AdminClientsPage() {
   };
 
   const viewPanel = async (company: Company) => {
-    if (!window.confirm(`Vas a entrar como el panel de "${company.name}". Podrás volver a tu cuenta de administrador con el botón "Volver a admin".`)) return;
+    if (!(await confirm(`Vas a entrar como el panel de "${company.name}". Podrás volver a tu cuenta de administrador con el botón "Volver a admin".`, { title: 'Entrar como cliente', confirmText: 'Entrar', danger: false }))) return;
     setBusyId(company.id);
     try {
       const session = await apiFetch<{ accessToken: string; user: unknown; company: unknown }>(`/admin/companies/${company.id}/impersonate`, { method: 'POST' });
