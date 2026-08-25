@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { ApiUserTokenGuard } from '../common/guards/api-user-token.guard';
 import type { ApiClientContext } from '../common/types/jwt-user';
@@ -14,6 +14,7 @@ type ApiRequest = Request & { apiClient: ApiClientContext };
 // `Authorization: Bearer {AUTH KEY}`. Ese proyecto no se modifica: estas rutas existen para
 // que su integración funcione sin cambios.
 @ApiTags('Legacy BrainPOS Restaurante API')
+@ApiBearerAuth()
 @UseGuards(ApiUserTokenGuard)
 @Controller('user')
 export class UserDeviceController {
