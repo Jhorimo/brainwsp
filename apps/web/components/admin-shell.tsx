@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Building2, ChevronDown, CreditCard, KeyRound, Lightbulb, LogOut, Menu, ShieldCheck } from 'lucide-react';
-import { clearAuthSession, getStoredUser, getToken } from '@/lib/api';
+import { apiFetch, clearAuthSession, getStoredUser, getToken } from '@/lib/api';
 
 const navigation = [
   { href: '/admin/clients', label: 'Usuarios', icon: Building2 },
@@ -37,6 +37,12 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
   const pathname = usePathname();
   const router = useRouter();
   const [name, setName] = useState('Super Admin');
+  const [email, setEmail] = useState('');
+  const [profileModal, setProfileModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   // Mismo patrón que AppShell (el panel de cada empresa): abajo de 640px la barra lateral
   // pasa a ser un cajón oculto en vez de una barra de íconos — este botón controla ambos
@@ -45,11 +51,36 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
 
   useEffect(() => {
     try {
-      const user = getStoredUser<{ name?: string }>();
+      const user = getStoredUser<{ name?: string; email?: string }>();
       setName(String(user.name || 'Super Admin'));
+      setEmail(String(user.email || ''));
     } catch {}
     setCollapsed(localStorage.getItem('brainwsp_admin_sidebar_collapsed') === '1');
   }, []);
+
+  const openProfile = () => {
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    setPasswordError('');
+    setPasswordSuccess(false);
+    setProfileModal(true);
+  };
+
+  const changePassword = async () => {
+    setPasswordError('');
+    setPasswordSuccess(false);
+    if (passwordForm.newPassword.length < 10) { setPasswordError('La nueva contraseña debe tener al menos 10 caracteres'); return; }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) { setPasswordError('Las contraseñas no coinciden'); return; }
+    setPasswordSaving(true);
+    try {
+      await apiFetch('/auth/password', { method: 'PATCH', body: JSON.stringify({ currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword }) });
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setPasswordSuccess(true);
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : 'No se pudo cambiar la contraseña');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
 
   useEffect(() => { setMobileNavOpen(false); }, [pathname]);
   useEffect(() => {
@@ -99,12 +130,12 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
           </nav>
 
           <div className="sidebar-footer">
-            <button className="account-button" type="button">
+            <button className="account-button" type="button" onClick={openProfile}>
               <div className="avatar">{name.split(' ').slice(0, 2).map((p) => p[0]).join('').toUpperCase()}</div>
               <div className="account-copy"><strong>{name}</strong><span>Super Admin</span></div>
               <ChevronDown size={16} />
             </button>
-            <button className="logout-button" onClick={logout} type="button"><LogOut size={17} />Cerrar sesión</button>
+            <button className="logout-button" onClick={logout} type="button"><LogOut size={17} /><span>Cerrar sesión</span></button>
           </div>
         </aside>
 
@@ -124,6 +155,36 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
           <div className="page-content">{children}</div>
         </main>
       </div>
+
+      {profileModal && (
+        <div className="modal-backdrop" onClick={() => setProfileModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header"><h2>Mi perfil</h2><p>Tus datos de acceso al panel de plataforma.</p></div>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div className="field"><label>Nombre</label><input value={name} disabled /></div>
+                <div className="field"><label>Correo</label><input value={email} disabled /></div>
+                <div className="field"><label>Rol</label><input value="Super administrador" disabled /></div>
+              </div>
+
+              <div className="field" style={{ marginTop: '1.25rem' }}>
+                <label>Cambiar contraseña</label>
+              </div>
+              {passwordError && <div className="error-box">{passwordError}</div>}
+              {passwordSuccess && <div className="success-box">Contraseña actualizada correctamente.</div>}
+              <div className="form-grid">
+                <div className="field"><label>Contraseña actual</label><input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} /></div>
+                <div className="field"><label>Nueva contraseña</label><input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} placeholder="Mínimo 10 caracteres" /></div>
+                <div className="field"><label>Confirmar nueva contraseña</label><input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} /></div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => setProfileModal(false)}>Cerrar</button>
+              <button className="button primary" disabled={passwordSaving || !passwordForm.currentPassword || !passwordForm.newPassword} onClick={() => void changePassword()}>{passwordSaving ? 'Guardando...' : 'Cambiar contraseña'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </ProtectedAdmin>
   );
 }

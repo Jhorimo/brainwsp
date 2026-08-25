@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateInstanceDto } from './instances.dto';
+import { CreateInstanceDto, UpdateInstanceDto } from './instances.dto';
 import { InstancesService } from './instances.service';
 
 // NOTE: not gated by ModuleAccessGuard/'instances' — the Conversations page calls
@@ -47,5 +47,17 @@ export class InstancesController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   logout(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.logout(user.companyId, id);
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  update(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateInstanceDto) {
+    return this.service.update(user.companyId, id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  remove(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.remove(user.companyId, id);
   }
 }

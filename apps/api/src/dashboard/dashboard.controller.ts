@@ -32,16 +32,17 @@ export class DashboardController {
   @Get('stats')
   async stats(@CurrentUser() user: JwtUser, @Query('from') from?: string, @Query('to') to?: string) {
     const { start, end } = this.resolveRange(from, to);
-    const [connectedInstances, openConversations, unreadConversations, inboundInRange, agents, aiActiveConversations, aiMessagesInRange] = await Promise.all([
+    const [connectedInstances, openConversations, unreadConversations, inboundInRange, outboundInRange, agents, aiActiveConversations, aiMessagesInRange] = await Promise.all([
       this.prisma.whatsAppInstance.count({ where: { companyId: user.companyId, status: InstanceStatus.CONNECTED, active: true } }),
       this.prisma.conversation.count({ where: { companyId: user.companyId, status: { in: [ConversationStatus.OPEN, ConversationStatus.PENDING] } } }),
       this.prisma.conversation.count({ where: { companyId: user.companyId, unreadCount: { gt: 0 } } }),
       this.prisma.message.count({ where: { companyId: user.companyId, direction: MessageDirection.INBOUND, createdAt: { gte: start, lt: end } } }),
+      this.prisma.message.count({ where: { companyId: user.companyId, direction: MessageDirection.OUTBOUND, createdAt: { gte: start, lt: end } } }),
       this.prisma.user.count({ where: { companyId: user.companyId, active: true } }),
       this.prisma.conversation.count({ where: { companyId: user.companyId, aiEnabled: true } }),
       this.prisma.message.count({ where: { companyId: user.companyId, createdAt: { gte: start, lt: end }, metadata: { path: ['aiGenerated'], equals: true } } }),
     ]);
-    return { connectedInstances, openConversations, unreadConversations, inboundInRange, agents, aiActiveConversations, aiMessagesInRange };
+    return { connectedInstances, openConversations, unreadConversations, inboundInRange, outboundInRange, agents, aiActiveConversations, aiMessagesInRange };
   }
 
   // Real per-day inbound/outbound counts for the dashboard's activity chart — every day in

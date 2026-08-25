@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
-import { Activity, Bot, Building2, CircleUserRound, Layers, MessagesSquare, Radio, Tag as TagIcon, UserRoundCheck, UserRoundX, UsersRound } from 'lucide-react';
+import { Activity, Bot, Building2, CircleUserRound, Layers, MessagesSquare, Radio, Send, Tag as TagIcon, UserRoundCheck, UserRoundX, UsersRound } from 'lucide-react';
 
-type Stats = { connectedInstances: number; openConversations: number; unreadConversations: number; inboundInRange: number; agents: number; aiActiveConversations: number; aiMessagesInRange: number };
+type Stats = { connectedInstances: number; openConversations: number; unreadConversations: number; inboundInRange: number; outboundInRange: number; agents: number; aiActiveConversations: number; aiMessagesInRange: number };
 type RankedUser = { id: string; name: string; email: string; role: string; conversations: number };
 type RankedGroup = { id: string; name: string; conversations: number };
 type RankedTag = { id: string; name: string; color: string; contacts: number };
@@ -68,7 +68,7 @@ function RankList({ icon: Icon, items, emptyLabel, subtitle, highlight }: { icon
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<Stats>({ connectedInstances: 0, openConversations: 0, unreadConversations: 0, inboundInRange: 0, agents: 0, aiActiveConversations: 0, aiMessagesInRange: 0 });
+  const [stats, setStats] = useState<Stats>({ connectedInstances: 0, openConversations: 0, unreadConversations: 0, inboundInRange: 0, outboundInRange: 0, agents: 0, aiActiveConversations: 0, aiMessagesInRange: 0 });
   const [breakdown, setBreakdown] = useState<Breakdown>({ byUser: [], byDepartment: [], byProject: [], unassigned: 0, byTag: [] });
   const [pipeline, setPipeline] = useState<PipelineDept[]>([]);
   const [volume, setVolume] = useState<VolumeDay[]>([]);
@@ -121,6 +121,7 @@ export default function DashboardPage() {
     { label: 'Conversaciones abiertas', value: stats.openConversations, meta: 'Open + Pending', icon: MessagesSquare },
     { label: 'Sin leer', value: stats.unreadConversations, meta: 'Requieren atención', icon: Activity },
     { label: 'Mensajes recibidos', value: stats.inboundInRange, meta: rangeLabel, icon: CircleUserRound },
+    { label: 'Mensajes enviados', value: stats.outboundInRange, meta: rangeLabel, icon: Send },
     { label: 'Agentes', value: stats.agents, meta: 'Usuarios activos', icon: UsersRound },
     { label: 'Con IA activa', value: stats.aiActiveConversations, meta: 'Conversaciones en piloto automático', icon: Bot },
     { label: 'Respuestas de IA', value: stats.aiMessagesInRange, meta: rangeLabel, icon: Bot },
@@ -161,8 +162,14 @@ export default function DashboardPage() {
                   {volume.map((day, index) => (
                     <div className="activity-chart-col" key={day.date}>
                       <div className="activity-chart-bars">
-                        <div className="activity-chart-bar inbound" style={{ height: `${(day.inbound / maxVolume) * 100}%` }} title={`Recibidos ${day.date}: ${day.inbound}`} />
-                        <div className="activity-chart-bar outbound" style={{ height: `${(day.outbound / maxVolume) * 100}%` }} title={`Enviados ${day.date}: ${day.outbound}`} />
+                        <div className="chart-bar-wrap">
+                          <div className="chart-tooltip">Recibidos · {formatShortDate(day.date)}<strong>{day.inbound}</strong></div>
+                          <div className="activity-chart-bar inbound" style={{ height: `${(day.inbound / maxVolume) * 100}%` }} />
+                        </div>
+                        <div className="chart-bar-wrap">
+                          <div className="chart-tooltip">Enviados · {formatShortDate(day.date)}<strong>{day.outbound}</strong></div>
+                          <div className="activity-chart-bar outbound" style={{ height: `${(day.outbound / maxVolume) * 100}%` }} />
+                        </div>
                       </div>
                       {(showEveryLabel || index % Math.ceil(volume.length / 8) === 0) && (
                         <span className="activity-chart-label">{formatShortDate(day.date)}</span>
@@ -277,6 +284,7 @@ export default function DashboardPage() {
           <div className="card-header"><div><h2>Resumen del periodo</h2><p>{rangeLabel}</p></div></div>
           <div className="card-body activity-list">
             <div className="activity-row"><div className="activity-icon"><CircleUserRound size={16} /></div><div className="activity-copy"><strong>Mensajes recibidos</strong><span>Volumen entrante — clave para medir campañas de ads</span></div><span className="activity-time">{stats.inboundInRange}</span></div>
+            <div className="activity-row"><div className="activity-icon"><Send size={16} /></div><div className="activity-copy"><strong>Mensajes enviados</strong><span>Total saliente — humanos + IA + API</span></div><span className="activity-time">{stats.outboundInRange}</span></div>
             <div className="activity-row"><div className="activity-icon"><Bot size={16} /></div><div className="activity-copy"><strong>Respondidos por IA</strong><span>Mensajes que no tocó un humano</span></div><span className="activity-time">{stats.aiMessagesInRange}</span></div>
             <div className="activity-row"><div className="activity-icon"><UserRoundCheck size={16} /></div><div className="activity-copy"><strong>Agentes con actividad</strong><span>Enviaron al menos un mensaje</span></div><span className="activity-time">{agentPerf.filter((item) => item.messagesSent > 0).length}</span></div>
           </div>

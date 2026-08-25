@@ -18,3 +18,11 @@ export class CreateInstanceDto {
   @IsEnum(WhatsAppProvider)
   provider?: WhatsAppProvider;
 }
+
+export class UpdateInstanceDto {
+  @ApiPropertyOptional({ example: 'WhatsApp Ventas' })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  name?: string;
+}

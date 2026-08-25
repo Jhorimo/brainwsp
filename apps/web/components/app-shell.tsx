@@ -195,7 +195,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
               <div className="account-copy"><strong>{identity.company}</strong><span>{identity.role}</span></div>
               <ChevronDown size={16} />
             </button>
-            <button className="logout-button" onClick={logout} type="button"><LogOut size={17} />Cerrar sesión</button>
+            <button className="logout-button" onClick={logout} type="button"><LogOut size={17} /><span>Cerrar sesión</span></button>
           </div>
         </aside>
 
