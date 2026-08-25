@@ -84,6 +84,7 @@ export default function PipelinesPage() {
   useEffect(() => { loadRef.current = load; });
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    socket.on('connect', () => loadRef.current());
     socket.on('deal.created', () => loadRef.current());
     socket.on('deal.updated', () => loadRef.current());
     socket.on('deal.removed', () => loadRef.current());

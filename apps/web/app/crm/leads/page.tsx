@@ -55,6 +55,7 @@ export default function LeadsPage() {
   useEffect(() => { loadRef.current = load; });
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    socket.on('connect', () => loadRef.current());
     socket.on('lead.created', () => loadRef.current());
     socket.on('lead.updated', () => loadRef.current());
     socket.on('lead.removed', () => loadRef.current());
