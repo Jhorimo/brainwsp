@@ -6,14 +6,17 @@ import { CSS } from '@dnd-kit/utilities';
 import { io } from 'socket.io-client';
 import { Kanban, Plus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
+import { NoteButton } from '@/components/note-button';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type TeamUser = { id: string; name: string };
+type Tag = { id: string; name: string; color: string };
 type Stage = { id: string; name: string; color: string; isWon: boolean; order: number };
 type Department = { id: string; name: string; stages: Stage[] };
 type Deal = {
   id: string; title: string; value?: number | null; stage: { id: string }; probability?: number | null;
   assignedUser?: TeamUser | null; companyName?: string | null; personName?: string | null;
+  phone?: string | null; notes?: string | null; contactTags?: Tag[]; project?: { id: string; name: string } | null;
 };
 
 function initialsOf(name: string) {
@@ -25,11 +28,26 @@ function DealCard({ deal }: { deal: Deal }) {
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.35 : 1 };
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="kanban-card">
-      <strong>{deal.title}</strong>
+      <div className="kanban-card-title-row">
+        <strong>{deal.title}</strong>
+        {deal.notes && <NoteButton notes={deal.notes} />}
+      </div>
       {deal.value ? <span className="kanban-card-value">USD {deal.value.toLocaleString('es-PE')}</span> : null}
       {(deal.companyName || deal.personName) && <span className="kanban-card-meta">{deal.companyName || deal.personName}</span>}
+      {deal.phone && <span className="kanban-card-meta">{deal.phone}</span>}
+      {deal.project && <span className="kanban-card-project">{deal.project.name}</span>}
+      {!!deal.contactTags?.length && (
+        <div className="kanban-card-tags">
+          {deal.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>)}
+        </div>
+      )}
       <div className="kanban-card-footer">
-        {deal.assignedUser ? <span className="kanban-card-avatar" title={deal.assignedUser.name}>{initialsOf(deal.assignedUser.name)}</span> : <span />}
+        {deal.assignedUser ? (
+          <span className="kanban-card-assignee" title={deal.assignedUser.name}>
+            <span className="kanban-card-avatar">{initialsOf(deal.assignedUser.name)}</span>
+            <span className="kanban-card-assignee-name">{deal.assignedUser.name.split(' ')[0]}</span>
+          </span>
+        ) : <span className="kanban-card-assignee-name">Sin responsable</span>}
         {deal.probability != null && <span className="kanban-card-probability">{deal.probability}%</span>}
       </div>
     </div>

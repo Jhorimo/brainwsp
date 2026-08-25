@@ -10,10 +10,15 @@ export interface DealFilters {
   assignedUserId?: string;
 }
 
-const DEAL_INCLUDE = {
+// El contacto/conversación de origen traen datos que ya se ven en Conversaciones (teléfono,
+// notas, etiquetas, proyecto) — se leen de ahí en vez de duplicarlos como campos propios,
+// así siempre reflejan lo último que el agente vio/editó en el chat.
+export const DEAL_INCLUDE = {
   assignedUser: { select: { id: true, name: true } },
   stage: { select: { id: true, name: true, color: true, isWon: true } },
   tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
+  contact: { select: { phone: true, notes: true, tags: { include: { tag: { select: { id: true, name: true, color: true } } } } } },
+  conversation: { select: { project: { select: { id: true, name: true } } } },
 } satisfies Prisma.DealInclude;
 
 @Injectable()
@@ -92,15 +97,14 @@ export class DealsService {
         if (tagIds.length) await tx.dealTag.createMany({ data: [...new Set(tagIds)].map((tagId) => ({ dealId: id, tagId })) });
       }
     });
-    const updated = await this.prisma.deal.findUniqueOrThrow({ where: { id }, include: DEAL_INCLUDE });
-    const serialized = this.serialize(updated);
+    const serialized = await this.hydrate(id);
     void this.realtime.publish(companyId, 'deal.updated', serialized);
 
     // La Etapa de la conversación de origen (si tiene una) es la misma etiqueta que ve el
     // agente en Conversaciones — moverla acá en el Kanban debe reflejarse allá también.
-    if (input.stageId && updated.conversationId) {
-      await this.prisma.conversation.updateMany({ where: { id: updated.conversationId }, data: { stageId: input.stageId } });
-      void this.realtime.publish(companyId, 'conversation.updated', { id: updated.conversationId, stage: updated.stage }, updated.departmentId);
+    if (input.stageId && deal.conversationId) {
+      await this.prisma.conversation.updateMany({ where: { id: deal.conversationId }, data: { stageId: input.stageId } });
+      void this.realtime.publish(companyId, 'conversation.updated', { id: deal.conversationId, stage: serialized.stage }, deal.departmentId);
     }
     return serialized;
   }
@@ -121,13 +125,27 @@ export class DealsService {
     if (!deal || deal.stageId === stageId) return;
     const stage = await this.prisma.pipelineStage.findFirst({ where: { id: stageId, companyId, departmentId: deal.departmentId } });
     if (!stage) return;
-    const updated = await this.prisma.deal.update({ where: { id: deal.id }, data: { stageId }, include: DEAL_INCLUDE });
-    void this.realtime.publish(companyId, 'deal.updated', this.serialize(updated));
+    await this.prisma.deal.update({ where: { id: deal.id }, data: { stageId } });
+    void this.realtime.publish(companyId, 'deal.updated', await this.hydrate(deal.id));
+  }
+
+  // Reusado por LeadsService.convert() para devolver/emitir el Deal recién creado con la
+  // misma forma enriquecida (teléfono/notas/etiquetas/proyecto) que ya usa esta lista.
+  async hydrate(id: string) {
+    const deal = await this.prisma.deal.findUniqueOrThrow({ where: { id }, include: DEAL_INCLUDE });
+    return this.serialize(deal);
   }
 
   private serialize(deal: Prisma.DealGetPayload<{ include: typeof DEAL_INCLUDE }>) {
-    const { tags, ...rest } = deal;
-    return { ...rest, tags: tags.map((t) => t.tag) };
+    const { tags, contact, conversation, ...rest } = deal;
+    return {
+      ...rest,
+      tags: tags.map((t) => t.tag),
+      phone: contact?.phone || rest.personPhone || null,
+      notes: contact?.notes || null,
+      contactTags: contact?.tags.map((t) => t.tag) || [],
+      project: conversation?.project || null,
+    };
   }
 
   private async assertStageInDepartment(companyId: string, departmentId: string, stageId: string) {

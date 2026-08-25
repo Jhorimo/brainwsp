@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { LeadStatus, Prisma } from '@prisma/client';
+import { DealsService } from './deals.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 
@@ -10,14 +11,23 @@ export interface LeadFilters {
   assignedUserId?: string;
 }
 
+// Mismo criterio que DEAL_INCLUDE: teléfono/notas/etiquetas vienen del Contacto y el
+// proyecto de la Conversación de origen — se leen de ahí, no se duplican en el Lead.
+const LEAD_INCLUDE = {
+  assignedUser: { select: { id: true, name: true } },
+  contact: { select: { phone: true, notes: true, tags: { include: { tag: { select: { id: true, name: true, color: true } } } } } },
+  conversation: { select: { project: { select: { id: true, name: true } } } },
+} satisfies Prisma.LeadInclude;
+
 @Injectable()
 export class LeadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeBus,
+    private readonly deals: DealsService,
   ) {}
 
-  list(companyId: string, filters: LeadFilters) {
+  async list(companyId: string, filters: LeadFilters) {
     const where: Prisma.LeadWhereInput = {
       companyId,
       ...(filters.status ? { status: filters.status } : {}),
@@ -27,12 +37,8 @@ export class LeadsService {
         ? { OR: [{ title: { contains: filters.q, mode: 'insensitive' } }, { personName: { contains: filters.q, mode: 'insensitive' } }, { companyName: { contains: filters.q, mode: 'insensitive' } }, { personEmail: { contains: filters.q, mode: 'insensitive' } }] }
         : {}),
     };
-    return this.prisma.lead.findMany({
-      where,
-      include: { assignedUser: { select: { id: true, name: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: 300,
-    });
+    const leads = await this.prisma.lead.findMany({ where, include: LEAD_INCLUDE, orderBy: { createdAt: 'desc' }, take: 300 });
+    return leads.map(this.serialize);
   }
 
   async create(companyId: string, input: {
@@ -44,10 +50,11 @@ export class LeadsService {
     if (input.departmentId) await this.assertDepartmentBelongs(companyId, input.departmentId);
     const lead = await this.prisma.lead.create({
       data: { companyId, ...input, title: input.title.trim() },
-      include: { assignedUser: { select: { id: true, name: true } } },
+      include: LEAD_INCLUDE,
     });
-    void this.realtime.publish(companyId, 'lead.created', lead);
-    return lead;
+    const serialized = this.serialize(lead);
+    void this.realtime.publish(companyId, 'lead.created', serialized);
+    return serialized;
   }
 
   async update(companyId: string, id: string, input: Partial<{
@@ -62,10 +69,11 @@ export class LeadsService {
     const updated = await this.prisma.lead.update({
       where: { id },
       data: { ...input, ...(input.title !== undefined ? { title: input.title.trim() } : {}) },
-      include: { assignedUser: { select: { id: true, name: true } } },
+      include: LEAD_INCLUDE,
     });
-    void this.realtime.publish(companyId, 'lead.updated', updated);
-    return updated;
+    const serialized = this.serialize(updated);
+    void this.realtime.publish(companyId, 'lead.updated', serialized);
+    return serialized;
   }
 
   async remove(companyId: string, id: string) {
@@ -110,11 +118,24 @@ export class LeadsService {
     const updatedLead = await this.prisma.lead.update({
       where: { id },
       data: { convertedDealId: deal.id },
-      include: { assignedUser: { select: { id: true, name: true } } },
+      include: LEAD_INCLUDE,
     });
-    void this.realtime.publish(companyId, 'lead.updated', updatedLead);
-    void this.realtime.publish(companyId, 'deal.created', deal);
-    return deal;
+    const serializedLead = this.serialize(updatedLead);
+    const hydratedDeal = await this.deals.hydrate(deal.id);
+    void this.realtime.publish(companyId, 'lead.updated', serializedLead);
+    void this.realtime.publish(companyId, 'deal.created', hydratedDeal);
+    return hydratedDeal;
+  }
+
+  private serialize(lead: Prisma.LeadGetPayload<{ include: typeof LEAD_INCLUDE }>) {
+    const { contact, conversation, ...rest } = lead;
+    return {
+      ...rest,
+      phone: contact?.phone || rest.personPhone || null,
+      notes: contact?.notes || null,
+      contactTags: contact?.tags.map((t) => t.tag) || [],
+      project: conversation?.project || null,
+    };
   }
 
   private async assertUserBelongs(companyId: string, userId: string) {

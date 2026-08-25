@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
+import { NoteButton } from '@/components/note-button';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type TeamUser = { id: string; name: string };
@@ -14,6 +15,7 @@ type Deal = {
   id: string; title: string; value?: number | null; departmentId: string; stage: Stage; probability?: number | null;
   expectedCloseAt?: string | null; assignedUserId?: string | null; assignedUser?: TeamUser | null;
   companyName?: string | null; personName?: string | null; tags: Tag[]; createdAt: string;
+  phone?: string | null; notes?: string | null; contactTags?: Tag[]; project?: { id: string; name: string } | null;
 };
 
 const emptyForm = { title: '', companyName: '', personName: '', personEmail: '', personPhone: '', value: '' };
@@ -111,6 +113,7 @@ export default function DealsPage() {
               <th>Valor</th>
               <th>Responsable</th>
               <th>Empresa / Persona</th>
+              <th>Proyecto</th>
               <th>Cierre esperado</th>
               <th>Probabilidad</th>
               <th>Etiquetas</th>
@@ -120,7 +123,10 @@ export default function DealsPage() {
           <tbody>
             {deals.map((deal) => (
               <tr key={deal.id}>
-                <td><span className="row-main">{deal.title}</span></td>
+                <td>
+                  <span className="row-main">{deal.title}</span>
+                  {deal.notes && <NoteButton notes={deal.notes} />}
+                </td>
                 <td>
                   <select className="status-select" style={{ color: deal.stage.color, borderColor: `${deal.stage.color}55`, background: `${deal.stage.color}18` }} value={deal.stage.id} onChange={(e) => void updateDeal(deal, { stageId: e.target.value })}>
                     {currentDepartment?.stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
@@ -133,10 +139,15 @@ export default function DealsPage() {
                     {teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}
                   </select>
                 </td>
-                <td><span className="row-main">{deal.companyName || '—'}</span><span className="row-sub">{deal.personName || ''}</span></td>
+                <td>
+                  <span className="row-main">{deal.companyName || '—'}</span>
+                  <span className="row-sub">{deal.personName || ''}</span>
+                  {deal.phone && <span className="row-sub">{deal.phone}</span>}
+                </td>
+                <td>{deal.project?.name || '—'}</td>
                 <td>{deal.expectedCloseAt ? new Date(deal.expectedCloseAt).toLocaleDateString('es-PE') : '—'}</td>
                 <td>{deal.probability != null ? `${deal.probability}%` : '—'}</td>
-                <td>{deal.tags.length ? deal.tags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
+                <td>{deal.contactTags?.length ? deal.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
                 <td style={{ textAlign: 'right' }}><button className="button small danger" disabled={busyId === deal.id} onClick={() => void remove(deal)}><Trash2 size={13} /></button></td>
               </tr>
             ))}

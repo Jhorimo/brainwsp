@@ -5,16 +5,19 @@ import Link from 'next/link';
 import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2, UserPlus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
+import { NoteButton } from '@/components/note-button';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type LeadStatus = 'NONE' | 'COLD' | 'INTERESTED' | 'VERY_INTERESTED';
 type TeamUser = { id: string; name: string };
 type Department = { id: string; name: string; active: boolean };
+type Tag = { id: string; name: string; color: string };
 type Lead = {
   id: string; title: string; personName?: string | null; personEmail?: string | null; companyName?: string | null;
   status: LeadStatus; channel?: string | null; source?: string | null; score?: number | null; value?: number | null;
   assignedUserId?: string | null; assignedUser?: TeamUser | null; departmentId?: string | null;
   convertedDealId?: string | null; createdAt: string;
+  phone?: string | null; notes?: string | null; contactTags?: Tag[]; project?: { id: string; name: string } | null;
 };
 
 const statusLabels: Record<LeadStatus, string> = { NONE: 'Sin estado', COLD: 'Frío', INTERESTED: 'Interesado', VERY_INTERESTED: 'Muy interesado' };
@@ -119,6 +122,8 @@ export default function LeadsPage() {
               <th>Persona / Empresa</th>
               <th>Estado</th>
               <th>Departamento</th>
+              <th>Proyecto</th>
+              <th>Etiquetas</th>
               <th>Canal</th>
               <th>Valor</th>
               <th>Responsable</th>
@@ -129,8 +134,16 @@ export default function LeadsPage() {
           <tbody>
             {leads.map((lead) => (
               <tr key={lead.id}>
-                <td><span className="row-main">{lead.title}</span>{lead.source && <span className="row-sub">{lead.source}</span>}</td>
-                <td><span className="row-main">{lead.personName || '—'}</span><span className="row-sub">{lead.companyName || lead.personEmail || ''}</span></td>
+                <td>
+                  <span className="row-main">{lead.title}</span>
+                  {lead.notes && <NoteButton notes={lead.notes} />}
+                  {lead.source && <span className="row-sub">{lead.source}</span>}
+                </td>
+                <td>
+                  <span className="row-main">{lead.personName || '—'}</span>
+                  <span className="row-sub">{lead.companyName || lead.personEmail || ''}</span>
+                  {lead.phone && <span className="row-sub">{lead.phone}</span>}
+                </td>
                 <td>
                   <select className="status-select" value={lead.status} onChange={(e) => void updateLead(lead, { status: e.target.value as LeadStatus })}>
                     {Object.entries(statusLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}
@@ -142,6 +155,8 @@ export default function LeadsPage() {
                     {departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}
                   </select>
                 </td>
+                <td>{lead.project?.name || '—'}</td>
+                <td>{lead.contactTags?.length ? lead.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
                 <td>{lead.channel || '—'}</td>
                 <td>{lead.value ? `USD ${lead.value.toLocaleString('es-PE')}` : '—'}</td>
                 <td>
