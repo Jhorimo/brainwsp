@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InstanceStatus } from '@prisma/client';
 import QRCode from 'qrcode';
 import type { ApiClientContext } from '../common/types/jwt-user';
+import { slugify } from '../common/utils/slug';
 import { InstancesService } from '../instances/instances.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateAppDto, CreateDeviceDto } from './user-device.dto';
@@ -17,22 +18,53 @@ export class UserDeviceService {
   ) {}
 
   async createDevice(client: ApiClientContext, dto: CreateDeviceDto) {
-    const instance = await this.getOwnedInstance(client);
-    const updated = await this.prisma.whatsAppInstance.update({
-      where: { id: instance.id },
-      data: {
-        name: dto.name.trim(),
-        // Solo un valor declarado hasta que se conecte de verdad: el worker sobreescribe
-        // este campo con el número real que reporte Baileys en cuanto abra la sesión
-        // (ver apps/worker/src/session-manager.ts, evento `connection.update` -> 'open').
-        phoneNumber: dto.phone.trim(),
-      },
-    });
+    const name = dto.name.trim();
+    // Solo un valor declarado hasta que se conecte de verdad: el worker sobreescribe este
+    // campo con el número real que reporte Baileys en cuanto abra la sesión (ver
+    // apps/worker/src/session-manager.ts, evento `connection.update` -> 'open').
+    const phone = dto.phone.trim();
+
+    const existing = client.instanceId
+      ? await this.prisma.whatsAppInstance.findFirst({ where: { id: client.instanceId, companyId: client.companyId, active: true } })
+      : null;
+
+    const instance = existing
+      ? await this.prisma.whatsAppInstance.update({ where: { id: existing.id }, data: { name, phoneNumber: phone } })
+      : await this.provisionInstance(client, name, phone);
 
     return {
       success: true,
-      data: { uuid: updated.id, name: updated.name, phone: updated.phoneNumber },
+      data: { uuid: instance.id, name: instance.name, phone: instance.phoneNumber },
     };
+  }
+
+  // Primera vez que se usa el AUTH KEY "Principal" (creado sin instancia al registrar la
+  // empresa, ver AuthService.register): crea la instancia de WhatsApp y la enlaza a esta
+  // misma credencial, para que quede disponible en /api/user/create-session, check-session
+  // y logout-session sin que el OWNER tenga que crearla a mano en el panel.
+  private async provisionInstance(client: ApiClientContext, name: string, phone: string) {
+    const slug = await this.generateUniqueSlug(client.companyId, name);
+    const instance = await this.prisma.whatsAppInstance.create({
+      data: { companyId: client.companyId, name, slug, phoneNumber: phone },
+    });
+    await this.prisma.apiCredential.update({
+      where: { id: client.credentialId },
+      data: { instanceId: instance.id },
+    });
+    return instance;
+  }
+
+  private async generateUniqueSlug(companyId: string, name: string): Promise<string> {
+    const root = slugify(name);
+    let candidate = root;
+    let attempt = 1;
+    while (attempt <= 50) {
+      const existing = await this.prisma.whatsAppInstance.findUnique({ where: { companyId_slug: { companyId, slug: candidate } }, select: { id: true } });
+      if (!existing) return candidate;
+      attempt += 1;
+      candidate = `${root}-${attempt}`;
+    }
+    return `${root}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   async createApp(client: ApiClientContext, _dto: CreateAppDto) {

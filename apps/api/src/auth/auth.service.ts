@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Company, Prisma, User, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import type { JwtUser } from '../common/types/jwt-user';
+import { generateApiCredential, hashApiSecret, encryptApiSecret } from '../common/utils/secret';
 import { slugify } from '../common/utils/slug';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -111,6 +112,23 @@ export class AuthService {
         const user = await tx.user.create({
           data: { companyId: company.id, name: input.name.trim(), email, passwordHash, role: UserRole.OWNER },
         });
+
+        // AUTH KEY "Principal" de la empresa, sin instancia todavía (instanceId queda
+        // null): así el sistema que integra (p.ej. BrainPOS Restaurante) puede autenticar
+        // POST /api/user/device con este mismo AUTH KEY desde el primer momento, sin que
+        // el OWNER tenga que crear una instancia manualmente antes — ver
+        // UserDeviceService.createDevice, que aprovisiona la instancia en ese primer uso.
+        const { appKey, authKey } = generateApiCredential();
+        await tx.apiCredential.create({
+          data: {
+            companyId: company.id,
+            name: 'Principal',
+            appKey,
+            authHash: hashApiSecret(authKey),
+            authKeyEncrypted: encryptApiSecret(authKey),
+          },
+        });
+
         return { user, company };
       });
     } catch (error) {
