@@ -58,7 +58,7 @@ export default function RegisterPage() {
   return (
     <div className="login-shell">
       <section className="login-visual">
-        <div className="login-brand"><div className="brand-mark"><BrandIcon /></div><div><strong>BrainWSP</strong><div style={{color:'#a9c0e3',fontSize:11}}>by Brain Tech Perú</div></div></div>
+        <div className="login-brand"><div className="brand-mark"><BrandIcon size={58} /></div><div><strong>BrainWSP</strong><div style={{color:'#a9c0e3'}}>by Brain Tech Perú</div></div></div>
         <div className="login-copy">
           <h1>Crea tu cuenta y conecta WhatsApp a tu operación.</h1>
           <p>En minutos tendrás tu propio espacio de trabajo: agrega tu número de WhatsApp, invita a tu equipo y automatiza conversaciones.</p>

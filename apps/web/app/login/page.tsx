@@ -132,7 +132,7 @@ function LoginForm() {
   return (
     <div className="login-shell">
       <section className="login-visual">
-        <div className="login-brand"><div className="brand-mark"><BrandIcon /></div><div><strong>BrainWSP</strong><div style={{color:'#a9c0e3',fontSize:11}}>by Brain Tech Perú</div></div></div>
+        <div className="login-brand"><div className="brand-mark"><BrandIcon size={58} /></div><div><strong>BrainWSP</strong><div style={{color:'#a9c0e3'}}>by Brain Tech Perú</div></div></div>
         <div className="login-copy">
           <h1>WhatsApp empresarial, integrado a todo tu ecosistema.</h1>
           <p>Centraliza tus sistemas de negocio, agentes humanos, conversaciones y automatizaciones en una sola plataforma preparada para crecer.</p>
