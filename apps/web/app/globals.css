@@ -32,7 +32,10 @@ a { color: inherit; text-decoration: none; }
    between .sidebar and .main-area in the DOM) — only shown as a fixed overlay inside the
    ≤640px mobile-drawer media query below. */
 .mobile-nav-backdrop { display: none; }
-.sidebar { position: sticky; top: 0; height: 100vh; background: #213786; color: #fff; padding: 24px 18px 18px; display: flex; flex-direction: column; transition: padding .22s ease; }
+/* `overflow-y: auto` keeps the nav list + footer inside the sidebar's own box on short
+   viewports (laptop windows, embedded panels) — without it, once brand+nav+footer needed
+   more than 100vh, the overflow rendered past the sidebar's blue background onto the page. */
+.sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; background: #213786; color: #fff; padding: 24px 18px 18px; display: flex; flex-direction: column; transition: padding .22s ease; }
 .impersonation-banner { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; height: 42px; padding: 0 16px; background: var(--warning-soft); color: var(--warning); border-bottom: 1px solid #ffe3ab; font-size: 12px; font-weight: 600; }
 .impersonation-banner button { border: 1px solid var(--warning); background: var(--warning); color: #fff; border-radius: 8px; padding: 5px 12px; font-size: 11px; font-weight: 700; }
 /* La barra ocupa 42px por fuera del grid de .app-frame, así que el sidebar sticky
@@ -792,3 +795,14 @@ tr:last-child td { border-bottom: 0; }
   .calendar-week-header, .calendar-week-body { grid-template-columns: 44px repeat(7, minmax(86px, 1fr)); }
 }
 .params-head code { background: none; padding: 0; }
+
+.legal-page { min-height: 100vh; display: flex; justify-content: center; padding: 48px 20px 80px; }
+.legal-doc { max-width: 720px; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 40px 44px; line-height: 1.65; }
+.legal-doc h1 { font-size: 24px; margin: 0 0 6px; }
+.legal-updated { color: var(--muted); font-size: 12px; margin: 0 0 28px; }
+.legal-doc h2 { font-size: 15px; margin: 28px 0 10px; color: var(--brand); }
+.legal-doc p, .legal-doc li { font-size: 13.5px; color: var(--text); }
+.legal-doc ul { margin: 8px 0; padding-left: 20px; }
+.legal-doc li { margin: 4px 0; }
+.legal-doc a { color: var(--brand-light); text-decoration: underline; }
+.legal-doc code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
