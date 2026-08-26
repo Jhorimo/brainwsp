@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CreditCard, Plus } from 'lucide-react';
+import { CreditCard, Pencil, Plus } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch } from '@/lib/api';
@@ -24,8 +24,10 @@ export default function AdminPlansPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState('');
   const [modal, setModal] = useState(false);
+  const [editPlan, setEditPlan] = useState<Plan | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', maxAgents: '', maxInstances: '' });
+  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', maxAgents: '', maxInstances: '' });
 
   const load = useCallback(async () => {
     try { setPlans(await apiFetch<Plan[]>('/admin/plans')); }
@@ -52,6 +54,37 @@ export default function AdminPlansPage() {
       setForm({ name: '', billingCycle: 'MONTHLY', price: '', maxAgents: '', maxInstances: '' });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el plan'); }
+    finally { setSaving(false); }
+  };
+
+  const openEdit = (plan: Plan) => {
+    setEditForm({
+      name: plan.name,
+      billingCycle: plan.billingCycle,
+      price: plan.price ? (plan.price / 100).toFixed(2) : '',
+      maxAgents: plan.maxAgents ? String(plan.maxAgents) : '',
+      maxInstances: plan.maxInstances ? String(plan.maxInstances) : '',
+    });
+    setEditPlan(plan);
+  };
+
+  const saveEdit = async () => {
+    if (!editPlan || !editForm.name.trim()) return;
+    setSaving(true);
+    try {
+      const updated = await apiFetch<Plan>(`/admin/plans/${editPlan.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          billingCycle: editForm.billingCycle,
+          price: editForm.price ? Math.round(Number(editForm.price) * 100) : 0,
+          maxAgents: editForm.maxAgents ? Number(editForm.maxAgents) : null,
+          maxInstances: editForm.maxInstances ? Number(editForm.maxInstances) : null,
+        }),
+      });
+      setPlans((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setEditPlan(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar el plan'); }
     finally { setSaving(false); }
   };
 
@@ -82,8 +115,9 @@ export default function AdminPlansPage() {
               {plan._count.companies} cliente(s) · {plan.maxAgents ? `${plan.maxAgents} agentes` : 'agentes ilimitados'} · {plan.maxInstances ? `${plan.maxInstances} WhatsApp` : 'WhatsApp ilimitado'}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+              <button className="button small" onClick={() => openEdit(plan)}><Pencil size={13} />Editar</button>
               <button className={`button small ${plan.active ? '' : 'primary'}`} onClick={() => void toggleActive(plan)}>{plan.active ? 'Desactivar' : 'Activar'}</button>
-              <button className="button small" onClick={() => void removePlan(plan)}>Eliminar</button>
+              <button className="button small danger" onClick={() => void removePlan(plan)}>Eliminar</button>
             </div>
           </div>
         ))}
@@ -112,6 +146,33 @@ export default function AdminPlansPage() {
             <div className="modal-actions">
               <button className="button" onClick={() => setModal(false)}>Cancelar</button>
               <button className="button primary" disabled={saving || !form.name.trim()} onClick={() => void createPlan()}>{saving ? 'Guardando...' : 'Crear plan'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editPlan && (
+        <div className="modal-backdrop" onClick={() => setEditPlan(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header"><h2>Editar plan</h2><p>Los cambios aplican a los clientes que ya tienen este plan asignado.</p></div>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div className="field"><label>Nombre</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
+                <div className="field"><label>Ciclo de cobro</label>
+                  <select value={editForm.billingCycle} onChange={(e) => setEditForm({ ...editForm, billingCycle: e.target.value })}>
+                    <option value="FREE">Gratis</option>
+                    <option value="MONTHLY">Mensual</option>
+                    <option value="ANNUAL">Anual</option>
+                  </select>
+                </div>
+                <div className="field"><label>Precio (S/)</label><input type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} /></div>
+                <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={editForm.maxAgents} onChange={(e) => setEditForm({ ...editForm, maxAgents: e.target.value })} placeholder="Ilimitado" /></div>
+                <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={editForm.maxInstances} onChange={(e) => setEditForm({ ...editForm, maxInstances: e.target.value })} placeholder="Ilimitado" /></div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => setEditPlan(null)}>Cancelar</button>
+              <button className="button primary" disabled={saving || !editForm.name.trim()} onClick={() => void saveEdit()}>{saving ? 'Guardando...' : 'Guardar cambios'}</button>
             </div>
           </div>
         </div>
