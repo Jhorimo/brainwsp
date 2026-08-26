@@ -306,6 +306,13 @@ export default function ConversationsPage() {
   const [notesSaved, setNotesSaved] = useState(false);
   const notesSavedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // WhatsApp's pushName (the contact's own phone display name) is often not what the
+  // business actually calls this client — this lets an agent correct it, same
+  // inline-edit-with-cancel pattern as the tag rename above.
+  const [editingContactName, setEditingContactName] = useState(false);
+  const [contactNameDraft, setContactNameDraft] = useState('');
+  const cancelContactNameEditRef = useRef(false);
+
   const [incidentModal, setIncidentModal] = useState(false);
   const [incidentType, setIncidentType] = useState<IncidentType>('BUG');
   const [incidentDepartmentId, setIncidentDepartmentId] = useState('');
@@ -1342,6 +1349,24 @@ export default function ConversationsPage() {
     finally { setNotesSaving(false); }
   };
 
+  const startEditContactName = () => {
+    if (!selected) return;
+    setContactNameDraft(displayName(selected.contact));
+    setEditingContactName(true);
+  };
+
+  const saveContactName = async () => {
+    setEditingContactName(false);
+    if (cancelContactNameEditRef.current) { cancelContactNameEditRef.current = false; return; }
+    if (!selectedId) return;
+    const name = contactNameDraft.trim();
+    if (!name) return;
+    try {
+      await apiFetch(`/conversations/${selectedId}/contact-name`, { method: 'PATCH', body: JSON.stringify({ name }) });
+      setConversations((current) => current.map((item) => item.id === selectedId ? { ...item, contact: { ...item.contact, name } } : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo renombrar el cliente'); }
+  };
+
   const addToNote = (message: Message) => {
     const text = message.body || message.caption || '';
     if (!text) { setOpenMessageMenuId(null); return; }
@@ -1817,7 +1842,7 @@ export default function ConversationsPage() {
         <div className={`contact-panel-backdrop ${contactPanelOpen ? 'open' : ''}`} onClick={() => setContactPanelOpen(false)} />
         <aside className={`contact-panel ${contactPanelOpen ? 'mobile-open' : ''}`}>
           <button className="icon-button ghost contact-panel-close" onClick={() => setContactPanelOpen(false)} title="Cerrar"><X size={18} /></button>
-          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label>{editingTagId === tag.id ? (<input className="tag-menu-name-input" autoFocus value={editingTagName} onChange={(e) => setEditingTagName(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Enter') void saveTagName(tag.id); if (e.key === 'Escape') { cancelTagEditRef.current = true; setEditingTagId(null); } }} onBlur={() => void saveTagName(tag.id)} />) : (<button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>)}{canDeleteTags && editingTagId !== tag.id && <button className="tag-menu-edit" onClick={(e) => { e.stopPropagation(); startEditTagName(tag); }} title="Renombrar etiqueta"><Pencil size={12} /></button>}{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
+          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div>{editingContactName ? (<input className="contact-name-input" autoFocus value={contactNameDraft} onChange={(e) => setContactNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void saveContactName(); if (e.key === 'Escape') { cancelContactNameEditRef.current = true; setEditingContactName(false); } }} onBlur={() => void saveContactName()} />) : (<h3 className="contact-name-heading">{displayName(selected.contact)}<button className="icon-button ghost" onClick={startEditContactName} title="Editar nombre"><Pencil size={13} /></button></h3>)}<p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label>{editingTagId === tag.id ? (<input className="tag-menu-name-input" autoFocus value={editingTagName} onChange={(e) => setEditingTagName(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Enter') void saveTagName(tag.id); if (e.key === 'Escape') { cancelTagEditRef.current = true; setEditingTagId(null); } }} onBlur={() => void saveTagName(tag.id)} />) : (<button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>)}{canDeleteTags && editingTagId !== tag.id && <button className="tag-menu-edit" onClick={(e) => { e.stopPropagation(); startEditTagName(tag); }} title="Renombrar etiqueta"><Pencil size={12} /></button>}{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
               const stages = stagesByDept[selected.department!.id] || [];
               return stages.length ? (
                 <select className="lead-stage-select" style={{ background: `${(selected.stage?.color) || '#eef1f7'}22`, borderColor: `${(selected.stage?.color) || '#dde1ea'}55`, color: selected.stage?.color || '#5b6478' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
-import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class SendAgentMessageDto {
   @ApiProperty({ example: 'Hola, le envío su comprobante.' })
@@ -52,6 +52,14 @@ export class UpdateNotesDto {
   @ApiProperty()
   @IsString()
   notes!: string;
+}
+
+export class UpdateContactNameDto {
+  @ApiProperty({ example: 'Jhon Ramirez' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  name!: string;
 }
 
 export class UpdateConversationDto {

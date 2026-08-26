@@ -348,6 +348,17 @@ export class ConversationsService {
     return { notes };
   }
 
+  // The name a business actually goes by often isn't what WhatsApp handed us as pushName
+  // (a personal phone's display name, an old nickname, etc.) — this lets an agent correct
+  // it without touching the underlying WhatsApp profile.
+  async updateContactName(user: JwtUser, conversationId: string, name: string) {
+    const conversation = await this.getOwned(user, conversationId);
+    const updated = await this.prisma.contact.update({ where: { id: conversation.contactId }, data: { name: name.trim() } });
+    const hydrated = await this.getHydrated(user.companyId, conversationId);
+    if (hydrated) void this.realtime.publish(user.companyId, 'conversation.updated', hydrated, hydrated.departmentId);
+    return { name: updated.name };
+  }
+
   async addContactTag(user: JwtUser, conversationId: string, tagId: string) {
     const companyId = user.companyId;
     const conversation = await this.getOwned(user, conversationId);

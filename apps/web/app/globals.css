@@ -480,6 +480,10 @@ tr:last-child td { border-bottom: 0; }
 .contact-panel-toggle, .contact-panel-close, .contact-panel-backdrop { display: none; }
 .contact-big-avatar { width: 60px; height: 60px; border-radius: 18px; margin: 4px auto 11px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); font-size: 18px; font-weight: 800; }
 .contact-panel h3 { text-align: center; margin: 0; font-size: 13px; }
+.contact-name-heading { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.contact-name-heading .icon-button { width: 20px; height: 20px; opacity: 0; flex-shrink: 0; }
+.contact-name-heading:hover .icon-button { opacity: 1; }
+.contact-name-input { display: block; width: 100%; text-align: center; font-size: 13px; font-weight: 700; color: var(--text); border: 1px solid var(--brand-light); border-radius: 6px; padding: 4px 8px; }
 .contact-panel > p { text-align: center; color: var(--muted); font-size: 10px; margin: 5px 0 19px; }
 .contact-section { padding: 15px 0; border-top: 1px solid #eff2f6; }
 .contact-section h4 { margin: 0 0 10px; font-size: 9px; color: #8b97a9; letter-spacing: .8px; text-transform: uppercase; }

@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
+import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateContactNameDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
@@ -88,6 +88,11 @@ export class ConversationsController {
   @Patch(':id/notes')
   updateNotes(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateNotesDto) {
     return this.service.updateContactNotes(user, id, dto.notes);
+  }
+
+  @Patch(':id/contact-name')
+  updateContactName(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateContactNameDto) {
+    return this.service.updateContactName(user, id, dto.name);
   }
 
   @Post(':id/tags')
