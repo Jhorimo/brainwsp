@@ -52,7 +52,7 @@ a { color: inherit; text-decoration: none; }
 .app-frame.collapsed .account-copy, .app-frame.collapsed .logout-button span { display: none; }
 .app-frame.collapsed .account-button svg:last-child { display: none; }
 .app-frame.collapsed .account-button, .app-frame.collapsed .logout-button { justify-content: center; padding: 10px 0; }
-.brand-mark { width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center; font-weight: 800; font-size: 21px; background: linear-gradient(145deg, var(--brand-light), var(--brand)); box-shadow: 0 8px 20px rgba(8, 85, 196, .3); }
+.brand-mark { width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center; background: linear-gradient(145deg, var(--brand-light), var(--brand)); box-shadow: 0 8px 20px rgba(8, 85, 196, .3); }
 .brand strong, .brand span { display: block; }
 .brand strong { font-size: 17px; letter-spacing: .1px; }
 .brand span { font-size: 11px; color: #8fa6ca; margin-top: 3px; text-transform: uppercase; letter-spacing: 1.2px; }

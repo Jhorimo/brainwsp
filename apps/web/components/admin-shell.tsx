@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { BrandIcon } from './brand-mark';
 import { usePathname, useRouter } from 'next/navigation';
 import { Building2, ChevronDown, CreditCard, KeyRound, Lightbulb, LogOut, Menu, ShieldCheck } from 'lucide-react';
 import { apiFetch, clearAuthSession, getStoredUser, getToken } from '@/lib/api';
@@ -108,7 +109,7 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
         <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} />
         <aside className="sidebar">
           <div className="brand">
-            <div className="brand-mark">B</div>
+            <div className="brand-mark"><BrandIcon /></div>
             <div>
               <strong>Brain Tech</strong>
               <span>Panel de plataforma</span>
