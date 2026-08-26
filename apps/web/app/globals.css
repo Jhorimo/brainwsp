@@ -498,8 +498,10 @@ tr:last-child td { border-bottom: 0; }
 .tag-menu button:hover { background: var(--surface-2); }
 .tag-menu-row { display: flex; align-items: center; gap: 8px; padding-left: 9px; }
 .tag-menu-name { flex: 1; min-width: 0; padding-left: 0 !important; }
-.tag-menu-delete { flex-shrink: 0; padding: 8px !important; color: #b7c0cd !important; opacity: 0; }
-.tag-menu-row:hover .tag-menu-delete { opacity: 1; }
+.tag-menu-name-input { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--brand-light); border-radius: 6px; padding: 0 7px; font-size: 11px; }
+.tag-menu-edit, .tag-menu-delete { flex-shrink: 0; padding: 8px !important; color: #b7c0cd !important; opacity: 0; }
+.tag-menu-row:hover .tag-menu-edit, .tag-menu-row:hover .tag-menu-delete { opacity: 1; }
+.tag-menu-edit:hover { color: var(--brand) !important; background: var(--brand-soft) !important; }
 .tag-menu-delete:hover { color: var(--danger) !important; background: #fdeced !important; }
 .tag-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .tag-dot-picker { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; cursor: pointer; position: relative; overflow: hidden; border: 1px solid rgba(0,0,0,.08); }

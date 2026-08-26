@@ -220,6 +220,11 @@ export default function ConversationsPage() {
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#6b8afd');
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState('');
+  // Escape must discard the edit, not save it — but the input's onBlur (which saves) fires
+  // right after Escape unmounts it, so this flag tells that blur "this close was a cancel".
+  const cancelTagEditRef = useRef(false);
   const tagMenuRef = useRef<HTMLDivElement>(null);
   const [aiPromptModal, setAiPromptModal] = useState(false);
   const [aiPromptDraft, setAiPromptDraft] = useState('');
@@ -977,6 +982,25 @@ export default function ConversationsPage() {
         ? { ...item, contact: { ...item.contact, tags: item.contact.tags!.map((t) => t.tag.id === tagId ? { ...t, tag: updated } : t) } }
         : item));
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el color'); }
+  };
+
+  const startEditTagName = (tag: Tag) => {
+    setEditingTagId(tag.id);
+    setEditingTagName(tag.name);
+  };
+
+  const saveTagName = async (tagId: string) => {
+    setEditingTagId(null);
+    if (cancelTagEditRef.current) { cancelTagEditRef.current = false; return; }
+    const name = editingTagName.trim();
+    if (!name) return;
+    try {
+      const updated = await apiFetch<Tag>(`/team/tags/${tagId}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+      setCompanyTags((current) => current.map((item) => item.id === tagId ? updated : item).sort((a, b) => a.name.localeCompare(b.name)));
+      setConversations((current) => current.map((item) => item.contact.tags?.some((t) => t.tag.id === tagId)
+        ? { ...item, contact: { ...item.contact, tags: item.contact.tags!.map((t) => t.tag.id === tagId ? { ...t, tag: updated } : t) } }
+        : item));
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo renombrar la etiqueta'); }
   };
 
   const deleteCompanyTag = async (tag: Tag) => {
@@ -1776,7 +1800,7 @@ export default function ConversationsPage() {
         <div className={`contact-panel-backdrop ${contactPanelOpen ? 'open' : ''}`} onClick={() => setContactPanelOpen(false)} />
         <aside className={`contact-panel ${contactPanelOpen ? 'mobile-open' : ''}`}>
           <button className="icon-button ghost contact-panel-close" onClick={() => setContactPanelOpen(false)} title="Cerrar"><X size={18} /></button>
-          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label><button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
+          {selected ? <><div className="contact-big-avatar">{avatarContent(selected.contact, 24)}</div><h3>{displayName(selected.contact)}</h3><p>{selected.contact.phone || selected.contact.waId}</p><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label>{editingTagId === tag.id ? (<input className="tag-menu-name-input" autoFocus value={editingTagName} onChange={(e) => setEditingTagName(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Enter') void saveTagName(tag.id); if (e.key === 'Escape') { cancelTagEditRef.current = true; setEditingTagId(null); } }} onBlur={() => void saveTagName(tag.id)} />) : (<button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>)}{canDeleteTags && editingTagId !== tag.id && <button className="tag-menu-edit" onClick={(e) => { e.stopPropagation(); startEditTagName(tag); }} title="Renombrar etiqueta"><Pencil size={12} /></button>}{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
               const stages = stagesByDept[selected.department!.id] || [];
               return stages.length ? (
                 <select className="lead-stage-select" style={{ background: `${(selected.stage?.color) || '#eef1f7'}22`, borderColor: `${(selected.stage?.color) || '#dde1ea'}55`, color: selected.stage?.color || '#5b6478' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>
