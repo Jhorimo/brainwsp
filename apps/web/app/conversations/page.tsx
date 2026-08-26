@@ -234,10 +234,17 @@ export default function ConversationsPage() {
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const dragCounterRef = useRef(0);
+  // The four composer actions (adjuntar/emoji/stickers/respuestas rápidas) used to be four
+  // separate icon buttons crowding the bar above the textarea — now they live behind one
+  // "+" button, and this is the single anchor every one of their popovers positions itself
+  // from (see the position-calc effects below, which all read composerMenuButtonRef).
+  const [showComposerMenu, setShowComposerMenu] = useState(false);
+  const [composerMenuPos, setComposerMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const composerMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const composerMenuRef = useRef<HTMLDivElement>(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showStickerTray, setShowStickerTray] = useState(false);
   const [stickerTrayPos, setStickerTrayPos] = useState<{ top: number; left: number } | null>(null);
-  const stickerButtonRef = useRef<HTMLButtonElement>(null);
   const stickerTrayRef = useRef<HTMLDivElement>(null);
   const [stickers, setStickers] = useState<Array<{ id: string }>>([]);
   const [savedStickerMsgIds, setSavedStickerMsgIds] = useState<Set<string>>(new Set());
@@ -245,7 +252,6 @@ export default function ConversationsPage() {
   const stickerFileInputRef = useRef<HTMLInputElement>(null);
   const [showQuickReplyTray, setShowQuickReplyTray] = useState(false);
   const [quickReplyTrayPos, setQuickReplyTrayPos] = useState<{ top: number; left: number } | null>(null);
-  const quickReplyButtonRef = useRef<HTMLButtonElement>(null);
   const quickReplyTrayRef = useRef<HTMLDivElement>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [editingQuickReplyId, setEditingQuickReplyId] = useState<string | null>(null);
@@ -262,7 +268,6 @@ export default function ConversationsPage() {
   const [qrAutocompleteMatches, setQrAutocompleteMatches] = useState<QuickReply[]>([]);
   const [qrAutocompleteIndex, setQrAutocompleteIndex] = useState(0);
   const [emojiPos, setEmojiPos] = useState<{ top: number; left: number } | null>(null);
-  const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const emojiPopoverRef = useRef<HTMLDivElement>(null);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -425,8 +430,26 @@ export default function ConversationsPage() {
   // overflow (needed for the message scroll fix), so an absolutely-positioned
   // popover nested inside it gets its emoji grid cut off and unclickable.
   useEffect(() => {
+    if (!showComposerMenu) { setComposerMenuPos(null); return; }
+    const button = composerMenuButtonRef.current;
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      const margin = 12;
+      const left = Math.min(rect.left, Math.max(margin, window.innerWidth - 210 - margin));
+      setComposerMenuPos({ top: rect.top, left });
+    }
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (composerMenuRef.current?.contains(target) || composerMenuButtonRef.current?.contains(target)) return;
+      setShowComposerMenu(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showComposerMenu]);
+
+  useEffect(() => {
     if (!showEmoji) { setEmojiPos(null); return; }
-    const button = emojiButtonRef.current;
+    const button = composerMenuButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
       // emoji-picker-react mide ~350px de ancho por defecto — anclarlo al borde
@@ -437,7 +460,7 @@ export default function ConversationsPage() {
     }
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (emojiPopoverRef.current?.contains(target) || emojiButtonRef.current?.contains(target)) return;
+      if (emojiPopoverRef.current?.contains(target) || composerMenuButtonRef.current?.contains(target)) return;
       setShowEmoji(false);
     };
     document.addEventListener('mousedown', onClickOutside);
@@ -446,7 +469,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     if (!showStickerTray) { setStickerTrayPos(null); return; }
-    const button = stickerButtonRef.current;
+    const button = composerMenuButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
       const margin = 12;
@@ -456,7 +479,7 @@ export default function ConversationsPage() {
     void apiFetch<Array<{ id: string }>>('/stickers').then(setStickers).catch(() => undefined);
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (stickerTrayRef.current?.contains(target) || stickerButtonRef.current?.contains(target)) return;
+      if (stickerTrayRef.current?.contains(target) || composerMenuButtonRef.current?.contains(target)) return;
       setShowStickerTray(false);
     };
     document.addEventListener('mousedown', onClickOutside);
@@ -465,7 +488,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     if (!showQuickReplyTray) { setQuickReplyTrayPos(null); return; }
-    const button = quickReplyButtonRef.current;
+    const button = composerMenuButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
       // El tray mide hasta 320px — anclarlo siempre al borde izquierdo del botón lo saca
@@ -477,7 +500,7 @@ export default function ConversationsPage() {
     }
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (quickReplyTrayRef.current?.contains(target) || quickReplyButtonRef.current?.contains(target)) return;
+      if (quickReplyTrayRef.current?.contains(target) || composerMenuButtonRef.current?.contains(target)) return;
       setShowQuickReplyTray(false);
     };
     document.addEventListener('mousedown', onClickOutside);
@@ -552,6 +575,7 @@ export default function ConversationsPage() {
       if (tagMenuOpen) { setTagMenuOpen(false); return; }
       if (openMessageMenuId) { setOpenMessageMenuId(null); return; }
       if (reactionMessageId) { setReactionMessageId(null); return; }
+      if (showComposerMenu) { setShowComposerMenu(false); return; }
       if (showEmoji) { setShowEmoji(false); return; }
       if (showStickerTray) { setShowStickerTray(false); return; }
       if (showQuickReplyTray) { setShowQuickReplyTray(false); return; }
@@ -566,7 +590,7 @@ export default function ConversationsPage() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showComposerMenu, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
@@ -1717,10 +1741,7 @@ export default function ConversationsPage() {
                 </div>
               ) : (
                 <>
-                  <button className="icon-button ghost" onClick={pickFile} title="Adjuntar archivo"><Paperclip size={17} /></button>
-                  <button ref={emojiButtonRef} className="icon-button ghost" onClick={() => setShowEmoji((v) => !v)} title="Emojis"><Smile size={17} /></button>
-                  <button ref={stickerButtonRef} className="icon-button ghost" onClick={() => setShowStickerTray((v) => !v)} title="Stickers"><StickerIcon size={17} /></button>
-                  <button ref={quickReplyButtonRef} className="icon-button ghost" onClick={() => setShowQuickReplyTray((v) => !v)} title="Respuestas rápidas"><Zap size={17} /></button>
+                  <button ref={composerMenuButtonRef} className="icon-button ghost" onClick={() => setShowComposerMenu((v) => !v)} title="Adjuntar, emojis, stickers y respuestas rápidas"><Plus size={17} /></button>
                   <textarea
                     ref={textareaRef}
                     rows={1}
@@ -1960,6 +1981,15 @@ export default function ConversationsPage() {
         </div>
       )}
     </AppShell>
+    {showComposerMenu && composerMenuPos && typeof document !== 'undefined' && createPortal(
+      <div ref={composerMenuRef} className="chat-quick-menu" style={{ position: 'fixed', top: composerMenuPos.top, left: composerMenuPos.left, right: 'auto', transform: 'translateY(-100%) translateY(-10px)' }}>
+        <button onClick={() => { setShowComposerMenu(false); pickFile(); }}><Paperclip size={14} />Adjuntar archivo</button>
+        <button onClick={() => { setShowComposerMenu(false); setShowEmoji(true); }}><Smile size={14} />Emojis</button>
+        <button onClick={() => { setShowComposerMenu(false); setShowStickerTray(true); }}><StickerIcon size={14} />Stickers</button>
+        <button onClick={() => { setShowComposerMenu(false); setShowQuickReplyTray(true); }}><Zap size={14} />Respuestas rápidas</button>
+      </div>,
+      document.body,
+    )}
     {showEmoji && emojiPos && typeof document !== 'undefined' && createPortal(
       <div ref={emojiPopoverRef} className="emoji-popover" style={{ top: emojiPos.top, left: emojiPos.left }}>
         <EmojiPicker onEmojiClick={insertEmoji} />
