@@ -4,6 +4,7 @@ import { InstanceStatus, MessageDirection, MessageStatus, MessageType, UserRole,
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { DealsService } from '../crm/deals.service';
+import { LeadsService } from '../crm/leads.service';
 import { transcodeToOggOpus } from '../media/audio-transcode';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
@@ -40,6 +41,7 @@ export class ConversationsService {
     private readonly storage: StorageService,
     private readonly agentAccess: AgentAccessService,
     private readonly deals: DealsService,
+    private readonly leads: LeadsService,
   ) {}
 
   // null = no restriction (sees every department, same as today). An array (possibly
@@ -440,7 +442,10 @@ export class ConversationsService {
       void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
       if (departmentChanged) void this.realtime.publish(companyId, 'conversation.updated', hydrated, current.departmentId);
     }
-    if (departmentChanged) void this.deals.syncStageFromConversation(companyId, conversationId, nextStageId ?? null);
+    if (departmentChanged) {
+      void this.deals.syncStageFromConversation(companyId, conversationId, nextStageId ?? null);
+      void this.leads.syncDepartmentFromConversation(companyId, conversationId, resolvedDepartmentId ?? null);
+    }
     return hydrated;
   }
 

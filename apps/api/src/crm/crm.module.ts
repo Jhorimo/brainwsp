@@ -13,6 +13,6 @@ import { LeadsService } from './leads.service';
   imports: [AuthModule, RealtimeModule],
   controllers: [LeadsController, DealsController, PipelinesController],
   providers: [LeadsService, DealsService, PipelinesService, ModuleAccessGuard],
-  exports: [DealsService],
+  exports: [DealsService, LeadsService],
 })
 export class CrmModule {}

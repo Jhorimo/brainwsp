@@ -84,6 +84,19 @@ export class LeadsService {
     return { success: true };
   }
 
+  // Mirrors DealsService.syncStageFromConversation: an agent assigning a department to a
+  // conversation (in Conversaciones) is the same intent as assigning it to the prospect it
+  // spawned (in Prospectos) — without this, those were two separate fields on two separate
+  // screens that never agreed, and "Convertir en trato" stayed blocked ("Asigna un
+  // departamento al prospecto...") even right after the conversation itself got assigned.
+  // No-op once the lead is converted — the Deal owns the department relationship by then.
+  async syncDepartmentFromConversation(companyId: string, conversationId: string, departmentId: string | null) {
+    const lead = await this.prisma.lead.findFirst({ where: { companyId, conversationId, convertedDealId: null } });
+    if (!lead || lead.departmentId === departmentId) return;
+    const updated = await this.prisma.lead.update({ where: { id: lead.id }, data: { departmentId }, include: LEAD_INCLUDE });
+    void this.realtime.publish(companyId, 'lead.updated', this.serialize(updated));
+  }
+
   // Crea un Deal en la primera etapa del departamento del prospecto, copiando sus datos, y
   // deja el Lead marcado como convertido (no se borra, queda de historial). Si ya estaba
   // convertido, no se puede volver a convertir.
