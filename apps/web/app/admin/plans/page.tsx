@@ -7,16 +7,19 @@ import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch } from '@/lib/api';
 
 type Plan = {
-  id: string; name: string; billingCycle: string; price: number;
+  id: string; name: string; billingCycle: string; price: number; priceUsd: number;
   maxAgents?: number | null; maxInstances?: number | null; active: boolean;
   _count: { companies: number };
 };
 
 const cycleLabels: Record<string, string> = { FREE: 'Gratis', MONTHLY: 'Mensual', ANNUAL: 'Anual' };
 
-function formatPrice(cents: number) {
-  if (!cents) return 'Gratis';
-  return `S/ ${(cents / 100).toFixed(2)}`;
+function formatPrices(plan: Pick<Plan, 'price' | 'priceUsd'>) {
+  if (!plan.price && !plan.priceUsd) return 'Gratis';
+  const parts: string[] = [];
+  if (plan.price) parts.push(`S/ ${(plan.price / 100).toFixed(2)}`);
+  if (plan.priceUsd) parts.push(`US$ ${(plan.priceUsd / 100).toFixed(2)}`);
+  return parts.join(' · ');
 }
 
 export default function AdminPlansPage() {
@@ -26,8 +29,8 @@ export default function AdminPlansPage() {
   const [modal, setModal] = useState(false);
   const [editPlan, setEditPlan] = useState<Plan | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', maxAgents: '', maxInstances: '' });
-  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', maxAgents: '', maxInstances: '' });
+  const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '' });
+  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '' });
 
   const load = useCallback(async () => {
     try { setPlans(await apiFetch<Plan[]>('/admin/plans')); }
@@ -46,12 +49,13 @@ export default function AdminPlansPage() {
           name: form.name.trim(),
           billingCycle: form.billingCycle,
           price: form.price ? Math.round(Number(form.price) * 100) : 0,
+          priceUsd: form.priceUsd ? Math.round(Number(form.priceUsd) * 100) : 0,
           maxAgents: form.maxAgents ? Number(form.maxAgents) : undefined,
           maxInstances: form.maxInstances ? Number(form.maxInstances) : undefined,
         }),
       });
       setModal(false);
-      setForm({ name: '', billingCycle: 'MONTHLY', price: '', maxAgents: '', maxInstances: '' });
+      setForm({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '' });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el plan'); }
     finally { setSaving(false); }
@@ -62,6 +66,7 @@ export default function AdminPlansPage() {
       name: plan.name,
       billingCycle: plan.billingCycle,
       price: plan.price ? (plan.price / 100).toFixed(2) : '',
+      priceUsd: plan.priceUsd ? (plan.priceUsd / 100).toFixed(2) : '',
       maxAgents: plan.maxAgents ? String(plan.maxAgents) : '',
       maxInstances: plan.maxInstances ? String(plan.maxInstances) : '',
     });
@@ -78,6 +83,7 @@ export default function AdminPlansPage() {
           name: editForm.name.trim(),
           billingCycle: editForm.billingCycle,
           price: editForm.price ? Math.round(Number(editForm.price) * 100) : 0,
+          priceUsd: editForm.priceUsd ? Math.round(Number(editForm.priceUsd) * 100) : 0,
           maxAgents: editForm.maxAgents ? Number(editForm.maxAgents) : null,
           maxInstances: editForm.maxInstances ? Number(editForm.maxInstances) : null,
         }),
@@ -110,7 +116,7 @@ export default function AdminPlansPage() {
           <div className="stat-card" key={plan.id}>
             <div className="stat-icon"><CreditCard size={19} /></div>
             <div className="stat-label">{plan.name} · {cycleLabels[plan.billingCycle] || plan.billingCycle}</div>
-            <div className="stat-value">{formatPrice(plan.price)}</div>
+            <div className="stat-value">{formatPrices(plan)}</div>
             <div className="stat-meta">
               {plan._count.companies} cliente(s) · {plan.maxAgents ? `${plan.maxAgents} agentes` : 'agentes ilimitados'} · {plan.maxInstances ? `${plan.maxInstances} WhatsApp` : 'WhatsApp ilimitado'}
             </div>
@@ -138,7 +144,8 @@ export default function AdminPlansPage() {
                     <option value="ANNUAL">Anual</option>
                   </select>
                 </div>
-                <div className="field"><label>Precio (S/)</label><input type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99.00" /></div>
+                <div className="field"><label>Precio en soles (S/)</label><input type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99.00" /></div>
+                <div className="field"><label>Precio en dólares (US$)</label><input type="number" min="0" step="0.01" value={form.priceUsd} onChange={(e) => setForm({ ...form, priceUsd: e.target.value })} placeholder="27.00" /></div>
                 <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={form.maxAgents} onChange={(e) => setForm({ ...form, maxAgents: e.target.value })} placeholder="10" /></div>
                 <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={form.maxInstances} onChange={(e) => setForm({ ...form, maxInstances: e.target.value })} placeholder="3" /></div>
               </div>
@@ -165,7 +172,8 @@ export default function AdminPlansPage() {
                     <option value="ANNUAL">Anual</option>
                   </select>
                 </div>
-                <div className="field"><label>Precio (S/)</label><input type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} /></div>
+                <div className="field"><label>Precio en soles (S/)</label><input type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} /></div>
+                <div className="field"><label>Precio en dólares (US$)</label><input type="number" min="0" step="0.01" value={editForm.priceUsd} onChange={(e) => setEditForm({ ...editForm, priceUsd: e.target.value })} /></div>
                 <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={editForm.maxAgents} onChange={(e) => setEditForm({ ...editForm, maxAgents: e.target.value })} placeholder="Ilimitado" /></div>
                 <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={editForm.maxInstances} onChange={(e) => setEditForm({ ...editForm, maxInstances: e.target.value })} placeholder="Ilimitado" /></div>
               </div>

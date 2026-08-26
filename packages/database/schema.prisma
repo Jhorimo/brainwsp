@@ -134,6 +134,7 @@ model Plan {
   name         String    @unique
   billingCycle String    @default("MONTHLY")
   price        Int       @default(0)
+  priceUsd     Int       @default(0)
   maxAgents    Int?
   maxInstances Int?
   active       Boolean   @default(true)

@@ -105,12 +105,13 @@ export class AdminService {
     return this.prisma.plan.findMany({ orderBy: { price: 'asc' }, include: { _count: { select: { companies: true } } } });
   }
 
-  createPlan(input: { name: string; billingCycle?: string; price?: number; maxAgents?: number; maxInstances?: number }) {
+  createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number }) {
     return this.prisma.plan.create({
       data: {
         name: input.name.trim(),
         billingCycle: input.billingCycle || 'MONTHLY',
         price: input.price ?? 0,
+        priceUsd: input.priceUsd ?? 0,
         maxAgents: input.maxAgents,
         maxInstances: input.maxInstances,
       },
@@ -120,7 +121,7 @@ export class AdminService {
     });
   }
 
-  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; maxAgents?: number; maxInstances?: number; active?: boolean }) {
+  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; active?: boolean }) {
     const plan = await this.prisma.plan.findUnique({ where: { id } });
     if (!plan) throw new NotFoundException('Plan no encontrado');
     return this.prisma.plan.update({
@@ -129,6 +130,7 @@ export class AdminService {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
         ...(input.billingCycle !== undefined ? { billingCycle: input.billingCycle } : {}),
         ...(input.price !== undefined ? { price: input.price } : {}),
+        ...(input.priceUsd !== undefined ? { priceUsd: input.priceUsd } : {}),
         ...(input.maxAgents !== undefined ? { maxAgents: input.maxAgents } : {}),
         ...(input.maxInstances !== undefined ? { maxInstances: input.maxInstances } : {}),
         ...(input.active !== undefined ? { active: input.active } : {}),

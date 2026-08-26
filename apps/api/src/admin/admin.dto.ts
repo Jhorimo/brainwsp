@@ -29,11 +29,17 @@ export class CreatePlanDto {
   @IsString()
   billingCycle?: string;
 
-  @ApiPropertyOptional({ example: 9900, description: 'Precio en céntimos de la moneda local.' })
+  @ApiPropertyOptional({ example: 9900, description: 'Precio en céntimos de sol (PEN).' })
   @IsOptional()
   @IsInt()
   @Min(0)
   price?: number;
+
+  @ApiPropertyOptional({ example: 2700, description: 'Precio en centavos de dólar (USD).' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  priceUsd?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -60,11 +66,17 @@ export class UpdatePlanDto {
   @IsString()
   billingCycle?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Precio en céntimos de sol (PEN).' })
   @IsOptional()
   @IsInt()
   @Min(0)
   price?: number;
+
+  @ApiPropertyOptional({ description: 'Precio en centavos de dólar (USD).' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  priceUsd?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
