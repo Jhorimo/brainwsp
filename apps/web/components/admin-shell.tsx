@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BrandIcon } from './brand-mark';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, ChevronDown, CreditCard, KeyRound, Lightbulb, LogOut, Menu, ShieldCheck } from 'lucide-react';
-import { apiFetch, clearAuthSession, getStoredUser, getToken } from '@/lib/api';
+import { Building2, Check, ChevronDown, CreditCard, KeyRound, Lightbulb, LogOut, Menu, ShieldCheck } from 'lucide-react';
+import { apiFetch, clearAuthSession, getStoredUser, getToken, updateStoredUser } from '@/lib/api';
 
 const navigation = [
   { href: '/admin/clients', label: 'Usuarios', icon: Building2 },
@@ -44,6 +44,10 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [nameError, setNameError] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   // Mismo patrón que AppShell (el panel de cada empresa): abajo de 640px la barra lateral
   // pasa a ser un cajón oculto en vez de una barra de íconos — este botón controla ambos
@@ -63,7 +67,28 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
     setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     setPasswordError('');
     setPasswordSuccess(false);
+    setNameDraft(name);
+    setNameError('');
+    setNameSaved(false);
     setProfileModal(true);
+  };
+
+  const saveName = async () => {
+    const trimmed = nameDraft.trim();
+    if (!trimmed || trimmed === name) return;
+    setNameSaving(true);
+    setNameError('');
+    setNameSaved(false);
+    try {
+      const updated = await apiFetch<{ name: string }>('/auth/me', { method: 'PATCH', body: JSON.stringify({ name: trimmed }) });
+      updateStoredUser({ name: updated.name });
+      setName(updated.name);
+      setNameSaved(true);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : 'No se pudo actualizar el nombre');
+    } finally {
+      setNameSaving(false);
+    }
   };
 
   const changePassword = async () => {
@@ -162,8 +187,19 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header"><h2>Mi perfil</h2><p>Tus datos de acceso al panel de plataforma.</p></div>
             <div className="modal-body">
+              {nameError && <div className="error-box">{nameError}</div>}
               <div className="form-grid">
-                <div className="field"><label>Nombre</label><input value={name} disabled /></div>
+                <div className="field">
+                  <label>Nombre</label>
+                  <div className="field-with-action">
+                    <input value={nameDraft} onChange={(e) => { setNameDraft(e.target.value); setNameSaved(false); }} onKeyDown={(e) => { if (e.key === 'Enter') void saveName(); }} />
+                    {nameDraft.trim() && nameDraft.trim() !== name && (
+                      <button className={`button small notes-save-button ${nameSaved ? 'saved' : ''}`} disabled={nameSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveName()} title="Guardar nombre">
+                        {nameSaving ? '...' : <Check size={13} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <div className="field"><label>Correo</label><input value={email} disabled /></div>
                 <div className="field"><label>Rol</label><input value="Super administrador" disabled /></div>
               </div>

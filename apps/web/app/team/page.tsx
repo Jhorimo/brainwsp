@@ -74,7 +74,7 @@ export default function TeamPage() {
 
   const emptyAgentForm = { name: '', email: '', password: '', role: 'AGENT' as TeamUser['role'], departmentIds: [] as string[], allowedModules: [...ALL_MODULE_KEYS] };
   const [agentForm, setAgentForm] = useState(emptyAgentForm);
-  const [editForm, setEditForm] = useState({ role: 'AGENT' as TeamUser['role'], password: '', departmentIds: [] as string[], allowedModules: [...ALL_MODULE_KEYS] });
+  const [editForm, setEditForm] = useState({ name: '', role: 'AGENT' as TeamUser['role'], password: '', departmentIds: [] as string[], allowedModules: [...ALL_MODULE_KEYS] });
   const [departmentForm, setDepartmentForm] = useState({ name: '', description: '' });
   const [projectForm, setProjectForm] = useState({ name: '', description: '' });
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -119,7 +119,10 @@ export default function TeamPage() {
   };
 
   const createAgent = async () => {
-    if (!agentForm.name.trim() || !agentForm.email.trim() || agentForm.password.length < 10 || emailTaken) return;
+    if (!agentForm.name.trim()) { setModalError('Ingresa el nombre del agente'); return; }
+    if (!agentForm.email.trim()) { setModalError('Ingresa un correo'); return; }
+    if (emailTaken) { setModalError('Ya existe un usuario con este correo — usa otro para no duplicar el acceso'); return; }
+    if (agentForm.password.length < 10) { setModalError('La contraseña inicial debe tener al menos 10 caracteres'); return; }
     setModalError('');
     setSaving(true);
     try {
@@ -171,6 +174,7 @@ export default function TeamPage() {
     setModalError('');
     setEditModal(user);
     setEditForm({
+      name: user.name,
       role: user.role,
       password: '',
       departmentIds: user.departments?.map((item) => item.department.id) ?? [],
@@ -180,12 +184,14 @@ export default function TeamPage() {
 
   const saveEdit = async () => {
     if (!editModal) return;
+    if (!editForm.name.trim()) { setModalError('Ingresa el nombre del usuario'); return; }
     setModalError('');
     setSaving(true);
     try {
       await apiFetch(`/team/users/${editModal.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
+          name: editForm.name.trim(),
           role: editForm.role,
           departmentIds: editForm.departmentIds,
           allowedModules: editForm.allowedModules,
@@ -415,6 +421,7 @@ export default function TeamPage() {
             <div className="modal-body">
               {modalError && <div className="error-box">{modalError}</div>}
               <div className="form-grid">
+                <div className="field"><label>Nombre</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Carlos Soporte" /></div>
                 <div className="field"><label>Rol</label><select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value as TeamUser['role'] })}><option value="AGENT">Agente</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option><option value="OWNER">Propietario</option></select></div>
                 <div className="field"><label>Nueva contraseña (opcional)</label><input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Dejar en blanco para no cambiarla" /></div>
               </div>

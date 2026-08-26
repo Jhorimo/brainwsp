@@ -30,7 +30,8 @@
       "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const arr=JSON.parse\\(d\\);arr.forEach\\(s=>console.log\\(s.name, '->', Buffer.from\\(s.name\\).toString\\('hex'\\)\\)\\);}\\)\")",
       "Bash(sed -i \"s/admin@brainwsp.com/admin@braintech.com.pe/; s/admin1234/ChangeMe-123456!/\" test_delete.js)",
       "Bash(node test_delete.js)",
-      "Bash(DATABASE_URL=\"postgresql://brainwsp:brainwsp@localhost:5432/brainwsp?schema=public\" npx -y prisma@6.19.0 migrate dev --schema schema.prisma --name merge_crm_pipeline_into_department_stages)"
+      "Bash(DATABASE_URL=\"postgresql://brainwsp:brainwsp@localhost:5432/brainwsp?schema=public\" npx -y prisma@6.19.0 migrate dev --schema schema.prisma --name merge_crm_pipeline_into_department_stages)",
+      "PowerShell(Get-Process \"Docker Desktop\", \"com.docker.backend\" -ErrorAction SilentlyContinue)"
     ]
   }
 }
