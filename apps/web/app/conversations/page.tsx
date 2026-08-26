@@ -1697,9 +1697,15 @@ export default function ConversationsPage() {
                 {editingContactName ? (
                   <input className="chat-header-name-input" autoFocus value={contactNameDraft} onChange={(e) => setContactNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void saveContactName(); if (e.key === 'Escape') { cancelContactNameEditRef.current = true; setEditingContactName(false); } }} onBlur={() => void saveContactName()} />
                 ) : (
-                  <strong className="chat-header-name">{displayName(selected.contact)}<button className="icon-button ghost" onClick={startEditContactName} title="Editar nombre"><Pencil size={11} /></button></strong>
+                  <div className="chat-header-name-row">
+                    <strong>{displayName(selected.contact)}</strong>
+                    <button className="chat-header-edit-btn" onClick={startEditContactName} title="Editar nombre"><Pencil size={11} /></button>
+                  </div>
                 )}
-                <span><span className="chat-header-phone">{selected.contact.phone || selected.contact.waId}</span> · {selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span>
+                <div className="chat-header-meta">
+                  <span className="chat-header-phone">{selected.contact.phone || selected.contact.waId}</span>
+                  <span className="chat-header-status">{selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span>
+                </div>
               </div>
               <div className="chat-header-actions">
                 {!selected.assignedUser && <button className="button small" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}
