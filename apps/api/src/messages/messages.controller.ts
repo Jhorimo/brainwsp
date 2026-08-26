@@ -5,10 +5,28 @@ import type { Request } from 'express';
 import { ApiCredentialsService } from '../api-credentials/api-credentials.service';
 import { ApiCredentialGuard } from '../common/guards/api-credential.guard';
 import type { ApiClientContext } from '../common/types/jwt-user';
-import { SendDocumentDto, SendTextDto } from './messages.dto';
+import { LegacySendDocumentDto, SendDocumentDto, SendTextDto } from './messages.dto';
 import { MessagesService } from './messages.service';
 
 type ApiRequest = Request & { apiClient: ApiClientContext };
+
+type AcceptedMessage = {
+  success: boolean;
+  message_id: string;
+  status: string;
+  instance: string;
+};
+
+function legacyAccepted(response: AcceptedMessage) {
+  return {
+    error: false,
+    data: {
+      status_code: 200,
+      message: 'Mensaje agregado a la cola de envío',
+      ...response,
+    },
+  };
+}
 
 @ApiTags('Public messaging API')
 @UseGuards(ApiCredentialGuard)
@@ -56,6 +74,32 @@ export class LegacyMessagesController {
     const appKey = String(req.headers['x-app-key'] || dto.appkey || dto.appKey || '');
     const authKey = String(req.headers['x-auth-key'] || dto.authkey || dto.authKey || '');
     const client = await this.credentials.authenticate(appKey, authKey);
-    return this.service.sendText(client, dto.to, dto.message, dto.instance);
+    const response = await this.service.sendText(client, dto.to, dto.message, dto.instance);
+    return legacyAccepted(response);
+  }
+}
+
+@ApiTags('Legacy BrainPOS/ERP API')
+@Controller('create-message_two')
+export class LegacyDocumentMessagesController {
+  constructor(
+    private readonly service: MessagesService,
+    private readonly credentials: ApiCredentialsService,
+  ) {}
+
+  @Post()
+  @UseInterceptors(AnyFilesInterceptor({ limits: { fieldSize: 64 * 1024 * 1024, fields: 12 } }))
+  async create(@Req() req: Request, @Body() dto: LegacySendDocumentDto) {
+    const appKey = String(req.headers['x-app-key'] || dto.appkey || dto.appKey || '');
+    const authKey = String(req.headers['x-auth-key'] || dto.authkey || dto.authKey || '');
+    const client = await this.credentials.authenticate(appKey, authKey);
+    const response = await this.service.sendBase64Document(client, {
+      to: dto.to,
+      file: dto.file,
+      fileName: dto.filename,
+      caption: dto.message,
+      instanceSlug: dto.instance,
+    });
+    return legacyAccepted(response);
   }
 }

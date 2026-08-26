@@ -214,6 +214,38 @@ Respuesta inmediata:
 
 `queued` significa que BrainWSP aceptó y persistió el mensaje. El worker lo procesa de forma independiente.
 
+### Documento PDF compatible con BrainPOS Restaurante
+
+El endpoint legacy de documentos acepta exactamente el `multipart/form-data` usado en
+`brainpos_rest` por ventas, anulaciones y cierres de caja. El campo `file` contiene el PDF
+como data URI base64; no es necesario modificar el código PHP existente.
+
+```php
+$curl = curl_init();
+
+curl_setopt_array($curl, array(
+  CURLOPT_URL => 'https://TU-DOMINIO/api/create-message_two',
+  CURLOPT_RETURNTRANSFER => true,
+  CURLOPT_CUSTOMREQUEST => 'POST',
+  CURLOPT_POSTFIELDS => array(
+    'appkey' => 'TU_APP_KEY',
+    'authkey' => 'TU_AUTH_KEY',
+    'to' => '51987654321',
+    'message' => 'Adjuntamos su comprobante electrónico.',
+    'file' => 'data:application/pdf;base64,' . base64_encode($pdf),
+    'filename' => 'F001-00001234',
+    'sandbox' => 'false'
+  ),
+));
+
+$response = curl_exec($curl);
+curl_close($curl);
+```
+
+Si `filename` no incluye extensión y el contenido es PDF, BrainWSP agrega `.pdf`. El
+archivo se almacena en MinIO, el mensaje se persiste y recién entonces pasa por la cola
+`whatsapp.outbound`. El límite del documento decodificado es 48 MB.
+
 ## API v1 recomendada
 
 ### Texto
@@ -364,4 +396,3 @@ chmod +x deploy.sh
 ```
 
 El script instala Docker, arma el proxy con SSL, genera credenciales seguras, construye las imágenes y levanta todo. Al final entrega la URL, el usuario y la contraseña del administrador (también quedan guardados en `../tudominio.com.txt`). Volver a correr el mismo comando actualiza el despliegue (`git pull` + rebuild) sin perder las credenciales existentes.
-

@@ -64,3 +64,20 @@ export class SendDocumentDto extends BaseApiMessageDto {
   @IsString()
   caption?: string;
 }
+
+export class LegacySendDocumentDto extends BaseApiMessageDto {
+  @ApiProperty({ description: 'Documento como data URI base64 (por ejemplo data:application/pdf;base64,...).' })
+  @IsString()
+  @MinLength(1)
+  file!: string;
+
+  @ApiProperty({ example: '20601234567-F001-00001234' })
+  @IsString()
+  @MinLength(1)
+  filename!: string;
+
+  @ApiPropertyOptional({ example: 'Adjuntamos su comprobante electrónico.' })
+  @IsOptional()
+  @IsString()
+  message?: string;
+}
