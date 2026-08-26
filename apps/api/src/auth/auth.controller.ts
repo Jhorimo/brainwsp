@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { AuthService } from './auth.service';
-import { ChangePasswordDto, LoginDto, RegisterDto, UpdateProfileDto } from './auth.dto';
+import { ChangePasswordDto, GoogleExchangeDto, LoginDto, RegisterDto, UpdateProfileDto } from './auth.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -20,6 +20,34 @@ export class AuthController {
   @Post('register')
   register(@Body() dto: RegisterDto, @Req() req: Request) {
     return this.auth.register(dto, req.ip, String(req.headers['user-agent'] || ''));
+  }
+
+  @Get('google')
+  googleStart(@Res() res: Response) {
+    res.redirect(this.auth.buildGoogleAuthUrl());
+  }
+
+  // Public: Google redirects the browser here with no Authorization header. Hands the
+  // browser a short-lived ticket via query param (never the real session token) — the
+  // frontend immediately exchanges it server-side in exchangeGoogle() below.
+  @Get('google/callback')
+  async googleCallback(@Query('code') code: string | undefined, @Query('error') error: string | undefined, @Res() res: Response) {
+    const webOrigin = (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',')[0].trim();
+    if (error || !code) {
+      res.redirect(`${webOrigin}/login?google_error=1`);
+      return;
+    }
+    try {
+      const ticket = await this.auth.handleGoogleCallback(code);
+      res.redirect(`${webOrigin}/login?g=${encodeURIComponent(ticket)}`);
+    } catch {
+      res.redirect(`${webOrigin}/login?google_error=1`);
+    }
+  }
+
+  @Post('google/exchange')
+  exchangeGoogle(@Body() dto: GoogleExchangeDto, @Req() req: Request) {
+    return this.auth.exchangeGoogleTicket(dto.ticket, dto.companyName, req.ip, String(req.headers['user-agent'] || ''));
   }
 
   @Get('me')

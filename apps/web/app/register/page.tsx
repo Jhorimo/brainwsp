@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Building2, MessageSquareText, Radio, Sparkles } from 'lucide-react';
 import { API_URL, setAuthSession } from '@/lib/api';
+import { GoogleIcon } from '@/components/google-icon';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -75,6 +76,10 @@ export default function RegisterPage() {
           <h2>Crea tu empresa</h2>
           <p>Registra tu empresa en BrainWSP y empieza a operar en minutos.</p>
           {error && <div className="error-box">{error}</div>}
+
+          <a className="button google-button" href={`${API_URL}/auth/google`}><GoogleIcon /> Registrarme con Google</a>
+          <div className="login-divider"><span>o con tu correo</span></div>
+
           <div className="form-grid">
             <div className="field"><label>Nombre de la empresa</label><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} type="text" /></div>
             <div className="field"><label>Tu nombre</label><input value={name} onChange={(e) => setName(e.target.value)} type="text" /></div>

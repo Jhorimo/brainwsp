@@ -147,7 +147,8 @@ model User {
   companyId            String
   email                String          @unique
   name                 String
-  passwordHash         String
+  passwordHash         String?
+  googleId             String?         @unique
   role                 UserRole        @default(AGENT)
   active               Boolean         @default(true)
   allowedModules       String[]        @default([])

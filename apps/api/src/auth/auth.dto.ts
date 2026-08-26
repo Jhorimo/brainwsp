@@ -36,6 +36,19 @@ export class UpdateProfileDto {
   name!: string;
 }
 
+export class GoogleExchangeDto {
+  @ApiProperty({ description: 'Ticket de un solo uso emitido por GET /auth/google/callback' })
+  @IsString()
+  ticket!: string;
+
+  @ApiPropertyOptional({ description: 'Requerido solo cuando el ticket es de un correo de Google sin cuenta todavía (respuesta needsCompany: true).' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  companyName?: string;
+}
+
 export class RegisterDto {
   @ApiProperty({ example: 'Brain Tech Perú' })
   @IsString()

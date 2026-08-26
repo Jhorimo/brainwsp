@@ -6,12 +6,17 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { generateApiCredential, hashApiSecret, encryptApiSecret } from '../common/utils/secret';
 import { slugify } from '../common/utils/slug';
 import { PrismaService } from '../prisma/prisma.service';
+import { GoogleAuthService } from './google-auth.service';
+
+type GoogleLoginTicket = { purpose: 'google-login'; userId: string; googleId: string };
+type GoogleSignupTicket = { purpose: 'google-signup'; googleId: string; email: string; name: string };
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly googleAuth: GoogleAuthService,
   ) {}
 
   // Resolved fresh from the DB (not decoded from the JWT) so nav/module visibility
@@ -51,7 +56,10 @@ export class AuthService {
       include: { company: true },
     });
 
-    if (!user?.active || !(await bcrypt.compare(password, user.passwordHash))) {
+    // `passwordHash` is null for accounts that only ever signed in with Google — nothing
+    // to compare against, so treat that the same as a wrong password rather than letting
+    // bcrypt.compare(password, null) throw.
+    if (!user?.active || !user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
       void this.logAccess({
         action: 'LOGIN',
         success: false,
@@ -65,25 +73,19 @@ export class AuthService {
     }
 
     void this.logAccess({ action: 'LOGIN', success: true, userId: user.id, companyId: user.companyId, ip, userAgent });
-
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    return this.issueSession(user, user.company, remember);
+  }
 
-    const payload = {
-      sub: user.id,
-      companyId: user.companyId,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-    };
-
+  // Sin "Recuérdame" el token usa la TTL corta configurada globalmente (JWT_TTL, 12h por
+  // defecto) — con "Recuérdame" dura 30 días, para que valga la pena guardarlo en
+  // localStorage en vez de sessionStorage (ver setAuthSession en el frontend).
+  private async issueSession(user: User, company: Company, remember?: boolean) {
+    const payload = { sub: user.id, companyId: user.companyId, email: user.email, name: user.name, role: user.role };
     return {
-      // Sin "Recuérdame" el token usa la TTL corta configurada globalmente (JWT_TTL,
-      // 12h por defecto) — con "Recuérdame" dura 30 días, para que valga la pena
-      // guardarlo en localStorage en vez de sessionStorage (ver setAuthSession en el
-      // frontend). Sin esto, el checkbox guardaba el token pero igual expiraba pronto.
       accessToken: await this.jwt.signAsync(payload, remember ? { expiresIn: '30d' } : undefined),
       user: payload,
-      company: { id: user.company.id, name: user.company.name, slug: user.company.slug },
+      company: { id: company.id, name: company.name, slug: company.slug },
     };
   }
 
@@ -94,7 +96,9 @@ export class AuthService {
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+    // A Google-only account (passwordHash null) has nothing to verify the "current"
+    // password against — this is really "set my first password", not "change" it.
+    if (!user || (user.passwordHash && !(await bcrypt.compare(currentPassword, user.passwordHash)))) {
       throw new UnauthorizedException('La contraseña actual no es correcta');
     }
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await bcrypt.hash(newPassword, 12) } });
@@ -102,20 +106,35 @@ export class AuthService {
   }
 
   async register(input: { companyName: string; name: string; email: string; password: string }, ip?: string, userAgent?: string) {
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const { user, company } = await this.createCompanyWithOwner({ ...input, passwordHash });
+    void this.logAccess({ action: 'REGISTER', success: true, userId: user.id, companyId: company.id, ip, userAgent });
+    return this.issueSession(user, company);
+  }
+
+  // Shared by email/password registration and by the "sign up with Google" completion
+  // step — both ultimately need the same thing: a brand-new Company plus its OWNER user
+  // and starter API credential.
+  private async createCompanyWithOwner(input: { companyName: string; name: string; email: string; passwordHash?: string; googleId?: string }) {
     const email = input.email.trim().toLowerCase();
 
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
     if (existingUser) throw new BadRequestException('Ya existe una cuenta con ese correo');
 
     const slug = await this.generateUniqueSlug(input.companyName);
-    const passwordHash = await bcrypt.hash(input.password, 12);
 
-    let created: { user: User; company: Company };
     try {
-      created = await this.prisma.$transaction(async (tx) => {
+      return await this.prisma.$transaction(async (tx) => {
         const company = await tx.company.create({ data: { name: input.companyName.trim(), slug } });
         const user = await tx.user.create({
-          data: { companyId: company.id, name: input.name.trim(), email, passwordHash, role: UserRole.OWNER },
+          data: {
+            companyId: company.id,
+            name: input.name.trim(),
+            email,
+            passwordHash: input.passwordHash,
+            googleId: input.googleId,
+            role: UserRole.OWNER,
+          },
         });
 
         // AUTH KEY "Principal" de la empresa, sin instancia todavía (instanceId queda
@@ -134,6 +153,7 @@ export class AuthService {
           },
         });
 
+        await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
         return { user, company };
       });
     } catch (error) {
@@ -149,17 +169,70 @@ export class AuthService {
       }
       throw error;
     }
+  }
 
-    const { user, company } = created;
-    await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    void this.logAccess({ action: 'REGISTER', success: true, userId: user.id, companyId: company.id, ip, userAgent });
+  // --- Ingresar / registrarse con Google ---
+  //
+  // 1. GET /auth/google redirects to Google.
+  // 2. GET /auth/google/callback exchanges the code for the Google profile and hands back
+  //    a short-lived, single-purpose ticket (never the real session) — one shape for an
+  //    existing account, another for an email Google confirmed but that has no BrainWSP
+  //    account yet.
+  // 3. The frontend posts that ticket to exchangeGoogleTicket(). An existing account logs
+  //    in immediately; a new one gets `needsCompany: true` until it also sends a
+  //    companyName, at which point it's the same "create a company" flow register() uses.
 
-    const payload = { sub: user.id, companyId: company.id, email: user.email, name: user.name, role: user.role };
-    return {
-      accessToken: await this.jwt.signAsync(payload),
-      user: payload,
-      company: { id: company.id, name: company.name, slug: company.slug },
-    };
+  buildGoogleAuthUrl() {
+    if (!this.googleAuth.isConfigured()) {
+      throw new BadRequestException('Ingresar con Google no está configurado en el servidor (faltan GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)');
+    }
+    return this.googleAuth.buildAuthUrl();
+  }
+
+  async handleGoogleCallback(code: string) {
+    const profile = await this.googleAuth.exchangeCode(code);
+    const user = await this.prisma.user.findFirst({ where: { OR: [{ googleId: profile.googleId }, { email: profile.email }] } });
+
+    if (user) {
+      const ticket: GoogleLoginTicket = { purpose: 'google-login', userId: user.id, googleId: profile.googleId };
+      return this.jwt.signAsync(ticket, { expiresIn: '2m' });
+    }
+
+    const ticket: GoogleSignupTicket = { purpose: 'google-signup', googleId: profile.googleId, email: profile.email, name: profile.name };
+    return this.jwt.signAsync(ticket, { expiresIn: '5m' });
+  }
+
+  async exchangeGoogleTicket(ticket: string, companyName: string | undefined, ip?: string, userAgent?: string) {
+    let payload: GoogleLoginTicket | GoogleSignupTicket;
+    try {
+      payload = await this.jwt.verifyAsync(ticket);
+    } catch {
+      throw new BadRequestException('El enlace de acceso con Google venció, inténtalo de nuevo');
+    }
+
+    if (payload.purpose === 'google-login') {
+      const user = await this.prisma.user.findUnique({ where: { id: payload.userId }, include: { company: true } });
+      if (!user?.active) throw new UnauthorizedException('Cuenta no encontrada o inactiva');
+      // First Google sign-in for an account that registered with email/password — link it
+      // so the next login can also match by googleId (not just by email).
+      if (!user.googleId) await this.prisma.user.update({ where: { id: user.id }, data: { googleId: payload.googleId } });
+      void this.logAccess({ action: 'LOGIN', success: true, userId: user.id, companyId: user.companyId, ip, userAgent, metadata: { via: 'google' } });
+      await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+      return this.issueSession(user, user.company);
+    }
+
+    if (!companyName?.trim()) {
+      return { needsCompany: true as const, email: payload.email, name: payload.name };
+    }
+
+    const { user, company } = await this.createCompanyWithOwner({
+      companyName,
+      name: payload.name,
+      email: payload.email,
+      googleId: payload.googleId,
+    });
+    void this.logAccess({ action: 'REGISTER', success: true, userId: user.id, companyId: company.id, ip, userAgent, metadata: { via: 'google' } });
+    return this.issueSession(user, company);
   }
 
   private async generateUniqueSlug(companyName: string): Promise<string> {
