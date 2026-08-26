@@ -3,10 +3,12 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Building2, MessageSquareText, Radio, Sparkles } from 'lucide-react';
+import { Building2, Copy, KeyRound, MessageSquareText, Radio, Sparkles } from 'lucide-react';
 import { API_URL, setAuthSession } from '@/lib/api';
 import { GoogleIcon } from '@/components/google-icon';
 import { BrandIcon } from '@/components/brand-mark';
+
+type ApiCredential = { appKey: string; authKey: string };
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -17,6 +19,7 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [credential, setCredential] = useState<ApiCredential | null>(null);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -47,13 +50,20 @@ export default function RegisterPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudo crear la cuenta');
       setAuthSession(data, true);
-      router.replace('/dashboard');
+      // El AUTH KEY "Principal" (creado junto con la empresa, ver AuthService.register)
+      // viaja en texto plano en esta respuesta y luego queda cifrado para poder revelarlo
+      // bajo demanda. Se muestra aquí para que el OWNER no tenga que entrar a "API e
+      // integraciones" a buscarlo; recién al cerrar este aviso se entra al dashboard.
+      if (data.apiCredential?.authKey) setCredential(data.apiCredential);
+      else router.replace('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
     } finally {
       setLoading(false);
     }
   };
+
+  const copy = (value: string) => navigator.clipboard.writeText(value);
 
   return (
     <div className="login-shell">
@@ -94,6 +104,26 @@ export default function RegisterPage() {
           </div>
         </form>
       </section>
+
+      {credential && (
+        <div className="modal-backdrop">
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Tu AUTH KEY está listo</h2>
+              <p>Úsalo para conectar tus sistemas (por ejemplo BrainPOS Restaurante) al Gateway de BrainWSP. Cópialo ahora — más tarde también podrás verlo desde &quot;API e integraciones&quot;.</p>
+            </div>
+            <div className="modal-body form-grid">
+              <div className="field"><label>APP KEY</label><div className="secret-box">{credential.appKey}</div></div>
+              <div className="field"><label>AUTH KEY</label><div className="secret-box">{credential.authKey}</div></div>
+              <div className="warning-box"><KeyRound size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Guárdalo en un lugar seguro: con este AUTH KEY se pueden crear y controlar tus instancias de WhatsApp.</div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => void copy(`${credential.appKey}\n${credential.authKey}`)}><Copy size={14} />Copiar</button>
+              <button className="button primary" onClick={() => router.replace('/dashboard')}>Ya lo guardé, continuar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

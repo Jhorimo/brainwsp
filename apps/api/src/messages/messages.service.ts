@@ -1,9 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MessageDirection, MessageStatus, MessageType, WhatsAppProvider } from '@prisma/client';
+import { basename, extname } from 'node:path';
 import type { ApiClientContext } from '../common/types/jwt-user';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { StorageService } from '../storage/storage.service';
+
+const MAX_LEGACY_DOCUMENT_BYTES = 48 * 1024 * 1024;
 
 @Injectable()
 export class MessagesService {
@@ -11,6 +15,7 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly queues: QueueService,
     private readonly realtime: RealtimeBus,
+    private readonly storage: StorageService,
   ) {}
 
   async sendText(client: ApiClientContext, to: string, message: string, instanceSlug?: string) {
@@ -81,6 +86,39 @@ export class MessagesService {
 
     await this.emitQueued(client.companyId, context.conversation.id, record);
     return this.accepted(record.id, context.instance.slug);
+  }
+
+  async sendBase64Document(
+    client: ApiClientContext,
+    input: { to: string; file: string; fileName: string; caption?: string; instanceSlug?: string },
+  ) {
+    const parsed = input.file.match(/^data:([^;,]+);base64,([\s\S]+)$/i);
+    const mimeType = parsed?.[1]?.trim().toLowerCase() || 'application/pdf';
+    const encoded = (parsed?.[2] || input.file).replace(/\s+/g, '');
+    if (!encoded || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
+      throw new BadRequestException('El documento base64 no es válido');
+    }
+
+    const buffer = Buffer.from(encoded, 'base64');
+    if (!buffer.length) throw new BadRequestException('El documento está vacío');
+    if (buffer.length > MAX_LEGACY_DOCUMENT_BYTES) {
+      throw new BadRequestException('El documento supera el límite de 48 MB');
+    }
+
+    let safeName = basename(input.fileName.trim()).replace(/[\u0000-\u001f\u007f]/g, '');
+    if (!safeName) safeName = 'documento';
+    if (!extname(safeName) && mimeType === 'application/pdf') safeName += '.pdf';
+    const extension = extname(safeName).replace('.', '').toLowerCase() || (mimeType === 'application/pdf' ? 'pdf' : 'bin');
+    const upload = await this.storage.uploadBuffer(buffer, mimeType, extension);
+
+    return this.sendDocument(client, {
+      to: input.to,
+      url: upload.internalUrl,
+      fileName: safeName,
+      mimeType,
+      caption: input.caption,
+      instanceSlug: input.instanceSlug,
+    });
   }
 
   async status(client: ApiClientContext, messageId: string) {

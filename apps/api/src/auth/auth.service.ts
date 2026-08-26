@@ -107,9 +107,12 @@ export class AuthService {
 
   async register(input: { companyName: string; name: string; email: string; password: string }, ip?: string, userAgent?: string) {
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const { user, company } = await this.createCompanyWithOwner({ ...input, passwordHash });
+    const { user, company, apiCredential } = await this.createCompanyWithOwner({ ...input, passwordHash });
     void this.logAccess({ action: 'REGISTER', success: true, userId: user.id, companyId: company.id, ip, userAgent });
-    return this.issueSession(user, company);
+    // El AUTH KEY "Principal" viaja en texto plano en esta respuesta y luego queda
+    // cifrado para poder revelarlo bajo demanda — el frontend lo muestra al registrarse
+    // para que el OWNER no dependa de entrar a "API e integraciones" a buscarlo.
+    return { ...(await this.issueSession(user, company)), apiCredential };
   }
 
   // Shared by email/password registration and by the "sign up with Google" completion
@@ -154,7 +157,7 @@ export class AuthService {
         });
 
         await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-        return { user, company };
+        return { user, company, apiCredential: { appKey, authKey } };
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -225,14 +228,14 @@ export class AuthService {
       return { needsCompany: true as const, email: payload.email, name: payload.name };
     }
 
-    const { user, company } = await this.createCompanyWithOwner({
+    const { user, company, apiCredential } = await this.createCompanyWithOwner({
       companyName,
       name: payload.name,
       email: payload.email,
       googleId: payload.googleId,
     });
     void this.logAccess({ action: 'REGISTER', success: true, userId: user.id, companyId: company.id, ip, userAgent, metadata: { via: 'google' } });
-    return this.issueSession(user, company);
+    return { ...(await this.issueSession(user, company)), apiCredential };
   }
 
   private async generateUniqueSlug(companyName: string): Promise<string> {

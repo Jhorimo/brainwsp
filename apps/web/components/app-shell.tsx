@@ -11,7 +11,9 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  Copy,
   Eye,
+  EyeOff,
   Handshake,
   Kanban,
   KeyRound,
@@ -26,7 +28,17 @@ import {
   Wifi,
 } from 'lucide-react';
 import { Protected } from './protected';
-import { apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
+import { API_URL, apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
+
+type MasterCredential = {
+  id: string;
+  name: string;
+  appKey: string;
+  hasAuthKey: boolean;
+  authKey?: string;
+};
+
+const GATEWAY_BASE_URL = API_URL.replace(/\/api\/?$/, '');
 
 const roleLabels: Record<string, string> = {
   SUPERADMIN: 'Super administrador',
@@ -70,6 +82,11 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const [companySaving, setCompanySaving] = useState(false);
   const [companySaved, setCompanySaved] = useState(false);
   const [companyError, setCompanyError] = useState('');
+  const [masterCredential, setMasterCredential] = useState<MasterCredential | null>(null);
+  const [masterAuthKey, setMasterAuthKey] = useState('');
+  const [masterAuthVisible, setMasterAuthVisible] = useState(false);
+  const [masterLoading, setMasterLoading] = useState(false);
+  const [masterError, setMasterError] = useState('');
   // null = ver todo (rol no restringido, o aún no se resolvió /auth/me). Un array = lista
   // de módulos permitidos para un Agente restringido — ver AppShell más abajo.
   const [allowedModules, setAllowedModules] = useState<string[] | null>(null);
@@ -132,7 +149,54 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
     setCompanyDraft(identity.company);
     setCompanyError('');
     setCompanySaved(false);
+    setMasterCredential(null);
+    setMasterAuthKey('');
+    setMasterAuthVisible(false);
+    setMasterError('');
     setProfileModal(true);
+    if (identity.role === 'OWNER' || identity.role === 'ADMIN') void loadMasterCredential();
+  };
+
+  const loadMasterCredential = async () => {
+    setMasterLoading(true);
+    setMasterError('');
+    try {
+      const credential = await apiFetch<MasterCredential>('/api-credentials/master', { method: 'POST' });
+      setMasterCredential(credential);
+      if (credential.authKey) setMasterAuthKey(credential.authKey);
+    } catch (err) {
+      setMasterError(err instanceof Error ? err.message : 'No se pudo obtener el AUTH KEY maestro');
+    } finally {
+      setMasterLoading(false);
+    }
+  };
+
+  const toggleMasterAuthKey = async () => {
+    if (masterAuthVisible) {
+      setMasterAuthVisible(false);
+      return;
+    }
+    if (masterAuthKey) {
+      setMasterAuthVisible(true);
+      return;
+    }
+    if (!masterCredential) return;
+    setMasterLoading(true);
+    setMasterError('');
+    try {
+      const data = await apiFetch<{ authKey: string }>(`/api-credentials/${masterCredential.id}/reveal`);
+      setMasterAuthKey(data.authKey);
+      setMasterAuthVisible(true);
+    } catch (err) {
+      setMasterError(err instanceof Error ? err.message : 'No se pudo mostrar el AUTH KEY maestro');
+    } finally {
+      setMasterLoading(false);
+    }
+  };
+
+  const copyMasterAuthKey = async () => {
+    if (!masterAuthKey) return;
+    await navigator.clipboard.writeText(masterAuthKey);
   };
 
   const saveName = async () => {
@@ -341,6 +405,23 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                 </div>
                 <div className="field"><label>Rol</label><input value={roleLabels[identity.role] || identity.role} disabled title="El rol lo asigna un administrador desde Equipo y agentes" /></div>
               </div>
+
+              {isAccountManager && (
+                <div style={{ marginTop: '1.25rem' }}>
+                  <div className="field">
+                    <label>Integración BrainPOS</label>
+                    <p className="row-sub" style={{ marginTop: 4 }}>Este AUTH KEY maestro permite que cada instalación de BrainPOS cree su propia instancia y reciba automáticamente su APP KEY.</p>
+                  </div>
+                  {masterError && <div className="error-box">{masterError}</div>}
+                  {masterLoading && !masterCredential ? <div className="row-sub">Preparando credencial maestra...</div> : masterCredential && (
+                    <div className="form-grid">
+                      <div className="field"><label>URL del Gateway</label><div className="secret-box">{GATEWAY_BASE_URL}</div></div>
+                      <div className="field"><label>AUTH KEY maestro</label><div className="field-with-action"><div className="secret-box" style={{ flex: 1, overflowWrap: 'anywhere' }}>{masterAuthVisible ? masterAuthKey : '••••••••••••••••••••••••'}</div><button className="icon-button" type="button" disabled={masterLoading || !masterCredential.hasAuthKey} onClick={() => void toggleMasterAuthKey()} title={masterAuthVisible ? 'Ocultar AUTH KEY' : 'Ver AUTH KEY'}>{masterAuthVisible ? <EyeOff size={15} /> : <Eye size={15} />}</button><button className="icon-button" type="button" disabled={!masterAuthKey} onClick={() => void copyMasterAuthKey()} title="Copiar AUTH KEY"><Copy size={15} /></button></div></div>
+                    </div>
+                  )}
+                  <div className="warning-box" style={{ marginTop: 10 }}><KeyRound size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Trátalo como una contraseña: con este token se pueden crear y controlar las instancias vinculadas a tu empresa.</div>
+                </div>
+              )}
 
               <div className="field" style={{ marginTop: '1.25rem' }}>
                 <label>Cambiar contraseña</label>

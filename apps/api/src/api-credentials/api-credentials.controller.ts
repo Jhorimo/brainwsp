@@ -17,6 +17,11 @@ import { ApiCredentialsService } from './api-credentials.service';
 export class ApiCredentialsController {
   constructor(private readonly service: ApiCredentialsService) {}
 
+  @Post('master')
+  ensureMaster(@CurrentUser() user: JwtUser) {
+    return this.service.ensureMaster(user.companyId);
+  }
+
   @Get()
   list(@CurrentUser() user: JwtUser) {
     return this.service.list(user.companyId);

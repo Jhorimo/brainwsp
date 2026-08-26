@@ -174,11 +174,10 @@ model User {
 model ApiCredential {
   id         String           @id @default(uuid())
   companyId  String
-  // Opcional: la credencial "Principal" que se crea sola al registrar la empresa (ver
-  // AuthService.register()) todavía no tiene instancia — la obtiene recién cuando el
-  // AUTH KEY se usa para llamar POST /api/user/device (ver UserDeviceService), que
-  // aprovisiona la instancia y la enlaza aquí. Las credenciales creadas a mano desde el
-  // panel (ApiCredentialsService.create) siguen requiriendo elegir una instancia existente.
+  // Opcional: la credencial maestra que se crea al registrar la empresa no pertenece a
+  // una instancia. Su AUTH KEY permite que POST /api/user/device aprovisione múltiples
+  // instancias, cada una con una credencial hija y APP KEY propio. Las credenciales
+  // creadas manualmente desde el panel sí requieren una instancia existente.
   instanceId String?
   name       String
   appKey     String           @unique
@@ -209,6 +208,11 @@ model WhatsAppInstance {
   provider         WhatsAppProvider @default(BAILEYS)
   phoneNumber      String?
   displayName      String?
+  // Datos del cliente BrainPOS Restaurante que creó esta instancia vía POST
+  // /api/user/device. Varias instalaciones pueden compartir dominio/IP, por lo que la
+  // identidad estable combina el webhook normalizado con el teléfono declarado.
+  posWebhookUrl    String?
+  posClientKey     String?
   status           InstanceStatus   @default(DISCONNECTED)
   qr               String?
   reconnectAttempt Int              @default(0)
@@ -227,6 +231,7 @@ model WhatsAppInstance {
   authKeys         WhatsAppAuthKey[]
 
   @@unique([companyId, slug])
+  @@unique([companyId, posClientKey])
   @@index([companyId, status])
 }
 

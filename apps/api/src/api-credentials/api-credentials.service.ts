@@ -8,6 +8,63 @@ import type { ApiClientContext } from '../common/types/jwt-user';
 export class ApiCredentialsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async ensureMaster(companyId: string) {
+    const existing = await this.prisma.apiCredential.findFirst({
+      where: { companyId, instanceId: null, active: true },
+      select: {
+        id: true,
+        name: true,
+        appKey: true,
+        authKeyEncrypted: true,
+        instanceId: true,
+        active: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (existing) {
+      const { authKeyEncrypted, ...credential } = existing;
+      return { ...credential, hasAuthKey: authKeyEncrypted != null };
+    }
+
+    const { appKey, authKey } = generateApiCredential();
+    let suffix = 1;
+    let name = 'BrainPOS Maestro';
+    while (await this.prisma.apiCredential.findFirst({ where: { companyId, name: { equals: name, mode: 'insensitive' } }, select: { id: true } })) {
+      suffix += 1;
+      name = `BrainPOS Maestro ${suffix}`;
+    }
+
+    try {
+      const credential = await this.prisma.apiCredential.create({
+        data: {
+          companyId,
+          name,
+          appKey,
+          authHash: hashApiSecret(authKey),
+          authKeyEncrypted: encryptApiSecret(authKey),
+        },
+        select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
+      });
+      return { ...credential, hasAuthKey: true, authKey };
+    } catch (error) {
+      // Dos pestañas pueden abrir el perfil a la vez. Si otra petición ya creó la
+      // credencial maestra, devolvemos esa fila en vez de crear una segunda.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const raced = await this.prisma.apiCredential.findFirst({
+          where: { companyId, instanceId: null, active: true },
+          select: { id: true, name: true, appKey: true, authKeyEncrypted: true, instanceId: true, active: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (raced) {
+          const { authKeyEncrypted, ...credential } = raced;
+          return { ...credential, hasAuthKey: authKeyEncrypted != null };
+        }
+      }
+      throw error;
+    }
+  }
+
   async list(companyId: string) {
     const credentials = await this.prisma.apiCredential.findMany({
       where: { companyId },
@@ -70,12 +127,25 @@ export class ApiCredentialsService {
   async revoke(companyId: string, id: string) {
     const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
     if (!credential) throw new NotFoundException('Credencial no encontrada');
+    if (!credential.instanceId) {
+      await this.prisma.$transaction([
+        this.prisma.apiCredential.update({ where: { id }, data: { active: false } }),
+        this.prisma.apiCredential.updateMany({
+          where: { companyId, authHash: credential.authHash, id: { not: id } },
+          data: { active: false },
+        }),
+      ]);
+      return { ...credential, active: false };
+    }
     return this.prisma.apiCredential.update({ where: { id }, data: { active: false } });
   }
 
   async remove(companyId: string, id: string) {
     const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
     if (!credential) throw new NotFoundException('Credencial no encontrada');
+    if (!credential.instanceId) {
+      throw new BadRequestException('La credencial maestra no se puede eliminar. Puedes regenerarla o revocarla para invalidar el AUTH KEY actual.');
+    }
     await this.prisma.apiCredential.delete({ where: { id } });
     return { success: true };
   }
@@ -84,11 +154,25 @@ export class ApiCredentialsService {
     const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
     if (!credential) throw new NotFoundException('Credencial no encontrada');
     const authKey = generateAuthKey();
-    const updated = await this.prisma.apiCredential.update({
-      where: { id },
-      data: { authHash: hashApiSecret(authKey), authKeyEncrypted: encryptApiSecret(authKey), active: true },
-      select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
-    });
+    const authHash = hashApiSecret(authKey);
+    const authKeyEncrypted = encryptApiSecret(authKey);
+    const updated = !credential.instanceId
+      ? (await this.prisma.$transaction([
+          this.prisma.apiCredential.update({
+            where: { id },
+            data: { authHash, authKeyEncrypted, active: true },
+            select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
+          }),
+          this.prisma.apiCredential.updateMany({
+            where: { companyId, authHash: credential.authHash, id: { not: id } },
+            data: { authHash, authKeyEncrypted, active: true },
+          }),
+        ]))[0]
+      : await this.prisma.apiCredential.update({
+          where: { id },
+          data: { authHash, authKeyEncrypted, active: true },
+          select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
+        });
     return { ...updated, authKey, warning: 'Guarda el nuevo AUTH KEY. El anterior dejó de funcionar. También podrás ver este más tarde desde el icono del ojo en la tabla.' };
   }
 
@@ -135,7 +219,14 @@ export class ApiCredentialsService {
     if (!token) throw new UnauthorizedException('AUTH KEY requerido');
 
     const authHash = hashApiSecret(token);
-    const credential = await this.prisma.apiCredential.findFirst({ where: { authHash, active: true } });
+    // Puede haber varias filas con el mismo authHash: la credencial "maestra" (instanceId
+    // null) y las que UserDeviceService clona por cada dispositivo POS que crea a partir
+    // de ella (mismo AUTH KEY, APP KEY propio — ver createOrUpdateMasterInstance). El
+    // Bearer siempre debe resolver a la maestra, nunca a una hija al azar, o
+    // /api/user/check-session|logout-session no encuentran el dispositivo correcto.
+    const credential =
+      (await this.prisma.apiCredential.findFirst({ where: { authHash, active: true, instanceId: null } })) ??
+      (await this.prisma.apiCredential.findFirst({ where: { authHash, active: true } }));
     if (!credential) throw new UnauthorizedException('AUTH KEY inválido');
 
     await this.prisma.apiCredential.update({
