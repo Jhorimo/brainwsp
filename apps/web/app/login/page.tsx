@@ -168,13 +168,11 @@ function LoginForm() {
             <a className="button google-button" href={`${API_URL}/auth/google`}><GoogleIcon /> Ingresar con Google</a>
             <div className="login-divider"><span>o con tu correo</span></div>
 
-            <div className="field"><label>Correo electrónico</label><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete={remember ? 'username' : 'off'} /></div>
+            <div className="field"><label>Correo electrónico</label><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" /></div>
             <div className="field">
               <label>Contraseña</label>
               <div className="password-input">
-                {/* autoComplete="new-password" es el truco estándar para que el navegador no
-                    ofrezca guardar/autocompletar la clave cuando el usuario no marcó "Recuérdame". */}
-                <input value={password} onChange={(e) => setPassword(e.target.value)} type={showPassword ? 'text' : 'password'} autoComplete={remember ? 'current-password' : 'new-password'} />
+                <input value={password} onChange={(e) => setPassword(e.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="current-password" />
                 <button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>
                   {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
