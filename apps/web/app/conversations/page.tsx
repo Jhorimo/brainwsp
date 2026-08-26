@@ -897,6 +897,23 @@ export default function ConversationsPage() {
 
   const closeAppointmentModal = () => setAppointmentModal(false);
 
+  // Changing "Inicio" alone used to leave "Fin" wherever it was — move the start forward a
+  // couple of days and the end could silently stay in the past, only caught as an error at
+  // submit time. Shifting Fin by the same delta keeps the appointment's duration constant,
+  // same as dragging an event's start in Google Calendar.
+  const onAppointmentStartChange = (value: string) => {
+    const newStart = new Date(value);
+    if (value && !Number.isNaN(newStart.getTime()) && appointmentStart && appointmentEnd) {
+      const oldStart = new Date(appointmentStart);
+      const oldEnd = new Date(appointmentEnd);
+      if (!Number.isNaN(oldStart.getTime()) && !Number.isNaN(oldEnd.getTime())) {
+        const delta = newStart.getTime() - oldStart.getTime();
+        setAppointmentEnd(toDatetimeLocalValue(new Date(oldEnd.getTime() + delta)));
+      }
+    }
+    setAppointmentStart(value);
+  };
+
   const submitAppointment = async () => {
     if (!selectedId) return;
     if (!appointmentTitle.trim()) { setAppointmentError('Escribe un título para la cita'); return; }
@@ -1981,7 +1998,7 @@ export default function ConversationsPage() {
                 </div>
                 <div className="field">
                   <label>Inicio</label>
-                  <input type="datetime-local" value={appointmentStart} onChange={(e) => setAppointmentStart(e.target.value)} />
+                  <input type="datetime-local" value={appointmentStart} onChange={(e) => onAppointmentStartChange(e.target.value)} />
                 </div>
                 <div className="field">
                   <label>Fin</label>
