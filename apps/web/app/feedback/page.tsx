@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Lightbulb, MessageCircle } from 'lucide-react';
+import { AlertTriangle, Lightbulb, MessageCircle, Plus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
+import { FeedbackWidget } from '@/components/feedback-widget';
 import { apiFetch, getStoredUser } from '@/lib/api';
 
 type FeedbackType = 'SUGGESTION' | 'BUG' | 'OTHER';
@@ -30,6 +31,7 @@ export default function FeedbackPage() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [error, setError] = useState('');
   const [canManage, setCanManage] = useState(false);
+  const [newFeedbackOpen, setNewFeedbackOpen] = useState(false);
 
   const load = useCallback(async () => {
     try { setItems(await apiFetch<FeedbackItem[]>('/feedback')); }
@@ -56,7 +58,11 @@ export default function FeedbackPage() {
   };
 
   return (
-    <AppShell title="Sugerencias y reportes" subtitle="Lo que tu equipo reporta sobre BrainWSP">
+    <AppShell
+      title="Sugerencias y reportes"
+      subtitle="Lo que tu equipo reporta sobre BrainWSP"
+      actions={<button className="button primary" onClick={() => setNewFeedbackOpen(true)}><Plus size={16} />Nueva sugerencia</button>}
+    >
       {error && <div className="error-box">{error}</div>}
       <section className="table-card">
         <table>
@@ -88,8 +94,10 @@ export default function FeedbackPage() {
             })}
           </tbody>
         </table>
-        {!items.length && <div className="empty-state"><div><strong>Aún no hay reportes</strong>Usa el botón flotante para mandar una sugerencia o reportar un error.</div></div>}
+        {!items.length && <div className="empty-state"><div><strong>Aún no hay reportes</strong>Usa "Nueva sugerencia" para mandar una sugerencia o reportar un error.</div></div>}
       </section>
+
+      <FeedbackWidget open={newFeedbackOpen} onClose={() => { setNewFeedbackOpen(false); void load(); }} />
     </AppShell>
   );
 }

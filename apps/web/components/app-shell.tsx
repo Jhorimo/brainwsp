@@ -26,7 +26,6 @@ import {
   Wifi,
 } from 'lucide-react';
 import { Protected } from './protected';
-import { FeedbackWidget } from './feedback-widget';
 import { apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
 
 const roleLabels: Record<string, string> = {
@@ -362,7 +361,6 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
         </div>
       )}
 
-      <FeedbackWidget />
     </Protected>
   );
 }

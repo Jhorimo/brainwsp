@@ -203,8 +203,6 @@ tr:last-child td { border-bottom: 0; }
 .status-pill.info { color: var(--brand); background: var(--brand-soft); }
 
 /* Feedback widget */
-.feedback-fab { position: fixed; right: 26px; bottom: 26px; width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--accent); color: white; display: grid; place-items: center; box-shadow: 0 10px 26px rgba(228,0,124,.35); z-index: 90; }
-.feedback-fab:hover { background: var(--accent-dark); }
 .feedback-type-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .feedback-type-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 0; border: 1px solid var(--line); background: white; border-radius: 10px; font-size: 11px; font-weight: 700; color: var(--muted); }
 .feedback-type-tab:hover { background: var(--surface-2); }
@@ -644,10 +642,6 @@ tr:last-child td { border-bottom: 0; }
   .table-card table { min-width: 620px; }
   .api-hero { flex-wrap: wrap; }
   .api-url { white-space: normal; word-break: break-all; }
-
-  /* Fixed bottom-right at 26px on every page — on conversations that lands right on top
-     of the composer's mic/send button, blocking it. Raise it above any bottom-docked bar. */
-  .feedback-fab { bottom: 86px; }
 
   /* 4 íconos + textarea + botón de enviar/mic pelean por espacio en un celular angosto
      (~360-390px) — se achican los botones y el espaciado para que el textarea no quede

@@ -13,8 +13,10 @@ const TYPES: Array<{ id: FeedbackType; label: string; icon: typeof Lightbulb }> 
   { id: 'OTHER', label: 'Otro', icon: MessageCircle },
 ];
 
-export function FeedbackWidget() {
-  const [open, setOpen] = useState(false);
+// Controlled from the "Sugerencias y reportes" page's own "Nueva sugerencia" button — this
+// used to also render its own floating bubble on every screen, which the product owner
+// found intrusive. Now it only ever opens where that page tells it to.
+export function FeedbackWidget({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [type, setType] = useState<FeedbackType>('SUGGESTION');
   const [departmentId, setDepartmentId] = useState('');
@@ -31,10 +33,10 @@ export function FeedbackWidget() {
 
   useEffect(() => {
     if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open]);
+  }, [open, onClose]);
 
   const reset = () => {
     setType('SUGGESTION');
@@ -46,7 +48,7 @@ export function FeedbackWidget() {
   };
 
   const close = () => {
-    setOpen(false);
+    onClose();
     reset();
   };
 
@@ -69,8 +71,6 @@ export function FeedbackWidget() {
 
   return (
     <>
-      <button className="feedback-fab" onClick={() => setOpen(true)} title="Sugerencias y reportes"><Lightbulb size={20} /></button>
-
       {open && (
         <div className="modal-backdrop" onClick={close}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
