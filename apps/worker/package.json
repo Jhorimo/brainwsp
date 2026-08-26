@@ -13,6 +13,7 @@
     "@hapi/boom": "^10.0.1",
     "@prisma/client": "6.19.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",
+    "audio-decode": "^2.1.5",
     "bullmq": "^5.58.5",
     "ffmpeg-static": "^5.2.0",
     "ioredis": "^5.7.0",

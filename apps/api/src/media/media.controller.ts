@@ -44,8 +44,13 @@ export class MediaController {
     if (rangeMatch) {
       const stat = await this.storage.statObject(objectName);
       const size = stat.size;
-      const start = rangeMatch[1] ? Number(rangeMatch[1]) : 0;
-      const end = rangeMatch[2] ? Number(rangeMatch[2]) : size - 1;
+      // `bytes=-500` is a suffix range ("give me the last 500 bytes"), not "start at
+      // byte 0" — browsers use it to jump straight to the tail of Ogg/WebM files to read
+      // the last page's duration/seek info without downloading the whole file. Treating
+      // the missing start as 0 served the wrong slice and broke duration detection.
+      const isSuffixRange = rangeMatch[1] === '' && rangeMatch[2] !== '';
+      const start = isSuffixRange ? Math.max(size - Number(rangeMatch[2]), 0) : (rangeMatch[1] ? Number(rangeMatch[1]) : 0);
+      const end = isSuffixRange ? size - 1 : (rangeMatch[2] ? Number(rangeMatch[2]) : size - 1);
       const length = end - start + 1;
 
       res.status(206);

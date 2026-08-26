@@ -4,6 +4,7 @@ import { InstanceStatus, MessageDirection, MessageStatus, MessageType, UserRole,
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { DealsService } from '../crm/deals.service';
+import { transcodeToOggOpus } from '../media/audio-transcode';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -183,7 +184,15 @@ export class ConversationsService {
     if (!type) throw new BadRequestException('Tipo de archivo no soportado');
 
     const conversation = await this.getOwned(user, conversationId);
-    const { internalUrl } = await this.storage.uploadBuffer(file.buffer, file.mimetype, extname(file.originalname).replace('.', ''));
+
+    // Browser voice-note recordings (MediaRecorder) write WebM/Opus without a duration
+    // in the container, so the panel's <audio> player shows 0:00/0:00 and won't play.
+    // Re-mux to Ogg/Opus before it ever reaches MinIO, so both the panel and the
+    // WhatsApp send get a file with real duration metadata.
+    const uploadBuffer = type === MessageType.AUDIO ? await transcodeToOggOpus(file.buffer) : file.buffer;
+    const uploadMimeType = type === MessageType.AUDIO ? 'audio/ogg; codecs=opus' : file.mimetype;
+    const uploadExtension = type === MessageType.AUDIO ? 'ogg' : extname(file.originalname).replace('.', '');
+    const { internalUrl } = await this.storage.uploadBuffer(uploadBuffer, uploadMimeType, uploadExtension);
 
     const message = await this.prisma.message.create({
       data: {
@@ -196,7 +205,7 @@ export class ConversationsService {
         status: MessageStatus.QUEUED,
         caption: caption || undefined,
         fileName: file.originalname,
-        mimeType: file.mimetype,
+        mimeType: uploadMimeType,
         mediaUrl: internalUrl,
         sentByUserId,
         quotedMessageId: await this.resolveQuote(companyId, conversationId, quotedMessageId),
