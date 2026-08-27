@@ -124,6 +124,20 @@ export class ApiCredentialsService {
     return { ...credential, authKey, warning: 'Guarda el AUTH KEY ahora. También podrás verlo más tarde desde el icono del ojo en la tabla.' };
   }
 
+  async rename(companyId: string, id: string, name: string) {
+    const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
+    if (!credential) throw new NotFoundException('Credencial no encontrada');
+
+    const existing = await this.prisma.apiCredential.findFirst({ where: { companyId, name: { equals: name, mode: 'insensitive' }, id: { not: id } } });
+    if (existing) throw new BadRequestException(`Ya existe una credencial llamada "${name}". Usa otro nombre.`);
+
+    return this.prisma.apiCredential.update({
+      where: { id },
+      data: { name },
+      select: { id: true, name: true, appKey: true, instanceId: true, active: true, createdAt: true },
+    });
+  }
+
   async revoke(companyId: string, id: string) {
     const credential = await this.prisma.apiCredential.findFirst({ where: { id, companyId } });
     if (!credential) throw new NotFoundException('Credencial no encontrada');

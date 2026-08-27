@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { MessageDirection, WhatsAppProvider } from '@prisma/client';
+import { InstanceStatus, MessageDirection, WhatsAppProvider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 
@@ -94,18 +94,29 @@ export class InstancesService {
     return { success: true, status: 'LOGGING_OUT', instanceId: id };
   }
 
-  async update(companyId: string, id: string, data: { name?: string }) {
+  async update(companyId: string, id: string, data: { name?: string; slug?: string }) {
     await this.getOwned(companyId, id);
+    if (data.slug !== undefined) {
+      const existing = await this.prisma.whatsAppInstance.findUnique({
+        where: { companyId_slug: { companyId, slug: data.slug } },
+      });
+      if (existing && existing.id !== id) throw new ConflictException('Ya existe una instancia con ese slug');
+    }
     return this.prisma.whatsAppInstance.update({
       where: { id },
-      data: { ...(data.name !== undefined ? { name: data.name.trim() } : {}) },
+      data: {
+        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+        ...(data.slug !== undefined ? { slug: data.slug } : {}),
+      },
     });
   }
 
-  // Borrado real (no el `active: false` que usan otras entidades) porque esto es para
-  // limpiar instancias creadas por error — pero solo si de verdad nunca se usaron: nunca
-  // se conectaron y no tienen conversaciones/mensajes/credenciales de API dependiendo de
-  // ellas, para no arrastrar en cascada historial real de chat.
+  // Si la instancia nunca se conectó ni tiene historial, se borra de verdad (limpieza de
+  // instancias creadas por error). Si ya se usó, no la borramos en cascada — se archiva
+  // (`active: false`, igual que otras entidades) para conservar conversaciones/mensajes
+  // reales; `list()` ya filtra por `active: true` así que desaparece del panel igual.
+  // Una credencial de API vinculada sí bloquea ambos casos: hay que eliminarla primero
+  // desde "API e integraciones" para no romper la integración externa en silencio.
   async remove(companyId: string, id: string) {
     const instance = await this.getOwned(companyId, id);
     const [conversationCount, messageCount, credentialCount] = await Promise.all([
@@ -113,11 +124,21 @@ export class InstancesService {
       this.prisma.message.count({ where: { instanceId: id } }),
       this.prisma.apiCredential.count({ where: { instanceId: id } }),
     ]);
-    if (instance.phoneNumber || instance.lastConnectedAt || conversationCount > 0 || messageCount > 0 || credentialCount > 0) {
-      throw new ConflictException('Esta instancia ya se usó (se conectó, tiene conversaciones o una credencial de API) y no se puede eliminar. Puedes desactivarla en su lugar.');
+    if (credentialCount > 0) {
+      throw new ConflictException('Esta instancia tiene una credencial de API vinculada. Elimínala primero en "API e integraciones" y luego podrás quitar la instancia.');
     }
+
+    const everUsed = Boolean(instance.phoneNumber || instance.lastConnectedAt || conversationCount > 0 || messageCount > 0);
+    if (everUsed) {
+      if (instance.status !== InstanceStatus.DISCONNECTED && instance.status !== InstanceStatus.LOGGED_OUT) {
+        await this.queues.commands.add('logout', { instanceId: id }, { removeOnComplete: 1000, removeOnFail: 1000 });
+      }
+      await this.prisma.whatsAppInstance.update({ where: { id }, data: { active: false, autoConnect: false } });
+      return { success: true, archived: true };
+    }
+
     await this.prisma.whatsAppInstance.delete({ where: { id } });
-    return { success: true };
+    return { success: true, archived: false };
   }
 
   private async getOwned(companyId: string, id: string) {

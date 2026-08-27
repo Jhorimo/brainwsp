@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, Eye, EyeOff, KeyRound, Plus, RefreshCw, RotateCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Copy, Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, RotateCw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
 import { ApiDocs } from '@/components/api-docs';
@@ -30,6 +30,10 @@ export default function ApiSettingsPage() {
   const [revealedAuthKeys, setRevealedAuthKeys] = useState<Record<string, string>>({});
   const [revealingAuthKeyId, setRevealingAuthKeyId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editItem, setEditItem] = useState<Credential | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editError, setEditError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => { try { setItems(await apiFetch<Credential[]>('/api-credentials')); } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } }, []);
   const loadInstances = useCallback(async () => { try { setInstances(await apiFetch<Instance[]>('/instances')); } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } }, []);
@@ -85,6 +89,23 @@ export default function ApiSettingsPage() {
     finally { setRevealingAuthKeyId(null); }
   };
 
+  const openEdit = (item: Credential) => {
+    setEditItem(item);
+    setEditName(item.name);
+    setEditError('');
+  };
+
+  const saveEdit = async () => {
+    if (!editItem || !editName.trim()) return;
+    setSaving(true); setEditError('');
+    try {
+      await apiFetch(`/api-credentials/${editItem.id}`, { method: 'PATCH', body: JSON.stringify({ name: editName.trim() }) });
+      setEditItem(null);
+      await load();
+    } catch (err) { setEditError(err instanceof Error ? err.message : 'No se pudo renombrar la credencial'); }
+    finally { setSaving(false); }
+  };
+
   const remove = async (item: Credential) => {
     if (!(await confirm(`¿Eliminar la credencial "${item.name}"? Cualquier sistema que la use dejará de poder conectarse. Esta acción no se puede deshacer.`, { confirmText: 'Eliminar' }))) return;
     setBusyId(item.id); setError('');
@@ -112,7 +133,7 @@ export default function ApiSettingsPage() {
       <section className="api-hero"><div><h2>BrainWSP Gateway API</h2><p>Integra tus sistemas actuales sin conocer Baileys. Solo necesitan la URL, APP KEY y AUTH KEY. La plataforma gestiona la cola, sesión, reconexión y entrega.</p></div><div className="api-url">{API_URL}/v1/messages/text</div></section>
       <div className="toolbar"><div className="searchbox"><Search size={17} /><input placeholder="Buscar credencial..." value={search} onChange={(e) => setSearch(e.target.value)} /></div><button className="button" onClick={() => void load()}><RefreshCw size={14} />Actualizar</button></div>
       <div className="table-card">
-        <table><thead><tr><th>Integración</th><th>APP KEY</th><th>AUTH KEY</th><th>Instancia</th><th>Último uso</th><th>Estado</th><th></th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><span className="row-main">{item.name}</span><span className="row-sub">Creada {new Date(item.createdAt).toLocaleDateString('es-PE')}</span></td><td><code className="app-key-cell">{revealed.has(item.id) ? item.appKey : `${item.appKey.slice(0, 13)}…${item.appKey.slice(-6)}`}</code><button className="icon-button ghost small" onClick={() => toggleReveal(item.id)} title={revealed.has(item.id) ? 'Ocultar' : 'Ver completo'}>{revealed.has(item.id) ? <EyeOff size={13} /> : <Eye size={13} />}</button></td><td>{revealedAuthKeys[item.id] ? <><code className="app-key-cell">{revealedAuthKeys[item.id]}</code><button className="icon-button ghost small" onClick={() => void toggleRevealAuthKey(item)} title="Ocultar"><EyeOff size={13} /></button><button className="icon-button ghost small" onClick={() => void copy(revealedAuthKeys[item.id])} title="Copiar AUTH KEY"><Copy size={13} /></button></> : item.hasAuthKey ? <><code className="app-key-cell">••••••••••••••••</code><button className="icon-button ghost small" disabled={revealingAuthKeyId === item.id} onClick={() => void toggleRevealAuthKey(item)} title="Ver AUTH KEY">{revealingAuthKeyId === item.id ? <RefreshCw size={13} /> : <Eye size={13} />}</button></> : <span className="row-sub" title="Creada antes de esta función — regenérala para poder verla">No disponible</span>}</td><td>{item.instance?.name ?? <span className="row-sub" title="Se crea sola cuando este AUTH KEY llama POST /api/user/device por primera vez">Sin dispositivo aún</span>}</td><td>{item.lastUsedAt ? new Date(item.lastUsedAt).toLocaleString('es-PE') : 'Nunca'}</td><td><StatusPill status={!item.active ? 'revoked' : item.instance?.status || 'unknown'} /></td><td className="row-actions"><button className="icon-button" onClick={() => void copy(item.appKey)} title="Copiar APP KEY"><Copy size={15} /></button><button className="icon-button" disabled={busyId === item.id} onClick={() => void regenerate(item)} title="Regenerar AUTH KEY"><RotateCw size={15} /></button><button className="icon-button danger" disabled={busyId === item.id} onClick={() => void remove(item)} title="Eliminar credencial"><Trash2 size={15} /></button></td></tr>)}</tbody></table>
+        <table><thead><tr><th>Integración</th><th>APP KEY</th><th>AUTH KEY</th><th>Instancia</th><th>Último uso</th><th>Estado</th><th></th></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><span className="row-main">{item.name}</span><span className="row-sub">Creada {new Date(item.createdAt).toLocaleDateString('es-PE')}</span></td><td><code className="app-key-cell">{revealed.has(item.id) ? item.appKey : `${item.appKey.slice(0, 13)}…${item.appKey.slice(-6)}`}</code><button className="icon-button ghost small" onClick={() => toggleReveal(item.id)} title={revealed.has(item.id) ? 'Ocultar' : 'Ver completo'}>{revealed.has(item.id) ? <EyeOff size={13} /> : <Eye size={13} />}</button></td><td>{revealedAuthKeys[item.id] ? <><code className="app-key-cell">{revealedAuthKeys[item.id]}</code><button className="icon-button ghost small" onClick={() => void toggleRevealAuthKey(item)} title="Ocultar"><EyeOff size={13} /></button><button className="icon-button ghost small" onClick={() => void copy(revealedAuthKeys[item.id])} title="Copiar AUTH KEY"><Copy size={13} /></button></> : item.hasAuthKey ? <><code className="app-key-cell">••••••••••••••••</code><button className="icon-button ghost small" disabled={revealingAuthKeyId === item.id} onClick={() => void toggleRevealAuthKey(item)} title="Ver AUTH KEY">{revealingAuthKeyId === item.id ? <RefreshCw size={13} /> : <Eye size={13} />}</button></> : <span className="row-sub" title="Creada antes de esta función — regenérala para poder verla">No disponible</span>}</td><td>{item.instance?.name ?? <span className="row-sub" title="Se crea sola cuando este AUTH KEY llama POST /api/user/device por primera vez">Sin dispositivo aún</span>}</td><td>{item.lastUsedAt ? new Date(item.lastUsedAt).toLocaleString('es-PE') : 'Nunca'}</td><td><StatusPill status={!item.active ? 'revoked' : item.instance?.status || 'unknown'} /></td><td className="row-actions"><button className="icon-button" onClick={() => void copy(item.appKey)} title="Copiar APP KEY"><Copy size={15} /></button><button className="icon-button" onClick={() => openEdit(item)} title="Editar nombre"><Pencil size={15} /></button><button className="icon-button" disabled={busyId === item.id} onClick={() => void regenerate(item)} title="Regenerar AUTH KEY"><RotateCw size={15} /></button><button className="icon-button danger" disabled={busyId === item.id} onClick={() => void remove(item)} title="Eliminar credencial"><Trash2 size={15} /></button></td></tr>)}</tbody></table>
       </div>
 
       <section className="card" style={{marginTop:18}}><div className="card-header"><div><h2>Compatibilidad con tu sistema actual</h2><p>Endpoint legacy conservado para migrar sin romper tus sistemas actuales</p></div><ShieldCheck size={20} color="#168a55" /></div><div className="card-body"><div className="secret-box">POST {API_URL}/create-message<br/><br/>appkey=APP_KEY&amp;authkey=AUTH_KEY&amp;to=51999999999&amp;message=Hola</div></div></section>
@@ -120,6 +141,23 @@ export default function ApiSettingsPage() {
       <ApiDocs appKey={items.find((item) => item.active)?.appKey} />
 
       {createOpen && <div className="modal-backdrop" onClick={() => setCreateOpen(false)}><div className="modal" onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setCreateOpen(false)} title="Cerrar"><X size={16} /></button><div className="modal-header"><h2>Nueva credencial</h2><p>Genera un APP KEY y AUTH KEY para que un sistema externo se conecte a una instancia de WhatsApp. Cada instancia solo puede tener una credencial.</p></div><div className="modal-body form-grid">{error && <div className="error-box">{error}</div>}<div className="field"><label>Nombre</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Integración Producción" /></div><div className="field"><label>Instancia de WhatsApp</label>{availableInstances.length === 0 ? <div className="error-box">Todas tus instancias ya tienen una credencial. Crea una nueva instancia en "WhatsApp" primero.</div> : <select value={instanceId} onChange={(e) => setInstanceId(e.target.value)}><option value="">Selecciona una instancia...</option>{availableInstances.map((instance) => <option key={instance.id} value={instance.id}>{instance.name} ({instance.slug})</option>)}</select>}</div></div><div className="modal-actions"><button className="button" onClick={() => setCreateOpen(false)}>Cancelar</button><button className="button primary" disabled={creating || name.trim().length < 3 || !instanceId} onClick={() => void create()}>{creating ? 'Creando...' : 'Crear credencial'}</button></div></div></div>}
+
+      {editItem && (
+        <div className="modal-backdrop" onClick={() => setEditItem(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setEditItem(null)} title="Cerrar"><X size={16} /></button>
+            <div className="modal-header"><h2>Editar credencial</h2><p>Cambia el nombre con el que se muestra &quot;{editItem.name}&quot; en el panel.</p></div>
+            <div className="modal-body form-grid">
+              {editError && <div className="error-box">{editError}</div>}
+              <div className="field"><label>Nombre</label><input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(); }} /></div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => setEditItem(null)}>Cancelar</button>
+              <button className="button primary" disabled={saving || !editName.trim()} onClick={() => void saveEdit()}>{saving ? 'Guardando...' : 'Guardar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {created && <div className="modal-backdrop" onClick={() => setCreated(null)}><div className="modal" onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setCreated(null)} title="Cerrar"><X size={16} /></button><div className="modal-header"><h2>Credencial creada</h2><p>{created.warning}</p></div><div className="modal-body form-grid"><div className="field"><label>Nombre</label><input readOnly value={created.name} /></div><div className="field"><label>APP KEY</label><div className="secret-box">{created.appKey}</div></div><div className="field"><label>AUTH KEY</label><div className="secret-box">{created.authKey}</div></div><div className="warning-box"><KeyRound size={14} style={{verticalAlign:'middle',marginRight:6}}/>Cópialo ahora si lo necesitas. También podrás verlo más tarde desde el icono del ojo en la tabla.</div></div><div className="modal-actions"><button className="button" onClick={() => void copy(`${created.appKey}\n${created.authKey}`)}><Copy size={14} />Copiar</button><button className="button primary" onClick={() => setCreated(null)}>Ya lo guardé</button></div></div></div>}
     </AppShell>

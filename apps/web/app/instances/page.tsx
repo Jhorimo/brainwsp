@@ -14,13 +14,6 @@ type Instance = {
   inboundCount: number; outboundCount: number;
 };
 
-// Coincide con la validación del backend (InstancesService.remove): solo se puede borrar
-// una instancia que nunca llegó a conectarse ni tiene número vinculado — así evitamos
-// ofrecer "Eliminar" en instancias que sí tienen historial real detrás.
-function neverUsed(instance: Instance) {
-  return !instance.phoneNumber && !instance.lastConnectedAt && instance.status === 'DISCONNECTED' && !instance.inboundCount && !instance.outboundCount;
-}
-
 export default function InstancesPage() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [search, setSearch] = useState('');
@@ -32,7 +25,9 @@ export default function InstancesPage() {
   const [error, setError] = useState('');
   const [editInstance, setEditInstance] = useState<Instance | null>(null);
   const [editName, setEditName] = useState('');
+  const [editSlug, setEditSlug] = useState('');
   const [editError, setEditError] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const [deleteInstance, setDeleteInstance] = useState<Instance | null>(null);
   const [deleteError, setDeleteError] = useState('');
 
@@ -66,17 +61,19 @@ export default function InstancesPage() {
   const openEdit = (instance: Instance) => {
     setEditInstance(instance);
     setEditName(instance.name);
+    setEditSlug(instance.slug);
     setEditError('');
   };
 
   const saveEdit = async () => {
-    if (!editInstance || !editName.trim()) return;
-    setEditError('');
+    if (!editInstance || !editName.trim() || !editSlug.trim()) return;
+    setSavingEdit(true); setEditError('');
     try {
-      await apiFetch(`/instances/${editInstance.id}`, { method: 'PATCH', body: JSON.stringify({ name: editName.trim() }) });
+      await apiFetch(`/instances/${editInstance.id}`, { method: 'PATCH', body: JSON.stringify({ name: editName.trim(), slug: editSlug.trim() }) });
       setEditInstance(null);
       await load();
-    } catch (err) { setEditError(err instanceof Error ? err.message : 'No se pudo renombrar la instancia'); }
+    } catch (err) { setEditError(err instanceof Error ? err.message : 'No se pudo guardar la instancia'); }
+    finally { setSavingEdit(false); }
   };
 
   const confirmRemove = async () => {
@@ -114,10 +111,9 @@ export default function InstancesPage() {
               {instance.status !== 'CONNECTED' && <button className="button small primary" disabled={busy === instance.id + 'connect'} onClick={() => void action(instance.id, 'connect')}><Cable size={14} />Conectar</button>}
               {instance.qr && <button className="button small" onClick={() => setQrInstance(instance)}><QrCode size={14} />Ver QR</button>}
               {instance.status === 'CONNECTED' && <button className="button small" disabled={busy === instance.id + 'disconnect'} onClick={() => void action(instance.id, 'disconnect')}><Unplug size={14} />Desconectar</button>}
+              {instance.status !== 'DISCONNECTED' && instance.status !== 'LOGGED_OUT' && <button className="button small" disabled={busy === instance.id + 'logout'} onClick={() => void action(instance.id, 'logout')}><Power size={14} />Cerrar sesión</button>}
               <button className="button small" onClick={() => openEdit(instance)}><Pencil size={14} />Editar</button>
-              {neverUsed(instance)
-                ? <button className="button small danger" disabled={busy === instance.id + 'delete'} onClick={() => { setDeleteInstance(instance); setDeleteError(''); }}><Trash2 size={14} />Eliminar</button>
-                : <button className="button small danger" disabled={busy === instance.id + 'logout'} onClick={() => void action(instance.id, 'logout')}><Power size={14} />Cerrar sesión</button>}
+              <button className="button small danger" disabled={busy === instance.id + 'delete'} onClick={() => { setDeleteInstance(instance); setDeleteError(''); }}><Trash2 size={14} />Eliminar</button>
             </div>
           </article>
         ))}
@@ -130,14 +126,16 @@ export default function InstancesPage() {
       {editInstance && (
         <div className="modal-backdrop" onClick={() => setEditInstance(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h2>Editar instancia</h2><p>Cambia el nombre con el que se muestra "{editInstance.name}" en el panel.</p></div>
-            <div className="modal-body">
+            <div className="modal-header"><h2>Editar instancia</h2><p>Cambia el nombre y el slug de "{editInstance.name}".</p></div>
+            <div className="modal-body form-grid">
               {editError && <div className="error-box">{editError}</div>}
               <div className="field"><label>Nombre</label><input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(); }} /></div>
+              <div className="field"><label>Slug</label><input value={editSlug} onChange={(e) => setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(); }} /></div>
+              <div className="warning-box">El slug se usa para elegir esta instancia desde la API (parámetro <code>instance</code>). Si lo cambias, actualiza también las integraciones que lo usan.</div>
             </div>
             <div className="modal-actions">
               <button className="button" onClick={() => setEditInstance(null)}>Cancelar</button>
-              <button className="button primary" disabled={!editName.trim()} onClick={() => void saveEdit()}>Guardar</button>
+              <button className="button primary" disabled={savingEdit || !editName.trim() || !editSlug.trim()} onClick={() => void saveEdit()}>{savingEdit ? 'Guardando...' : 'Guardar'}</button>
             </div>
           </div>
         </div>
@@ -146,7 +144,7 @@ export default function InstancesPage() {
       {deleteInstance && (
         <div className="modal-backdrop" onClick={() => setDeleteInstance(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h2>Eliminar instancia</h2><p>¿Eliminar &quot;{deleteInstance.name}&quot;? Esta acción no se puede deshacer.</p></div>
+            <div className="modal-header"><h2>Eliminar instancia</h2><p>¿Eliminar &quot;{deleteInstance.name}&quot;? Si nunca se conectó se borra por completo; si ya tiene historial, se cerrará su sesión y se ocultará del panel conservando las conversaciones. Esta acción no se puede deshacer.</p></div>
             <div className="modal-body">
               {deleteError && <div className="error-box">{deleteError}</div>}
             </div>
