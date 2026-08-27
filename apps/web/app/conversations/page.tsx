@@ -125,8 +125,10 @@ function formatTime(seconds: number) {
   const s = Math.floor(seconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 }
-// WhatsApp's own lightweight markup: *bold*, _italic_, ~strikethrough~, ```monospace```, plus bare URLs.
-const FORMAT_PATTERN = /(https?:\/\/[^\s]+)|\*([^\n*]+)\*|_([^\n_]+)_|~([^\n~]+)~|```([^`]+)```/g;
+// WhatsApp's own lightweight markup: *bold*, _italic_, ~strikethrough~, ```monospace```, plus
+// bare URLs (with or without a protocol, e.g. "app.misire.pe") and phone numbers in
+// international format (+51 970 445 971) — same things WhatsApp Web itself auto-links.
+const FORMAT_PATTERN = /(https?:\/\/[^\s]+)|(\+\d[\d\s\-()]{6,18}\d)|(\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,24}(?:\/[^\s]*)?\b)|\*([^\n*]+)\*|_([^\n_]+)_|~([^\n~]+)~|```([^`]+)```/g;
 function formatMessageText(text: string) {
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
@@ -135,8 +137,10 @@ function formatMessageText(text: string) {
   FORMAT_PATTERN.lastIndex = 0;
   while ((match = FORMAT_PATTERN.exec(text))) {
     if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    const [full, url, bold, italic, strike, mono] = match;
+    const [full, url, phone, domain, bold, italic, strike, mono] = match;
     if (url) nodes.push(<a key={key++} href={url} target="_blank" rel="noreferrer" className="message-link">{url}</a>);
+    else if (phone) nodes.push(<a key={key++} href={`https://wa.me/${phone.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="message-link">{phone}</a>);
+    else if (domain) nodes.push(<a key={key++} href={`https://${domain}`} target="_blank" rel="noreferrer" className="message-link">{domain}</a>);
     else if (bold !== undefined) nodes.push(<strong key={key++}>{bold}</strong>);
     else if (italic !== undefined) nodes.push(<em key={key++}>{italic}</em>);
     else if (strike !== undefined) nodes.push(<s key={key++}>{strike}</s>);
