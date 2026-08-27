@@ -32,6 +32,9 @@ export class AuthController {
   // frontend immediately exchanges it server-side in exchangeGoogle() below.
   @Get('google/callback')
   async googleCallback(@Query('code') code: string | undefined, @Query('error') error: string | undefined, @Res() res: Response) {
+    // WEB_ORIGIN puede traer varios orígenes separados por coma (CORS de main.ts admite
+    // varios frontends). El redirect de OAuth solo puede ir a uno, así que se usa
+    // siempre el primero como frontend "canónico".
     const webOrigin = (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',')[0].trim();
     if (error || !code) {
       res.redirect(`${webOrigin}/login?google_error=1`);
