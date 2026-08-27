@@ -329,9 +329,13 @@ tr:last-child td { border-bottom: 0; }
 .message-stream-inner { max-width: 900px; margin: 0 auto; padding: 0 26px; display: flex; flex-direction: column; gap: 9px; }
 .message-bubble { position: relative; align-self: flex-start; max-width: 72%; width: fit-content; padding: 10px 12px 8px; border-radius: 12px; background: white; border: 1px solid #e7ebf1; box-shadow: 0 2px 5px rgba(38,53,76,.03); font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .message-bubble code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
-.message-menu-trigger { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: rgba(255,255,255,.9); color: #8b99ad; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
+/* Floated fully above the bubble's own top edge (not inside it) — on a short, single-line
+   message like "Hola" there's no room inside the bubble for these without sitting on top
+   of the text itself, so they ride in the gap above instead, same as WhatsApp Web's own
+   hover toolbar. */
+.message-menu-trigger { position: absolute; top: -24px; right: 4px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: white; box-shadow: 0 1px 4px rgba(31,47,76,.18); color: #8b99ad; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
 .message-bubble:hover .message-menu-trigger { opacity: 1; }
-.message-react-trigger { position: absolute; top: 4px; right: 26px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: rgba(255,255,255,.9); color: #8b99ad; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
+.message-react-trigger { position: absolute; top: -24px; right: 26px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: white; box-shadow: 0 1px 4px rgba(31,47,76,.18); color: #8b99ad; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
 .message-bubble:hover .message-react-trigger { opacity: 1; }
 .message-badge-pin, .message-badge-star { color: #8b99ad; margin-right: 2px; }
 
