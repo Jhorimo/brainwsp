@@ -71,7 +71,7 @@ export class ConversationsService {
         messages: {
           take: 1,
           orderBy: { createdAt: 'desc' },
-          select: { id: true, body: true, caption: true, type: true, direction: true, status: true, createdAt: true, author: { select: { id: true, name: true, pushName: true } } },
+          select: { id: true, body: true, caption: true, type: true, direction: true, status: true, createdAt: true, deleted: true, author: { select: { id: true, name: true, pushName: true } } },
         },
       },
       orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
@@ -293,6 +293,31 @@ export class ConversationsService {
     return { success: true };
   }
 
+  // "Eliminar" (delete for everyone), same as WhatsApp Web. Only an agent's own OUTBOUND
+  // message can be revoked — WhatsApp has no API to delete a customer's message for them.
+  // The actual revoke (and clearing `deleted`/broadcasting the result) happens in the
+  // worker, mirroring sendReaction above; this just validates ownership and hands off the job.
+  async deleteMessage(user: JwtUser, conversationId: string, messageId: string) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
+    const message = await this.prisma.message.findFirst({ where: { id: messageId, companyId, conversationId } });
+    if (!message) throw new NotFoundException('Mensaje no encontrado');
+    if (message.direction !== MessageDirection.OUTBOUND) throw new BadRequestException('Solo se pueden eliminar mensajes enviados por ti');
+    if (message.deleted) return { success: true };
+    const sentStatuses: MessageStatus[] = [MessageStatus.SENT, MessageStatus.DELIVERED, MessageStatus.READ];
+    if (!sentStatuses.includes(message.status)) {
+      throw new BadRequestException('Este mensaje todavía no se envió, espera a que termine de enviarse');
+    }
+
+    await this.queues.outbound.add('delete-message', { instanceId: conversation.instanceId, targetMessageId: messageId }, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    });
+    return { success: true };
+  }
+
   async updateMessageFlags(
     user: JwtUser,
     conversationId: string,
@@ -487,7 +512,7 @@ export class ConversationsService {
         messages: {
           take: 1,
           orderBy: { createdAt: 'desc' },
-          select: { id: true, body: true, caption: true, type: true, direction: true, status: true, createdAt: true, author: { select: { id: true, name: true, pushName: true } } },
+          select: { id: true, body: true, caption: true, type: true, direction: true, status: true, createdAt: true, deleted: true, author: { select: { id: true, name: true, pushName: true } } },
         },
       },
     });

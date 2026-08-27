@@ -449,6 +449,10 @@ model Message {
   quotedMessageId String?
   pinned         Boolean          @default(false)
   starred        Boolean          @default(false)
+  // "Eliminar" (delete for everyone), WhatsApp Web style. Original content is kept in the
+  // fields above for audit purposes — this only controls whether the panel renders the
+  // real content or a "mensaje eliminado" placeholder.
+  deleted        Boolean          @default(false)
   sentAt         DateTime?
   deliveredAt    DateTime?
   readAt         DateTime?

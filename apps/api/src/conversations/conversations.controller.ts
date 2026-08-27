@@ -75,6 +75,11 @@ export class ConversationsController {
     return this.service.updateMessageFlags(user, id, messageId, dto);
   }
 
+  @Delete(':id/messages/:messageId')
+  deleteMessage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    return this.service.deleteMessage(user, id, messageId);
+  }
+
   @Post(':id/messages/:messageId/forward')
   forwardMessage(
     @CurrentUser() user: JwtUser,

@@ -9,7 +9,7 @@ import type { SessionManager } from './session-manager.js';
 import { downloadObjectBuffer, objectNameFromUrl } from './storage.js';
 import { transcodeToOggOpus } from './audio-transcode.js';
 
-type OutboundJobData = { messageId: string } | { instanceId: string; targetMessageId: string; emoji: string };
+type OutboundJobData = { messageId: string } | { instanceId: string; targetMessageId: string; emoji: string } | { instanceId: string; targetMessageId: string };
 
 export class OutboundWorker {
   private readonly connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
@@ -35,6 +35,11 @@ export class OutboundWorker {
     if (job.name === 'send-reaction') {
       const data = job.data as { instanceId: string; targetMessageId: string; emoji: string };
       return this.sessions.sendReaction(data.instanceId, data.targetMessageId, data.emoji);
+    }
+
+    if (job.name === 'delete-message') {
+      const data = job.data as { instanceId: string; targetMessageId: string };
+      return this.sessions.deleteMessage(data.instanceId, data.targetMessageId);
     }
 
     const { messageId } = job.data as { messageId: string };

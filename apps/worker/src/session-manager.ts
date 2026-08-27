@@ -589,6 +589,34 @@ export class SessionManager {
     await this.applyReaction(instanceId, target.waMessageId, 'me', true, emoji);
   }
 
+  // "Eliminar" from the panel, same as WhatsApp Web's own delete-for-everyone: only ever
+  // an agent's own OUTBOUND message (WhatsApp has no API to revoke a customer's message),
+  // and WhatsApp itself still rejects it once the message is too old — that surfaces to the
+  // caller as a normal thrown error, same as any other failed send. The original content
+  // stays in the database (kept for audit/compliance) — only `deleted` flips, and the panel
+  // renders a placeholder for any message with that flag instead of the real content.
+  async deleteMessage(instanceId: string, messageId: string) {
+    const target = await this.prisma.message.findFirst({
+      where: { id: messageId, instanceId },
+      select: {
+        id: true, companyId: true, waMessageId: true, direction: true,
+        contact: { select: { waId: true } },
+        conversation: { select: { departmentId: true } },
+      },
+    });
+    if (!target) throw new Error('Mensaje no encontrado');
+    if (target.direction !== MessageDirection.OUTBOUND) throw new Error('Solo se pueden eliminar mensajes enviados por ti');
+
+    const socket = await this.ensureConnected(instanceId);
+    await socket.sendMessage(target.contact.waId, {
+      delete: { remoteJid: target.contact.waId, fromMe: true, id: target.waMessageId },
+    });
+
+    const updated = await this.prisma.message.update({ where: { id: target.id }, data: { deleted: true } });
+    await this.realtime.publish(target.companyId, 'message.updated', updated, target.conversation.departmentId);
+    return updated;
+  }
+
   // Fire-and-forget: WhatsApp profile pictures are fetched lazily so they never
   // delay message persistence, and only for contacts that don't have one cached yet
   // (Baileys throws for contacts with no photo or privacy-restricted ones — that's fine, the

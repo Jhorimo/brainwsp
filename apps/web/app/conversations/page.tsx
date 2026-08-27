@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, ArrowLeft, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Info, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Info, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -29,12 +29,12 @@ type Conversation = {
   project?: { id: string; name: string } | null;
   stage?: Stage | null;
   instance: { id: string; name: string; slug: string; status: string };
-  messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; author?: Author | null }>;
+  messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
 type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; contacts?: Array<{ displayName?: string; vcard?: string }> };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
-type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
+type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
@@ -95,6 +95,7 @@ function lastText(conversation: Conversation) {
   const message = conversation.messages[0];
   if (!message) return 'Sin mensajes';
   const prefix = authorName(message.author) ? `${authorName(message.author)}: ` : '';
+  if (message.deleted) return prefix + 'Se eliminó este mensaje';
   if (message.body || message.caption) return prefix + (message.body || message.caption);
   switch (message.type) {
     case 'IMAGE': return prefix + '📷 Foto';
@@ -1376,6 +1377,21 @@ export default function ConversationsPage() {
     }
   };
 
+  // "Eliminar" (delete for everyone), same as WhatsApp Web. Only ever offered for the
+  // agent's own outbound messages — see the menu below and the backend guard.
+  const deleteMessageForEveryone = async (message: Message) => {
+    setOpenMessageMenuId(null);
+    if (!selectedId) return;
+    if (!(await confirm('¿Eliminar este mensaje para todos? Esta acción no se puede deshacer.', { confirmText: 'Eliminar' }))) return;
+    setMessages((current) => current.map((item) => item.id === message.id ? { ...item, deleted: true } : item));
+    try {
+      await apiFetch(`/conversations/${selectedId}/messages/${message.id}`, { method: 'DELETE' });
+    } catch (err) {
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, deleted: false } : item));
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar el mensaje');
+    }
+  };
+
   const saveNotes = async (value: string) => {
     if (!selectedId) return;
     setNotesSaving(true);
@@ -1527,6 +1543,7 @@ export default function ConversationsPage() {
   };
 
   const renderMessageBody = (message: Message) => {
+    if (message.deleted) return <div className="message-deleted"><Ban size={13} />Se eliminó este mensaje</div>;
     switch (message.type) {
       case 'IMAGE':
         return <div className="message-media"><button className="media-zoom" onClick={() => setLightboxUrl(mediaUrl(message.id))} title="Ampliar imagen"><img src={mediaUrl(message.id)} alt={message.caption || 'Imagen'} onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Imagen no disponible</div><span className="media-zoom-hint"><ZoomIn size={15} /></span></button>{message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}</div>;
@@ -2211,6 +2228,7 @@ export default function ConversationsPage() {
             <button onClick={() => void toggleFlag(message, 'starred')}><Star size={14} />{message.starred ? 'Quitar destacado' : 'Destacar'}</button>
             <button disabled={!hasText} onClick={() => addToNote(message)}><StickyNote size={14} />Añadir texto a la nota</button>
             <button onClick={() => enterSelectMode(message.id)}><CheckSquare size={14} />Seleccionar</button>
+            {message.direction === 'OUTBOUND' && !message.deleted && ['SENT', 'DELIVERED', 'READ'].includes(message.status) && <button className="danger" onClick={() => void deleteMessageForEveryone(message)}><Trash2 size={14} />Eliminar</button>}
           </div>
         );
       })(),
