@@ -1,18 +1,25 @@
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { createCorsOriginValidator } from './common/cors-origin';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const port = Number(process.env.API_PORT || 4000);
-  const webOrigin = process.env.WEB_ORIGIN || 'http://localhost:3000';
+  // El límite por defecto de body-parser (100kb) se queda corto para adjuntos en base64
+  // (ej. sendMessage con PDF, ver MessagesController). BODY_LIMIT es configurable por si
+  // algún adjunto necesita más margen.
+  const bodyLimit = process.env.BODY_LIMIT || '25mb';
 
+  app.useBodyParser('json', { limit: bodyLimit });
+  app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.enableCors({
-    origin: webOrigin.split(',').map((value) => value.trim()).filter(Boolean),
+    origin: createCorsOriginValidator(),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });

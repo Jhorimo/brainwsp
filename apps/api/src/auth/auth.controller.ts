@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { getPrimaryWebOrigin } from '../common/cors-origin';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
@@ -32,10 +33,10 @@ export class AuthController {
   // frontend immediately exchanges it server-side in exchangeGoogle() below.
   @Get('google/callback')
   async googleCallback(@Query('code') code: string | undefined, @Query('error') error: string | undefined, @Res() res: Response) {
-    // WEB_ORIGIN puede traer varios orígenes separados por coma (CORS de main.ts admite
-    // varios frontends). El redirect de OAuth solo puede ir a uno, así que se usa
-    // siempre el primero como frontend "canónico".
-    const webOrigin = (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',')[0].trim();
+    // WEB_ORIGIN puede traer varios orígenes separados por coma, incluyendo comodines de
+    // subdominio (ver cors-origin.ts). El redirect de OAuth solo puede ir a un dominio
+    // concreto, así que se usa siempre el primer origen exacto como frontend "canónico".
+    const webOrigin = getPrimaryWebOrigin();
     if (error || !code) {
       res.redirect(`${webOrigin}/login?google_error=1`);
       return;
