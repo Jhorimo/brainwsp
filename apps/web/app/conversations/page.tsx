@@ -697,13 +697,19 @@ export default function ConversationsPage() {
   }, [totalUnreadCount]);
 
   // Favicon badge, same idea: redraw the app icon with a small red counter dot whenever the
-  // unread total changes. Always redraws from the *original* icon (cached once on the link's
-  // dataset) so repeated updates don't stack badges on top of a previous badge.
+  // unread total changes. Original href is cached on <html> once so repeated updates always
+  // redraw from the pristine icon instead of stacking a badge on a previous badge. The badged
+  // icon is a PNG data URL, so mutating the existing SVG <link> in place doesn't work — its
+  // stale `type="image/svg+xml"` makes some browsers refuse the swap, and Chrome in particular
+  // often won't repaint the tab icon from an in-place href change anyway. Replacing the whole
+  // <link> element is the reliable cross-browser way to force a repaint.
   useEffect(() => {
-    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!link) return;
-    if (!link.dataset.originalHref) link.dataset.originalHref = link.href;
-    const baseHref = link.dataset.originalHref;
+    const root = document.documentElement;
+    if (!root.dataset.faviconHref) {
+      const existing = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      root.dataset.faviconHref = existing?.href || '/icon.svg';
+    }
+    const baseHref = root.dataset.faviconHref;
 
     const img = new Image();
     img.onload = () => {
@@ -732,11 +738,15 @@ export default function ConversationsPage() {
         ctx.textBaseline = 'middle';
         ctx.fillText(label, cx, cy + 1);
       }
-      link.href = canvas.toDataURL('image/png');
+      const nextHref = totalUnreadCount > 0 ? canvas.toDataURL('image/png') : baseHref;
+      document.querySelectorAll('link[rel="icon"]').forEach((el) => el.remove());
+      const next = document.createElement('link');
+      next.rel = 'icon';
+      next.type = totalUnreadCount > 0 ? 'image/png' : (baseHref.endsWith('.svg') ? 'image/svg+xml' : '');
+      next.href = nextHref;
+      document.head.appendChild(next);
     };
     img.src = baseHref;
-
-    return () => { link.href = baseHref; };
   }, [totalUnreadCount]);
 
   const pickFile = () => fileInputRef.current?.click();
