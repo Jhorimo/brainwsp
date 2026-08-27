@@ -81,9 +81,13 @@ export class ConversationsService {
 
   async messages(user: JwtUser, conversationId: string) {
     await this.getOwned(user, conversationId);
+    // `take` alone with an ascending order returns the OLDEST 500 messages — for a
+    // conversation with more history than that, every message past #500 (including
+    // anything sent or received just now) would never come back from this endpoint.
+    // Take the most recent 500 instead, then restore chronological order for display.
     const items = await this.prisma.message.findMany({
       where: { companyId: user.companyId, conversationId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       take: 500,
       include: {
         author: { select: { id: true, name: true, pushName: true } },
@@ -92,7 +96,7 @@ export class ConversationsService {
       },
     });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
-    return items;
+    return items.reverse();
   }
 
   async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string, quotedMessageId?: string) {

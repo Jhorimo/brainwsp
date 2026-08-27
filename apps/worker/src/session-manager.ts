@@ -338,17 +338,22 @@ export class SessionManager {
     }
 
     // WhatsApp's privacy rollout can route 1:1 chats through an opaque `@lid`
-    // remoteJid instead of the phone-number JID. Baileys still reports the
-    // real phone number in `key.remoteJidAlt` for those messages.
-    const phone = jidToPhone(remoteJid) || (message.key.remoteJidAlt ? jidToPhone(message.key.remoteJidAlt) : null);
+    // remoteJid instead of the phone-number JID, and can alternate between the
+    // two for the same real contact from one message to the next. Baileys
+    // reports the phone-number JID in `key.remoteJidAlt` for those messages —
+    // use it as the identity key (not just to backfill `phone`) so both forms
+    // resolve to the same Contact/Conversation instead of silently forking
+    // into two separate threads for the same person.
+    const identityJid = !isGroup && remoteJid.endsWith('@lid') && message.key.remoteJidAlt ? message.key.remoteJidAlt : remoteJid;
+    const phone = jidToPhone(identityJid);
     const contact = await this.prisma.contact.upsert({
-      where: { companyId_waId: { companyId: instance.companyId, waId: remoteJid } },
+      where: { companyId_waId: { companyId: instance.companyId, waId: identityJid } },
       update: isGroup
         ? { lastSeenAt: new Date(), ...(groupSubject ? { name: groupSubject, pushName: groupSubject } : {}) }
         : { phone: phone || undefined, pushName: message.pushName || undefined, lastSeenAt: new Date() },
       create: isGroup
-        ? { companyId: instance.companyId, waId: remoteJid, name: groupSubject || null, pushName: groupSubject || null, lastSeenAt: new Date() }
-        : { companyId: instance.companyId, waId: remoteJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
+        ? { companyId: instance.companyId, waId: identityJid, name: groupSubject || null, pushName: groupSubject || null, lastSeenAt: new Date() }
+        : { companyId: instance.companyId, waId: identityJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
     });
     this.refreshAvatar(socket, contact.id, remoteJid, contact.avatarUrl);
 
