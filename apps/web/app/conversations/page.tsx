@@ -1521,18 +1521,21 @@ export default function ConversationsPage() {
       case 'DOCUMENT': {
         const meta = [fileExtLabel(message.fileName, message.mimeType), formatFileSize(message.fileSize)].filter(Boolean).join(' · ');
         return (
-          <div className="doc-card">
-            <div className="doc-card-main">
-              <div className="doc-card-icon"><FileText size={20} /></div>
-              <div className="doc-card-info">
-                <div className="doc-card-name">{message.fileName || 'Documento'}</div>
-                {meta && <div className="doc-card-meta">{meta}</div>}
+          <div className="message-media">
+            <div className="doc-card">
+              <div className="doc-card-main">
+                <div className="doc-card-icon"><FileText size={20} /></div>
+                <div className="doc-card-info">
+                  <div className="doc-card-name">{message.fileName || 'Documento'}</div>
+                  {meta && <div className="doc-card-meta">{meta}</div>}
+                </div>
+              </div>
+              <div className="doc-card-actions">
+                <a href={mediaUrl(message.id)} target="_blank" rel="noreferrer">Abrir</a>
+                <a href={`${mediaUrl(message.id)}&download=1`}>Guardar como...</a>
               </div>
             </div>
-            <div className="doc-card-actions">
-              <a href={mediaUrl(message.id)} target="_blank" rel="noreferrer">Abrir</a>
-              <a href={`${mediaUrl(message.id)}&download=1`}>Guardar como...</a>
-            </div>
+            {message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}
           </div>
         );
       }
