@@ -129,7 +129,9 @@ function formatTime(seconds: number) {
 // bare URLs (with or without a protocol, e.g. "app.misire.pe") and phone numbers in
 // international format (+51 970 445 971) — same things WhatsApp Web itself auto-links.
 const FORMAT_PATTERN = /(https?:\/\/[^\s]+)|(\+\d[\d\s\-()]{6,18}\d)|(\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,24}(?:\/[^\s]*)?\b)|\*([^\n*]+)\*|_([^\n_]+)_|~([^\n~]+)~|```([^`]+)```/g;
-function formatMessageText(text: string) {
+// `onPhoneClick`, when given, takes over left-clicking an auto-linked phone number — used to
+// open this app's own "Nuevo chat" (pre-filled) instead of sending the agent out to wa.me.
+function formatMessageText(text: string, onPhoneClick?: (digits: string) => void) {
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
   let key = 0;
@@ -139,7 +141,12 @@ function formatMessageText(text: string) {
     if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
     const [full, url, phone, domain, bold, italic, strike, mono] = match;
     if (url) nodes.push(<a key={key++} href={url} target="_blank" rel="noreferrer" className="message-link">{url}</a>);
-    else if (phone) nodes.push(<a key={key++} href={`https://wa.me/${phone.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="message-link">{phone}</a>);
+    else if (phone) {
+      const digits = phone.replace(/[^\d]/g, '');
+      nodes.push(onPhoneClick
+        ? <a key={key++} href={`https://wa.me/${digits}`} className="message-link" onClick={(e) => { e.preventDefault(); onPhoneClick(digits); }}>{phone}</a>
+        : <a key={key++} href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" className="message-link">{phone}</a>);
+    }
     else if (domain) nodes.push(<a key={key++} href={`https://${domain}`} target="_blank" rel="noreferrer" className="message-link">{domain}</a>);
     else if (bold !== undefined) nodes.push(<strong key={key++}>{bold}</strong>);
     else if (italic !== undefined) nodes.push(<em key={key++}>{italic}</em>);
@@ -887,6 +894,12 @@ export default function ConversationsPage() {
 
   const closeNewChatModal = () => setNewChatModal(false);
 
+  // Clicking an auto-linked phone number inside a message opens "Nuevo chat" pre-filled
+  // with that number, instead of sending the agent out to wa.me.
+  const openNewChatWithPhone = (digits: string) => {
+    void openNewChatModal().then(() => setNewChatPhone(digits));
+  };
+
   const submitNewChat = async () => {
     if (!newChatInstanceId) { setNewChatError('Selecciona la línea de WhatsApp desde la que vas a escribir'); return; }
     if (newChatPhone.replace(/[^0-9]/g, '').length < 8) { setNewChatError('Ingresa un número válido con código de país'); return; }
@@ -1555,9 +1568,9 @@ export default function ConversationsPage() {
     if (message.deleted) return <div className="message-deleted"><Ban size={13} />Se eliminó este mensaje</div>;
     switch (message.type) {
       case 'IMAGE':
-        return <div className="message-media"><button className="media-zoom" onClick={() => setLightboxUrl(mediaUrl(message.id))} title="Ampliar imagen"><img src={mediaUrl(message.id)} alt={message.caption || 'Imagen'} onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Imagen no disponible</div><span className="media-zoom-hint"><ZoomIn size={15} /></span></button>{message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}</div>;
+        return <div className="message-media"><button className="media-zoom" onClick={() => setLightboxUrl(mediaUrl(message.id))} title="Ampliar imagen"><img src={mediaUrl(message.id)} alt={message.caption || 'Imagen'} onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Imagen no disponible</div><span className="media-zoom-hint"><ZoomIn size={15} /></span></button>{message.caption && <div className="media-caption">{formatMessageText(message.caption, openNewChatWithPhone)}</div>}</div>;
       case 'VIDEO':
-        return <div className="message-media"><video controls src={mediaUrl(message.id)} />{message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}</div>;
+        return <div className="message-media"><video controls src={mediaUrl(message.id)} />{message.caption && <div className="media-caption">{formatMessageText(message.caption, openNewChatWithPhone)}</div>}</div>;
       case 'AUDIO':
         return <audio controls src={mediaUrl(message.id)} className="message-audio" />;
       case 'DOCUMENT': {
@@ -1581,7 +1594,7 @@ export default function ConversationsPage() {
                 <a href={`${mediaUrl(message.id)}&download=1`}>Guardar como...</a>
               </div>
             </div>
-            {message.caption && <div className="media-caption">{formatMessageText(message.caption)}</div>}
+            {message.caption && <div className="media-caption">{formatMessageText(message.caption, openNewChatWithPhone)}</div>}
           </div>
         );
       }
@@ -1645,7 +1658,7 @@ export default function ConversationsPage() {
         );
       }
       default:
-        return formatMessageText(message.body || message.caption || message.type);
+        return formatMessageText(message.body || message.caption || message.type, openNewChatWithPhone);
     }
   };
 
