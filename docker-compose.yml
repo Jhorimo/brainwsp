@@ -49,7 +49,10 @@ services:
       DATABASE_URL: postgresql://brainwsp:brainwsp@postgres:5432/brainwsp?schema=public
       REDIS_URL: redis://redis:6379
       API_PORT: 4000
-      WEB_ORIGIN: http://localhost:3000,http://braintech_soft.pe
+      # Lee de .env en vez de fijarlo aquí — así producción no depende de que el deploy
+      # siempre incluya docker-compose.prod.yml para tener el origen correcto; docker-compose.prod.yml
+      # lo sigue sobreescribiendo igual, esto es solo la red de seguridad si no se aplica.
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000,http://braintech_soft.pe}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
