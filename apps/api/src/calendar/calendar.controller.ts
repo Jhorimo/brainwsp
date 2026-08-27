@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query,
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
+import { getPrimaryWebOrigin } from '../common/cors-origin';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -44,9 +45,9 @@ export class CalendarController {
     @Query('error') error: string | undefined,
     @Res() res: Response,
   ) {
-    // Mismo criterio que AuthController.googleCallback: con varios orígenes en
-    // WEB_ORIGIN, el redirect de OAuth usa siempre el primero como canónico.
-    const webOrigin = (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',')[0].trim();
+    // Mismo criterio que AuthController.googleCallback: con varios orígenes (y posibles
+    // comodines) en WEB_ORIGIN, el redirect de OAuth usa siempre el primer origen exacto.
+    const webOrigin = getPrimaryWebOrigin();
     if (error || !code || !state) {
       res.redirect(`${webOrigin}/calendar?calendar_error=1`);
       return;

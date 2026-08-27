@@ -2,12 +2,13 @@ import { JwtService } from '@nestjs/jwt';
 import { WebSocketGateway, WebSocketServer, OnGatewayConnection } from '@nestjs/websockets';
 import { UserRole } from '@prisma/client';
 import type { Server, Socket } from 'socket.io';
+import { createCorsOriginValidator } from '../common/cors-origin';
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
 
 @WebSocketGateway({
   cors: {
-    origin: (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',').map((value) => value.trim()).filter(Boolean),
+    origin: createCorsOriginValidator(),
     credentials: true,
   },
 })
