@@ -564,7 +564,7 @@ export default function ConversationsPage() {
     const button = reactionButtonRef.current;
     if (button) {
       const rect = button.getBoundingClientRect();
-      setReactionPos({ top: rect.top - 6, left: Math.min(rect.left - 90, window.innerWidth - 260) });
+      setReactionPos({ top: rect.top - 16, left: Math.min(rect.left - 90, window.innerWidth - 260) });
     }
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -1519,7 +1519,10 @@ export default function ConversationsPage() {
   // event once the worker actually confirms the send to WhatsApp.
   const toggleReactionMenu = (e: { currentTarget: HTMLElement }, messageId: string) => {
     if (reactionMessageId === messageId) { setReactionMessageId(null); return; }
-    reactionButtonRef.current = e.currentTarget;
+    // Anchor to the whole bubble, not the small trigger icon pinned to its top-right corner —
+    // on a short, single-line bubble the icon sits so close to the top edge that the picker's
+    // "grow upward from here" math left it overlapping the message text instead of clearing it.
+    reactionButtonRef.current = e.currentTarget.closest('.message-bubble') || e.currentTarget;
     setReactionMoreOpen(false);
     setReactionMessageId(messageId);
   };
