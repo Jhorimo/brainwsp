@@ -696,59 +696,6 @@ export default function ConversationsPage() {
     return () => { document.title = baseTitle; };
   }, [totalUnreadCount]);
 
-  // Favicon badge, same idea: redraw the app icon with a small red counter dot whenever the
-  // unread total changes. Original href is cached on <html> once so repeated updates always
-  // redraw from the pristine icon instead of stacking a badge on a previous badge. The badged
-  // icon is a PNG data URL, so mutating the existing SVG <link> in place doesn't work — its
-  // stale `type="image/svg+xml"` makes some browsers refuse the swap, and Chrome in particular
-  // often won't repaint the tab icon from an in-place href change anyway. Replacing the whole
-  // <link> element is the reliable cross-browser way to force a repaint.
-  useEffect(() => {
-    const root = document.documentElement;
-    if (!root.dataset.faviconHref) {
-      const existing = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-      root.dataset.faviconHref = existing?.href || '/icon.svg';
-    }
-    const baseHref = root.dataset.faviconHref;
-
-    const img = new Image();
-    img.onload = () => {
-      const size = 64;
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0, size, size);
-      if (totalUnreadCount > 0) {
-        const label = totalUnreadCount > 99 ? '99+' : String(totalUnreadCount);
-        const radius = label.length > 2 ? 20 : 16;
-        const cx = size - radius - 1;
-        const cy = radius + 1;
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#e03131';
-        ctx.fill();
-        ctx.lineWidth = 2.5;
-        ctx.strokeStyle = 'white';
-        ctx.stroke();
-        ctx.fillStyle = 'white';
-        ctx.font = `700 ${radius}px -apple-system, "Segoe UI", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, cx, cy + 1);
-      }
-      const nextHref = totalUnreadCount > 0 ? canvas.toDataURL('image/png') : baseHref;
-      document.querySelectorAll('link[rel="icon"]').forEach((el) => el.remove());
-      const next = document.createElement('link');
-      next.rel = 'icon';
-      next.type = totalUnreadCount > 0 ? 'image/png' : (baseHref.endsWith('.svg') ? 'image/svg+xml' : '');
-      next.href = nextHref;
-      document.head.appendChild(next);
-    };
-    img.src = baseHref;
-  }, [totalUnreadCount]);
-
   const pickFile = () => fileInputRef.current?.click();
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
