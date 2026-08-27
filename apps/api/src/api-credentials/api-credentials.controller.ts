@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateApiCredentialDto } from './api-credentials.dto';
+import { CreateApiCredentialDto, UpdateApiCredentialDto } from './api-credentials.dto';
 import { ApiCredentialsService } from './api-credentials.service';
 
 @ApiTags('API credentials')
@@ -35,6 +35,11 @@ export class ApiCredentialsController {
   @Get(':id/reveal')
   reveal(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.reveal(user.companyId, id, user.sub);
+  }
+
+  @Patch(':id')
+  rename(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateApiCredentialDto) {
+    return this.service.rename(user.companyId, id, dto.name.trim());
   }
 
   @Patch(':id/revoke')

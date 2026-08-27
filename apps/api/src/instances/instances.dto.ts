@@ -25,4 +25,10 @@ export class UpdateInstanceDto {
   @IsString()
   @MinLength(3)
   name?: string;
+
+  @ApiPropertyOptional({ example: 'ventas' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9-]+$/)
+  slug?: string;
 }
