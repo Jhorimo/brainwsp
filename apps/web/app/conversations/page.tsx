@@ -151,6 +151,22 @@ function fileExtLabel(fileName?: string | null, mimeType?: string | null) {
   const subtype = mimeType?.split('/')[1]?.split(';')[0];
   return subtype ? subtype.replace(/^x-/, '').toUpperCase() : 'ARCHIVO';
 }
+// A colored badge per file type, same idea as WhatsApp's own document icon, so a PDF
+// reads as red, a spreadsheet as green, etc. instead of one generic grey icon for
+// everything. Falls back to a plain icon for anything outside this common set.
+const FILE_TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
+  PDF: { bg: '#fbe7e5', fg: '#dc4a3a' },
+  DOC: { bg: '#e5edfb', fg: '#3467d6' },
+  DOCX: { bg: '#e5edfb', fg: '#3467d6' },
+  XLS: { bg: '#e3f4e9', fg: '#1e8f52' },
+  XLSX: { bg: '#e3f4e9', fg: '#1e8f52' },
+  CSV: { bg: '#e3f4e9', fg: '#1e8f52' },
+  PPT: { bg: '#fcebe0', fg: '#d9702b' },
+  PPTX: { bg: '#fcebe0', fg: '#d9702b' },
+  ZIP: { bg: '#f0eafb', fg: '#7749d1' },
+  RAR: { bg: '#f0eafb', fg: '#7749d1' },
+  TXT: { bg: '#ebeef2', fg: '#5c6b80' },
+};
 // For pre-filling a <input type="datetime-local">, which needs local time with no
 // timezone suffix — `toISOString()` would shift it to UTC and show the wrong hour.
 function toDatetimeLocalValue(date: Date) {
@@ -1519,12 +1535,16 @@ export default function ConversationsPage() {
       case 'AUDIO':
         return <audio controls src={mediaUrl(message.id)} className="message-audio" />;
       case 'DOCUMENT': {
-        const meta = [fileExtLabel(message.fileName, message.mimeType), formatFileSize(message.fileSize)].filter(Boolean).join(' · ');
+        const ext = fileExtLabel(message.fileName, message.mimeType);
+        const meta = [ext, formatFileSize(message.fileSize)].filter(Boolean).join(' · ');
+        const colors = FILE_TYPE_COLORS[ext];
         return (
           <div className="message-media">
             <div className="doc-card">
               <div className="doc-card-main">
-                <div className="doc-card-icon"><FileText size={20} /></div>
+                <div className="doc-card-icon" style={colors ? { background: colors.bg, color: colors.fg } : undefined}>
+                  {colors ? <span className="doc-card-icon-label">{ext}</span> : <FileText size={20} />}
+                </div>
                 <div className="doc-card-info">
                   <div className="doc-card-name">{message.fileName || 'Documento'}</div>
                   {meta && <div className="doc-card-meta">{meta}</div>}
