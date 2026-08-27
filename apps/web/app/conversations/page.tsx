@@ -655,6 +655,10 @@ export default function ConversationsPage() {
     && (!filterProject || item.project?.id === filterProject)
     && (!filterStage || item.stage?.id === filterStage)
   ), [conversations, search, filterAgent, filterDept, filterProject, filterStage]);
+  // Total across every conversation, not just the currently filtered/visible ones — same as
+  // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
+  // or filter is open.
+  const totalUnreadCount = useMemo(() => conversations.reduce((sum, item) => sum + item.unreadCount, 0), [conversations]);
   const unreadTabCount = useMemo(() => baseFiltered.filter((item) => item.unreadCount > 0).length, [baseFiltered]);
   const pinnedTabCount = useMemo(() => baseFiltered.filter((item) => item.pinned).length, [baseFiltered]);
   const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
@@ -683,6 +687,57 @@ export default function ConversationsPage() {
   );
 
   useEffect(() => { setNotesDraft(selected?.contact.notes || ''); setNotesSaved(false); }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tab title badge, same as WhatsApp Web: prefix the unread count so it's visible even
+  // when this tab isn't focused.
+  useEffect(() => {
+    const baseTitle = document.title.replace(/^\(\d+\+?\)\s*/, '');
+    document.title = totalUnreadCount > 0 ? `(${totalUnreadCount > 99 ? '99+' : totalUnreadCount}) ${baseTitle}` : baseTitle;
+    return () => { document.title = baseTitle; };
+  }, [totalUnreadCount]);
+
+  // Favicon badge, same idea: redraw the app icon with a small red counter dot whenever the
+  // unread total changes. Always redraws from the *original* icon (cached once on the link's
+  // dataset) so repeated updates don't stack badges on top of a previous badge.
+  useEffect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) return;
+    if (!link.dataset.originalHref) link.dataset.originalHref = link.href;
+    const baseHref = link.dataset.originalHref;
+
+    const img = new Image();
+    img.onload = () => {
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, size, size);
+      if (totalUnreadCount > 0) {
+        const label = totalUnreadCount > 99 ? '99+' : String(totalUnreadCount);
+        const radius = label.length > 2 ? 20 : 16;
+        const cx = size - radius - 1;
+        const cy = radius + 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#e03131';
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'white';
+        ctx.stroke();
+        ctx.fillStyle = 'white';
+        ctx.font = `700 ${radius}px -apple-system, "Segoe UI", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, cx, cy + 1);
+      }
+      link.href = canvas.toDataURL('image/png');
+    };
+    img.src = baseHref;
+
+    return () => { link.href = baseHref; };
+  }, [totalUnreadCount]);
 
   const pickFile = () => fileInputRef.current?.click();
 
