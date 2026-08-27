@@ -38,12 +38,17 @@ export default function InstancesPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    // A dropped connection (dev server reload, network blip, worker restart) can miss the
+    // "connected" event while it's down, leaving the QR modal stuck showing a scanned code
+    // forever — same failure mode conversations/page.tsx already guards against. Every
+    // (re)connect forces a refetch so the instance list can't get stuck on stale data.
+    socket.on('connect', () => void load());
     socket.on('instance.updated', (updated: Instance) => {
       setInstances((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
       setQrInstance((current) => current?.id === updated.id ? { ...current, ...updated } : current);
     });
     return () => { socket.disconnect(); };
-  }, []);
+  }, [load]);
 
   const action = async (id: string, name: 'connect' | 'disconnect' | 'logout') => {
     setBusy(id + name); setError('');
