@@ -187,6 +187,10 @@ services:
             WEB_ORIGIN: https://${HOST},${EXTRA_WEB_ORIGINS}
             VIRTUAL_HOST: ${API_HOST}
             VIRTUAL_PORT: 4000
+            # nginx-proxy (jwilder/nginx-proxy y sus forks, ver rash07/nginx-proxy arriba) lee esta
+            # variable del contenedor backend para fijar el client_max_body_size de su vhost.
+            # Debe ser >= BODY_LIMIT del API (ver main.ts) o los adjuntos grandes se cortan antes de llegar a Express.
+            CLIENT_MAX_BODY_SIZE: 25m
             CERT_NAME: ${HOST}
     worker:
         environment:
