@@ -25,6 +25,7 @@ function legacyAccepted(response: AcceptedMessage) {
       message: 'Mensaje agregado a la cola de envío',
       ...response,
     },
+    status: 200,
   };
 }
 
