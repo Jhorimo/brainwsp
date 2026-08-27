@@ -106,7 +106,7 @@ export class ConversationsService {
 
   // Agent-initiated first contact: no inbound message exists yet, so the Contact/Conversation
   // rows have to be created here instead of by the worker's `persistIncoming`.
-  async startConversation(companyId: string, instanceId: string, rawPhone: string, text: string, sentByUserId?: string) {
+  async startConversation(companyId: string, instanceId: string, rawPhone: string, text: string, sentByUserId?: string, name?: string) {
     const instance = await this.prisma.whatsAppInstance.findFirst({ where: { id: instanceId, companyId, active: true } });
     if (!instance) throw new NotFoundException('Instancia de WhatsApp no encontrada');
     if (instance.status !== InstanceStatus.CONNECTED) throw new BadRequestException('La instancia de WhatsApp no está conectada');
@@ -114,11 +114,12 @@ export class ConversationsService {
     const phone = rawPhone.replace(/[^0-9]/g, '');
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
     const waId = `${phone}@s.whatsapp.net`;
+    const trimmedName = name?.trim() || undefined;
 
     const contact = await this.prisma.contact.upsert({
       where: { companyId_waId: { companyId, waId } },
-      update: { phone },
-      create: { companyId, waId, phone },
+      update: { phone, ...(trimmedName ? { name: trimmedName } : {}) },
+      create: { companyId, waId, phone, name: trimmedName },
     });
 
     const conversation = await this.prisma.conversation.upsert({

@@ -32,7 +32,7 @@ export class ConversationsController {
 
   @Post('start')
   start(@CurrentUser() user: JwtUser, @Body() dto: StartConversationDto) {
-    return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text, user.sub);
+    return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text, user.sub, dto.name);
   }
 
   @Post(':id/messages')

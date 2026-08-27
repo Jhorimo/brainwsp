@@ -357,6 +357,7 @@ export default function ConversationsPage() {
   const [newChatInstances, setNewChatInstances] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [newChatInstanceId, setNewChatInstanceId] = useState('');
   const [newChatPhone, setNewChatPhone] = useState('');
+  const [newChatName, setNewChatName] = useState('');
   const [newChatText, setNewChatText] = useState('');
   const [newChatSaving, setNewChatSaving] = useState(false);
   const [newChatError, setNewChatError] = useState('');
@@ -871,6 +872,7 @@ export default function ConversationsPage() {
   const openNewChatModal = async () => {
     setNewChatError('');
     setNewChatPhone('');
+    setNewChatName('');
     setNewChatText('');
     setNewChatModal(true);
     try {
@@ -894,7 +896,7 @@ export default function ConversationsPage() {
     try {
       const message = await apiFetch<{ conversationId: string }>('/conversations/start', {
         method: 'POST',
-        body: JSON.stringify({ instanceId: newChatInstanceId, phone: newChatPhone.trim(), text: newChatText.trim() }),
+        body: JSON.stringify({ instanceId: newChatInstanceId, phone: newChatPhone.trim(), text: newChatText.trim(), name: newChatName.trim() || undefined }),
       });
       await loadConversations();
       setSelectedId(message.conversationId);
@@ -1985,6 +1987,10 @@ export default function ConversationsPage() {
                 <div className="field">
                   <label>Número (con código de país)</label>
                   <input value={newChatPhone} onChange={(e) => setNewChatPhone(e.target.value)} placeholder="Ej: 51999999999" />
+                </div>
+                <div className="field">
+                  <label>Nombre (opcional)</label>
+                  <input value={newChatName} onChange={(e) => setNewChatName(e.target.value)} placeholder="Ej: Alexander" />
                 </div>
                 <div className="field">
                   <label>Primer mensaje</label>

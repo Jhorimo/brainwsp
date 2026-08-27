@@ -28,6 +28,11 @@ export class StartConversationDto {
   @IsString()
   @MinLength(1)
   text!: string;
+
+  @ApiPropertyOptional({ description: 'Nombre del contacto, si ya lo conoces (queda como el nombre del cliente en el panel).', example: 'Alexander' })
+  @IsOptional()
+  @IsString()
+  name?: string;
 }
 
 export class UpdateMessageFlagsDto {
