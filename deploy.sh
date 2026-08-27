@@ -147,6 +147,10 @@ POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 MINIO_ACCESS_KEY=brainwsp
 MINIO_SECRET_KEY=$MINIO_PASSWORD
 
+# Orígenes extra (además de https://\$HOST) que el API debe aceptar por CORS/WebSocket,
+# separados por coma. Ej: https://otra-app.com,https://otra-app2.com
+EXTRA_WEB_ORIGINS=
+
 # Agente IA (opcional): pon tu API key aquí cuando quieras activarlo.
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-5
@@ -159,6 +163,10 @@ else
     if ! grep -q "^CREDENTIAL_ENCRYPTION_KEY=" .env; then
         echo "Agregando CREDENTIAL_ENCRYPTION_KEY (variable nueva) a .env existente"
         echo "CREDENTIAL_ENCRYPTION_KEY=$(gen_secret 32)" >> .env
+    fi
+    if ! grep -q "^EXTRA_WEB_ORIGINS=" .env; then
+        echo "Agregando EXTRA_WEB_ORIGINS (variable nueva) a .env existente"
+        echo "EXTRA_WEB_ORIGINS=" >> .env
     fi
 fi
 
@@ -176,7 +184,7 @@ services:
     api:
         environment:
             DATABASE_URL: postgresql://brainwsp:${POSTGRES_PASSWORD}@postgres:5432/brainwsp?schema=public
-            WEB_ORIGIN: https://${HOST}
+            WEB_ORIGIN: https://${HOST},${EXTRA_WEB_ORIGINS}
             VIRTUAL_HOST: ${API_HOST}
             VIRTUAL_PORT: 4000
             CERT_NAME: ${HOST}

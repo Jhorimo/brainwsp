@@ -44,6 +44,8 @@ export class CalendarController {
     @Query('error') error: string | undefined,
     @Res() res: Response,
   ) {
+    // Mismo criterio que AuthController.googleCallback: con varios orígenes en
+    // WEB_ORIGIN, el redirect de OAuth usa siempre el primero como canónico.
     const webOrigin = (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',')[0].trim();
     if (error || !code || !state) {
       res.redirect(`${webOrigin}/calendar?calendar_error=1`);

@@ -5,7 +5,12 @@ import type { Server, Socket } from 'socket.io';
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
 
-@WebSocketGateway({ cors: { origin: process.env.WEB_ORIGIN || 'http://localhost:3000', credentials: true } })
+@WebSocketGateway({
+  cors: {
+    origin: (process.env.WEB_ORIGIN || 'http://localhost:3000').split(',').map((value) => value.trim()).filter(Boolean),
+    credentials: true,
+  },
+})
 export class RealtimeGateway implements OnGatewayConnection {
   @WebSocketServer()
   server!: Server;
