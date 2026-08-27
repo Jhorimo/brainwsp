@@ -658,9 +658,11 @@ export default function ConversationsPage() {
   const pickFile = () => fileInputRef.current?.click();
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (file) attachFile(file);
+    if (files.length === 0) return;
+    if (files.length === 1) { attachFile(files[0]); return; }
+    void sendFiles(files);
   };
 
   const removePendingFile = () => {
@@ -698,8 +700,10 @@ export default function ConversationsPage() {
     e.preventDefault();
     dragCounterRef.current = 0;
     setDragActive(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) attachFile(file);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+    if (files.length === 1) { attachFile(files[0]); return; }
+    void sendFiles(files);
   };
 
   // Lets agents paste a screenshot (Ctrl+V) straight into the composer, same as WhatsApp Web.
@@ -743,6 +747,26 @@ export default function ConversationsPage() {
       setReplyToMessage(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo enviar el archivo');
+    } finally { setSending(false); }
+  };
+
+  // Dropping/picking more than one file at once skips the single-attachment preview
+  // (there's no UI for captioning several files individually) and sends each one as
+  // its own message right away, same as WhatsApp Web does for a multi-file drop.
+  const sendFiles = async (files: File[]) => {
+    if (!selectedId || sending || files.length === 0) return;
+    setSending(true);
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('ptt', 'false');
+        const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
+        setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
+      }
+      void loadConversations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron enviar los archivos');
     } finally { setSending(false); }
   };
 
@@ -1795,7 +1819,7 @@ export default function ConversationsPage() {
             )}
 
             <div className="chat-composer">
-              <input ref={fileInputRef} type="file" hidden accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={onFileChange} />
+              <input ref={fileInputRef} type="file" multiple hidden accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={onFileChange} />
               <input ref={stickerFileInputRef} type="file" hidden accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadSticker(file); }} />
               {qrAutocompleteOpen && qrAutocompleteMatches.length > 0 && (
                 <div className="quick-reply-autocomplete">
