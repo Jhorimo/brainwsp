@@ -340,12 +340,21 @@ export class SessionManager {
     // WhatsApp's privacy rollout can route 1:1 chats through an opaque `@lid`
     // remoteJid instead of the phone-number JID, and can alternate between the
     // two for the same real contact from one message to the next. Baileys
-    // reports the phone-number JID in `key.remoteJidAlt` for those messages —
-    // use it as the identity key (not just to backfill `phone`) so both forms
-    // resolve to the same Contact/Conversation instead of silently forking
-    // into two separate threads for the same person.
-    const identityJid = !isGroup && remoteJid.endsWith('@lid') && message.key.remoteJidAlt ? message.key.remoteJidAlt : remoteJid;
-    const phone = jidToPhone(identityJid);
+    // reports the phone-number JID in `key.remoteJidAlt` for those messages.
+    // Always defaulting to one form over the other forks a fresh duplicate the
+    // moment a contact who was only ever recorded under the other form messages
+    // again — so look up whichever JID this contact already exists under and
+    // keep using that; only a genuinely new contact defaults to the phone JID.
+    const altPhoneJid = !isGroup && message.key.remoteJidAlt && jidToPhone(message.key.remoteJidAlt) ? message.key.remoteJidAlt : null;
+    let identityJid = remoteJid;
+    if (!isGroup && remoteJid.endsWith('@lid') && altPhoneJid) {
+      const existing = await this.prisma.contact.findFirst({
+        where: { companyId: instance.companyId, waId: { in: [remoteJid, altPhoneJid] } },
+        select: { waId: true },
+      });
+      identityJid = existing?.waId || altPhoneJid;
+    }
+    const phone = jidToPhone(identityJid) || (altPhoneJid ? jidToPhone(altPhoneJid) : null);
     const contact = await this.prisma.contact.upsert({
       where: { companyId_waId: { companyId: instance.companyId, waId: identityJid } },
       update: isGroup
