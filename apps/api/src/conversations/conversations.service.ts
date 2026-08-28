@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InstanceStatus, MessageDirection, MessageStatus, MessageType, UserRole, type ConversationStatus } from '@prisma/client';
+import { InstanceStatus, MessageDirection, MessageStatus, MessageType, Prisma, UserRole, type ConversationStatus } from '@prisma/client';
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { DealsService } from '../crm/deals.service';
@@ -10,6 +10,27 @@ import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { StorageService } from '../storage/storage.service';
+
+// Forma exacta que ya devolvia `include: { messages: { take: 1 } }`, para que el
+// frontend no note el cambio de implementacion.
+interface LastMessage {
+  id: string;
+  body: string | null;
+  caption: string | null;
+  type: MessageType;
+  direction: MessageDirection;
+  status: MessageStatus;
+  createdAt: Date;
+  deleted: boolean;
+  author: { id: string; name: string | null; pushName: string | null } | null;
+}
+
+interface LastMessageRow extends Omit<LastMessage, 'author'> {
+  conversationId: string;
+  authorId: string | null;
+  authorName: string | null;
+  authorPushName: string | null;
+}
 
 // What the "Responder" quote preview needs to render — both in the composer's reply bar
 // and above the quoting message's own bubble.
@@ -55,7 +76,7 @@ export class ConversationsService {
 
   async list(user: JwtUser, status?: ConversationStatus) {
     const restriction = await this.resolveDepartmentRestriction(user);
-    return this.prisma.conversation.findMany({
+    const conversations = await this.prisma.conversation.findMany({
       where: {
         companyId: user.companyId,
         ...(status ? { status } : {}),
@@ -68,15 +89,58 @@ export class ConversationsService {
         project: { select: { id: true, name: true } },
         stage: { select: { id: true, name: true, color: true } },
         instance: { select: { id: true, name: true, slug: true, status: true } },
-        messages: {
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-          select: { id: true, body: true, caption: true, type: true, direction: true, status: true, createdAt: true, deleted: true, author: { select: { id: true, name: true, pushName: true } } },
-        },
       },
       orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
       take: 100,
     });
+
+    // El ultimo mensaje de cada conversacion va en una consulta aparte, NO como
+    // `include: { messages: { take: 1 } }`. Prisma traduce ese take anidado a
+    // `WHERE conversationId IN (...) ORDER BY createdAt DESC OFFSET n` SIN LIMIT:
+    // trae TODOS los mensajes de las 100 conversaciones y descarta el resto en
+    // memoria. El 2026-08-28 eso puso Postgres al 90% de CPU durante 6 minutos por
+    // ejecucion y dejo sin responder a los cinco sistemas del servidor.
+    // DISTINCT ON resuelve lo mismo leyendo una sola fila por conversacion,
+    // apoyandose en el indice @@index([conversationId, createdAt]).
+    const lastMessages = await this.lastMessageByConversation(conversations.map((conversation) => conversation.id));
+
+    return conversations.map((conversation) => ({
+      ...conversation,
+      messages: lastMessages.get(conversation.id) ?? [],
+    }));
+  }
+
+  private async lastMessageByConversation(conversationIds: string[]): Promise<Map<string, LastMessage[]>> {
+    if (conversationIds.length === 0) return new Map();
+
+    const rows = await this.prisma.$queryRaw<LastMessageRow[]>`
+      SELECT DISTINCT ON (m."conversationId")
+             m."conversationId", m."id", m."body", m."caption", m."type", m."direction",
+             m."status", m."createdAt", m."deleted",
+             a."id" AS "authorId", a."name" AS "authorName", a."pushName" AS "authorPushName"
+        FROM "Message" m
+        LEFT JOIN "Contact" a ON a."id" = m."authorContactId"
+       WHERE m."conversationId" IN (${Prisma.join(conversationIds)})
+       ORDER BY m."conversationId", m."createdAt" DESC
+    `;
+
+    const byConversation = new Map<string, LastMessage[]>();
+    for (const row of rows) {
+      byConversation.set(row.conversationId, [
+        {
+          id: row.id,
+          body: row.body,
+          caption: row.caption,
+          type: row.type,
+          direction: row.direction,
+          status: row.status,
+          createdAt: row.createdAt,
+          deleted: row.deleted,
+          author: row.authorId ? { id: row.authorId, name: row.authorName, pushName: row.authorPushName } : null,
+        },
+      ]);
+    }
+    return byConversation;
   }
 
   async messages(user: JwtUser, conversationId: string) {
