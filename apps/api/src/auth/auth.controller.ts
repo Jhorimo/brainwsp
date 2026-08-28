@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { getPrimaryWebOrigin } from '../common/cors-origin';
@@ -11,6 +11,8 @@ import { ChangePasswordDto, GoogleExchangeDto, LoginDto, RegisterDto, UpdateProf
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
+  private static readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly auth: AuthService) {}
 
   @Post('login')
@@ -44,7 +46,10 @@ export class AuthController {
     try {
       const ticket = await this.auth.handleGoogleCallback(code);
       res.redirect(`${webOrigin}/login?g=${encodeURIComponent(ticket)}`);
-    } catch {
+    } catch (cause) {
+      // Igual que en CalendarController: sin este log, "no se pudo conectar con
+      // Google" no dejaba ninguna pista en el servidor.
+      AuthController.logger.error(`Fallo el login con Google: ${cause instanceof Error ? cause.message : String(cause)}`, cause instanceof Error ? cause.stack : undefined);
       res.redirect(`${webOrigin}/login?google_error=1`);
     }
   }

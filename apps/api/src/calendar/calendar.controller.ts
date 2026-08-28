@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Logger, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
@@ -18,6 +18,8 @@ import { CreateAppointmentDto } from './calendar.dto';
 @ApiTags('Calendar')
 @Controller('calendar')
 export class CalendarController {
+  private static readonly logger = new Logger(CalendarController.name);
+
   constructor(private readonly service: CalendarService) {}
 
   @UseGuards(JwtAuthGuard)
@@ -49,13 +51,18 @@ export class CalendarController {
     // comodines) en WEB_ORIGIN, el redirect de OAuth usa siempre el primer origen exacto.
     const webOrigin = getPrimaryWebOrigin();
     if (error || !code || !state) {
+      // El usuario ve "no se pudo conectar con Google" y antes no quedaba rastro de por que.
+      CalendarController.logger.warn(`Callback de Google incompleto: error=${error ?? 'ninguno'} code=${code ? 'presente' : 'ausente'} state=${state ? 'presente' : 'ausente'}`);
       res.redirect(`${webOrigin}/calendar?calendar_error=1`);
       return;
     }
     try {
       await this.service.handleCallback(code, state);
       res.redirect(`${webOrigin}/calendar?calendar_connected=1`);
-    } catch {
+    } catch (cause) {
+      // Sin este log el fallo era invisible: el catch vacio se lo tragaba y el
+      // usuario solo veia el mensaje generico del panel.
+      CalendarController.logger.error(`Fallo el intercambio del code de Google: ${cause instanceof Error ? cause.message : String(cause)}`, cause instanceof Error ? cause.stack : undefined);
       res.redirect(`${webOrigin}/calendar?calendar_error=1`);
     }
   }
