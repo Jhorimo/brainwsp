@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react';
 import { BrandIcon } from './brand-mark';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Activity,
   AlertTriangle,
   Bot,
   CalendarDays,
@@ -26,6 +25,7 @@ import {
   UserPlus,
   Users,
   Wifi,
+  Zap,
 } from 'lucide-react';
 import { Protected } from './protected';
 import { API_URL, apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
@@ -51,6 +51,7 @@ const roleLabels: Record<string, string> = {
 const navigation = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, module: 'dashboard' },
   { href: '/instances', label: 'WhatsApp', icon: Wifi, module: 'instances' },
+  { href: '/automations', label: 'Automatizaciones', icon: Zap, module: 'automations' },
   { href: '/team', label: 'Equipo y agentes', icon: Users, module: 'team' },
   { href: '/incidents', label: 'Incidencias', icon: AlertTriangle, module: 'incidents' },
   { href: '/api-settings', label: 'API e integraciones', icon: KeyRound, module: 'api-settings' },
@@ -335,7 +336,6 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
             )}
             <div className="nav-caption nav-gap">PRÓXIMAMENTE</div>
             <div className="nav-item muted"><Bot size={19} /><span>Agentes IA</span></div>
-            <div className="nav-item muted"><Activity size={19} /><span>Automatizaciones</span></div>
           </nav>
 
           <div className="sidebar-footer">

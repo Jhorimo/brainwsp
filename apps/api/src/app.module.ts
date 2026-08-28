@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ApiCredentialsModule } from './api-credentials/api-credentials.module';
+import { AutomationsModule } from './automations/automations.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { CommonModule } from './common/common.module';
 import { ConversationsModule } from './conversations/conversations.module';
@@ -52,6 +53,7 @@ import { UserDeviceModule } from './user-device/user-device.module';
     StickersModule,
     QuickRepliesModule,
     CalendarModule,
+    AutomationsModule,
     AdminModule,
     HealthModule,
   ],

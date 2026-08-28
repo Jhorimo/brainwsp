@@ -14,21 +14,54 @@ try {
 }
 if ($LASTEXITCODE -ne 0 -or $dockerInfoFailed) {
     Write-Host "[BrainWSP] Docker no responde, iniciando Docker Desktop..."
-    $dockerExe = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-    if (Test-Path $dockerExe) {
-        Start-Process $dockerExe
+
+    # La instalación puede ser "para todos los usuarios" (Program Files) o
+    # "solo este usuario" (AppData\Local\Programs). Probamos ambas antes de
+    # rendirnos, y si tampoco aparece ahí, preguntamos al registro de
+    # Windows por la ruta real de instalación.
+    $dockerExeCandidates = @(
+        "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+        "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe",
+        "$env:LOCALAPPDATA\Programs\DockerDesktop\Docker Desktop.exe"
+    )
+    $dockerExe = $dockerExeCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+    if (-not $dockerExe) {
+        $uninstallKeys = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+        )
+        $installLocation = Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -eq "Docker Desktop" } |
+            Select-Object -ExpandProperty InstallLocation -First 1
+        if ($installLocation) {
+            $candidate = Join-Path $installLocation "Docker Desktop.exe"
+            if (Test-Path $candidate) { $dockerExe = $candidate }
+        }
     }
+
+    if (-not $dockerExe) {
+        throw "No se encontró Docker Desktop.exe (se probó Program Files, AppData\Local\Programs y el registro). Ábrelo manualmente y reintenta."
+    }
+
+    Start-Process $dockerExe
+
     $elapsed = 0
+    $timeoutSeconds = 180
     while ($true) {
         try { docker info *> $null } catch {}
         if ($LASTEXITCODE -eq 0) { break }
-        if ($elapsed -ge 120) {
-            throw "Docker Desktop no arrancó en 120s. Ábrelo manualmente y reintenta."
+        if ($elapsed -ge $timeoutSeconds) {
+            throw "Docker Desktop no arrancó en ${timeoutSeconds}s. Ábrelo manualmente y reintenta."
+        }
+        if ($elapsed -gt 0 -and $elapsed % 15 -eq 0) {
+            Write-Host "[BrainWSP] Esperando a Docker Desktop... (${elapsed}s)"
         }
         Start-Sleep -Seconds 3
         $elapsed += 3
     }
-    Write-Host "[BrainWSP] Docker listo."
+    Write-Host "[BrainWSP] Docker listo tras ${elapsed}s."
 }
 
 # Avisa si el puerto 3000 ya está ocupado (p.ej. un "next dev" suelto de una

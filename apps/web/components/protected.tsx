@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getToken } from '@/lib/api';
+import { InactivityGuard } from './inactivity-guard';
 
 export function Protected({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -14,5 +15,10 @@ export function Protected({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   if (!ready) return <div className="center-screen"><div className="spinner" /></div>;
-  return children;
+  return (
+    <>
+      {children}
+      <InactivityGuard />
+    </>
+  );
 }

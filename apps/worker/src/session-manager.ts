@@ -23,6 +23,7 @@ import type { Logger } from 'pino';
 import { config } from './config.js';
 import { usePrismaAuthState } from './auth-state.js';
 import { maybeReplyWithAi } from './ai-agent.js';
+import { maybeRunFlow } from './automation-engine.js';
 import { extensionFromMime, extractMessage, jidToPhone } from './message-utils.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
@@ -503,9 +504,16 @@ export class SessionManager {
       conversation: realtimeConversation ? { ...realtimeConversation, messages: [created] } : { ...conversation, contact, messages: [created] },
     }, realtimeConversation?.departmentId ?? conversation.departmentId);
 
-    maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id).catch((error) => {
-      this.logger.warn({ err: error, conversationId: conversation.id }, 'AI auto-reply failed');
-    });
+    // Una automatización con keyword coincidente gana sobre la IA genérica — si disparó un
+    // flujo, no tiene sentido además contestar con una respuesta libre de IA para el mismo
+    // mensaje entrante.
+    maybeRunFlow(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id)
+      .then((triggered) => {
+        if (!triggered) return maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id);
+      })
+      .catch((error) => {
+        this.logger.warn({ err: error, conversationId: conversation.id }, 'Automation/AI auto-reply failed');
+      });
   }
 
   // `targetKey` identifies the message being reacted to; `reaction.key` is the reactor's own

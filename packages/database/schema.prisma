@@ -90,6 +90,18 @@ enum LeadStatus {
   VERY_INTERESTED
 }
 
+enum FlowTriggerType {
+  KEYWORD
+}
+
+enum FlowExecutionStatus {
+  RUNNING
+  WAITING_INPUT
+  WAITING_TIMER
+  COMPLETED
+  CANCELLED
+}
+
 model Company {
   id             String             @id @default(uuid())
   name           String
@@ -124,6 +136,9 @@ model Company {
   deals          Deal[]
   googleCalendar GoogleCalendarIntegration?
   calendarEvents CalendarEvent[]
+  flowFolders    FlowFolder[]
+  flows          Flow[]
+  flowExecutions FlowExecution[]
 }
 
 // Platform-level catalog, managed by SUPERADMIN users — not scoped to any one company.
@@ -167,6 +182,7 @@ model User {
   assignedDeals        Deal[]          @relation("DealAssignee")
   connectedCalendars   GoogleCalendarIntegration[]
   createdCalendarEvents CalendarEvent[]
+  createdFlows         Flow[]
 
   @@index([companyId])
 }
@@ -229,6 +245,7 @@ model WhatsAppInstance {
   messages         Message[]
   authCredential   WhatsAppAuthCredential?
   authKeys         WhatsAppAuthKey[]
+  flows            Flow[]
 
   @@unique([companyId, slug])
   @@unique([companyId, posClientKey])
@@ -416,6 +433,7 @@ model Conversation {
   leads          Lead[]
   deals          Deal[]
   calendarEvents CalendarEvent[]
+  flowExecutions FlowExecution[]
 
   @@unique([instanceId, contactId])
   @@index([companyId, status, lastMessageAt])
@@ -728,4 +746,76 @@ model DealTag {
   tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([dealId, tagId])
+}
+
+// --- Automatizaciones (Flow Builder) ---
+// Carpeta simple para organizar flujos (mismo patrón que Department/Project): una entidad
+// propia en vez de un string suelto, así el combobox "creatable" del formulario de creación
+// no genera duplicados por mayúsculas/typos y renombrarla afecta a todos sus flujos a la vez.
+model FlowFolder {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  flows     Flow[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+// La definición visual de una automatización. El diagrama completo (nodos + conexiones) se
+// guarda como un solo JSON en `graph` en vez de normalizar nodos/edges en tablas — así el
+// editor visual solo serializa/deserializa y agregar un tipo de nodo nuevo no pide migración
+// (mismo enfoque que usan n8n/Typebot). `graph.schemaVersion` permite migrar el formato hacia
+// adelante si el shape cambia más adelante.
+model Flow {
+  id              String           @id @default(uuid())
+  companyId       String
+  folderId        String?
+  name            String
+  triggerType     FlowTriggerType  @default(KEYWORD)
+  triggerKeywords String[]         @default([])
+  active          Boolean          @default(true)
+  graph           Json
+  createdByUserId String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Un flujo puede correr sobre uno o varios bots (instancias de WhatsApp) de la empresa —
+  // "Compartir" en el panel agrega/quita instancias de esta lista. m:n implícita (sin campos
+  // propios en la relación, así que no hace falta un modelo de tabla intermedia aparte).
+  instances       WhatsAppInstance[]
+  folder          FlowFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdByUser   User?            @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  executions      FlowExecution[]
+
+  @@index([companyId, active])
+  @@index([folderId])
+}
+
+// Estado de una corrida del flujo para UNA conversación puntual — máquina de estados: guarda
+// en qué nodo va (`currentNodeId`) y las variables recolectadas (`context`), para poder
+// retomar la ejecución cuando llegue el siguiente mensaje o se dispare un timer, en vez de
+// tener que rehacer el flujo desde el nodo inicial. El worker (apps/worker/automation-engine.ts)
+// crea una fila aquí por cada ejecución real en WhatsApp. El simulador del editor NO pasa por
+// aquí — corre el mismo motor pero de forma efímera (ver AutomationsService.simulate), para no
+// ensuciar esta tabla con corridas de prueba.
+model FlowExecution {
+  id             String              @id @default(uuid())
+  companyId      String
+  flowId         String
+  conversationId String
+  currentNodeId  String?
+  status         FlowExecutionStatus @default(RUNNING)
+  context        Json                @default("{}")
+  waitingUntil   DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  flow           Flow                @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  conversation   Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([conversationId, status])
 }

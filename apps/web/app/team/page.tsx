@@ -16,6 +16,7 @@ const MODULE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'api-settings', label: 'API e integraciones' },
   { key: 'feedback', label: 'Sugerencias y reportes' },
   { key: 'crm', label: 'CRM' },
+  { key: 'automations', label: 'Automatizaciones' },
 ];
 const ALL_MODULE_KEYS = MODULE_OPTIONS.map((item) => item.key);
 
