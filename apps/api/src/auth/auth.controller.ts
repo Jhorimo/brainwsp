@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { getPrimaryWebOrigin } from '../common/cors-origin';
@@ -11,6 +11,8 @@ import { ChangePasswordDto, GoogleExchangeDto, LoginDto, RegisterDto, UpdateProf
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly auth: AuthService) {}
 
   @Post('login')
@@ -38,13 +40,15 @@ export class AuthController {
     // concreto, así que se usa siempre el primer origen exacto como frontend "canónico".
     const webOrigin = getPrimaryWebOrigin();
     if (error || !code) {
+      if (error) this.logger.warn(`Google login callback returned error=${error}`);
       res.redirect(`${webOrigin}/login?google_error=1`);
       return;
     }
     try {
       const ticket = await this.auth.handleGoogleCallback(code);
       res.redirect(`${webOrigin}/login?g=${encodeURIComponent(ticket)}`);
-    } catch {
+    } catch (err) {
+      this.logger.error(`Google login callback failed: ${err instanceof Error ? err.message : err}`, err instanceof Error ? err.stack : undefined);
       res.redirect(`${webOrigin}/login?google_error=1`);
     }
   }

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Logger, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
@@ -18,6 +18,8 @@ import { CreateAppointmentDto } from './calendar.dto';
 @ApiTags('Calendar')
 @Controller('calendar')
 export class CalendarController {
+  private readonly logger = new Logger(CalendarController.name);
+
   constructor(private readonly service: CalendarService) {}
 
   @UseGuards(JwtAuthGuard)
@@ -49,13 +51,15 @@ export class CalendarController {
     // comodines) en WEB_ORIGIN, el redirect de OAuth usa siempre el primer origen exacto.
     const webOrigin = getPrimaryWebOrigin();
     if (error || !code || !state) {
+      if (error) this.logger.warn(`Google Calendar callback returned error=${error}`);
       res.redirect(`${webOrigin}/calendar?calendar_error=1`);
       return;
     }
     try {
       await this.service.handleCallback(code, state);
       res.redirect(`${webOrigin}/calendar?calendar_connected=1`);
-    } catch {
+    } catch (err) {
+      this.logger.error(`Google Calendar callback failed: ${err instanceof Error ? err.message : err}`, err instanceof Error ? err.stack : undefined);
       res.redirect(`${webOrigin}/calendar?calendar_error=1`);
     }
   }
