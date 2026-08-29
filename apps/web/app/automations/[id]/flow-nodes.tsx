@@ -22,10 +22,20 @@ const BLOCK_ICONS: Record<ContentBlock['kind'], typeof MessageSquareText> = {
   delay: Timer,
 };
 
+// Mismo criterio que formatDuration del nodo Wait — segundos crudos son ilegibles una vez que
+// DurationPicker permite configurar retrasos de hasta 30 días (ej. "172800s" en vez de "2d").
+function formatCompactDuration(totalSeconds: number) {
+  const s = Math.max(0, totalSeconds);
+  if (s % 86400 === 0 && s >= 86400) return `${s / 86400}d`;
+  if (s % 3600 === 0 && s >= 3600) return `${s / 3600}h`;
+  if (s % 60 === 0 && s >= 60) return `${s / 60}m`;
+  return `${s}s`;
+}
+
 function blockPreview(block: ContentBlock) {
   switch (block.kind) {
     case 'text': return block.text.trim() || '(vacío)';
-    case 'delay': return `${block.seconds}s · pausa`;
+    case 'delay': return `${formatCompactDuration(block.seconds)} · pausa`;
     case 'image': return block.caption?.trim() || block.fileName || 'Imagen';
     case 'video': return block.caption?.trim() || block.fileName || 'Video';
     case 'audio': return block.fileName || 'Audio';
