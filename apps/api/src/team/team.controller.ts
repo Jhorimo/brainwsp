@@ -41,6 +41,18 @@ export class TeamController {
     return this.service.updateUser(user.companyId, id, dto);
   }
 
+  @Patch('users/:id/default')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  setDefaultAgent(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.setDefaultAgent(user.companyId, id);
+  }
+
+  @Delete('users/:id/default')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  clearDefaultAgent(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.clearDefaultAgent(user.companyId, id);
+  }
+
   @Patch('company')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   updateCompany(@CurrentUser() user: JwtUser, @Body() dto: UpdateCompanyDto) {
@@ -74,6 +86,12 @@ export class TeamController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   setMembers(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SetDepartmentMembersDto) {
     return this.service.setDepartmentMembers(user.companyId, id, dto.userIds);
+  }
+
+  @Patch('departments/:id/default')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  setDefaultDepartment(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.setDefaultDepartment(user.companyId, id);
   }
 
   @Get('projects')

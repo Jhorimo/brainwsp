@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, Layers, Plus, ShieldCheck, Trash2, UserRoundCog, Users, Workflow } from 'lucide-react';
+import { Building2, Layers, Plus, ShieldCheck, Star, Trash2, UserRoundCog, Users, Workflow, X } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
 
@@ -27,6 +27,8 @@ type TeamUser = {
   email: string;
   role: 'OWNER' | 'ADMIN' | 'SUPERVISOR' | 'AGENT';
   active: boolean;
+  isDefaultAgent: boolean;
+  effectiveDefault: boolean;
   lastLoginAt?: string | null;
   departments?: DepartmentRef[];
   allowedModules?: string[];
@@ -36,6 +38,7 @@ type Department = {
   name: string;
   description?: string | null;
   active: boolean;
+  isDefault: boolean;
   users: Array<{ user: Pick<TeamUser, 'id' | 'name' | 'email' | 'role' | 'active'> }>;
   _count?: { conversations: number };
 };
@@ -142,11 +145,32 @@ export default function TeamPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el usuario'); }
   };
 
+  const setDefaultAgent = async (user: TeamUser) => {
+    try {
+      await apiFetch(`/team/users/${user.id}/default`, { method: 'PATCH' });
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo marcar el usuario como predeterminado'); }
+  };
+
+  const clearDefaultAgent = async (user: TeamUser) => {
+    try {
+      await apiFetch(`/team/users/${user.id}/default`, { method: 'DELETE' });
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo quitar al usuario como predeterminado'); }
+  };
+
   const toggleDepartment = async (department: Department) => {
     try {
       await apiFetch(`/team/departments/${department.id}`, { method: 'PATCH', body: JSON.stringify({ active: !department.active }) });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el departamento'); }
+  };
+
+  const setDefaultDepartment = async (department: Department) => {
+    try {
+      await apiFetch(`/team/departments/${department.id}/default`, { method: 'PATCH' });
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo marcar el departamento como predeterminado'); }
   };
 
   const toggleProject = async (project: Project) => {
@@ -307,7 +331,7 @@ export default function TeamPage() {
         <section className="table-card">
           <div className="card-header"><div><h2>Agentes y usuarios</h2><p>El mismo usuario puede iniciar sesión y atender el chat en vivo.</p></div></div>
           <table>
-            <thead><tr><th>Usuario</th><th>Rol</th><th>Departamentos</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Rol</th><th>Departamentos</th><th>Estado</th><th>Por Defecto</th><th></th></tr></thead>
             <tbody>
               {users.map((user) => (
                 <tr key={user.id}>
@@ -315,6 +339,16 @@ export default function TeamPage() {
                   <td>{roleNames[user.role]}</td>
                   <td>{user.departments?.length ? user.departments.map((item) => item.department.name).join(', ') : '—'}</td>
                   <td><span className={`status-pill ${user.active ? 'success' : 'neutral'}`}><span className="status-dot" />{user.active ? 'Activo' : 'Inactivo'}</span></td>
+                  <td style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                    {user.effectiveDefault ? (
+                      <span className="default-badge" title={user.isDefaultAgent ? 'Se asigna como responsable a los leads nuevos' : 'Único agente activo: predeterminado automáticamente'}><Star size={11} />Predeterminado</span>
+                    ) : user.active ? (
+                      <button className="button small" title="Asignar como responsable a los leads nuevos" onClick={() => void setDefaultAgent(user)}><Star size={13} />Fijar por defecto</button>
+                    ) : '—'}
+                    {user.effectiveDefault && user.isDefaultAgent && (
+                      <button className="icon-button" title="Quitar como predeterminado" onClick={() => void clearDefaultAgent(user)}><X size={12} /></button>
+                    )}
+                  </td>
                   <td style={{ textAlign: 'right', display: 'flex', gap: '.5rem', justifyContent: 'flex-end' }}>
                     <button className="button small" onClick={() => openEdit(user)}>Editar</button>
                     <button className={`button small ${user.active ? '' : 'primary'}`} onClick={() => void toggleUser(user)}>{user.active ? 'Desactivar' : 'Activar'}</button>
@@ -334,6 +368,11 @@ export default function TeamPage() {
                   <div className="department-icon"><Building2 size={17} /></div>
                   <div className="department-copy"><strong>{department.name}</strong><span>{department.description || 'Sin descripción'} · {department.users.length} miembro(s){!department.active && ' · Inactivo'}</span></div>
                   <div className="department-row-actions">
+                    {department.isDefault ? (
+                      <span className="default-badge" title="Se asigna automáticamente a las conversaciones nuevas"><Star size={11} />Predeterminado</span>
+                    ) : department.active ? (
+                      <button className="button small" title="Asignar automáticamente a las conversaciones nuevas" onClick={() => void setDefaultDepartment(department)}><Star size={13} />Fijar por defecto</button>
+                    ) : null}
                     <button className="button small" onClick={() => void openStages(department)}><Workflow size={13} />Etapas</button>
                     <button className="button small" onClick={() => openMembers(department)}>Miembros</button>
                     <button className={`button small ${department.active ? 'danger' : 'primary'}`} onClick={() => void toggleDepartment(department)}>{department.active ? 'Desactivar' : 'Activar'}</button>

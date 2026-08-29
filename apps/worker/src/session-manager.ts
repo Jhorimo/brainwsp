@@ -15,6 +15,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  UserRole,
   type PrismaClient,
 } from '@prisma/client';
 import type { Queue } from 'bullmq';
@@ -388,6 +389,22 @@ export class SessionManager {
       where: { instanceId_contactId: { instanceId, contactId: contact.id } },
       select: { id: true },
     });
+    // Departamento y agente predeterminados de la empresa (si hay alguno marcado) — así una
+    // conversación nueva no queda "Sin asignar" hasta que alguien la revise manualmente. El
+    // agente sigue la misma regla que TeamService.computeEffectiveDefaultAgentId: uno marcado
+    // explícitamente en /team, o si la empresa solo tiene un agente activo, ese mismo. Se
+    // replica aquí porque el worker no comparte el módulo team de la API.
+    let defaultDepartment: { id: string } | null = null;
+    let defaultAgentId: string | undefined;
+    if (!existingConversation) {
+      [defaultDepartment, defaultAgentId] = await Promise.all([
+        this.prisma.department.findFirst({ where: { companyId: instance.companyId, isDefault: true, active: true }, select: { id: true } }),
+        this.prisma.user
+          .findMany({ where: { companyId: instance.companyId, active: true, role: { not: UserRole.SUPERADMIN } }, select: { id: true, isDefaultAgent: true } })
+          .then((agents) => agents.find((agent) => agent.isDefaultAgent)?.id ?? (agents.length === 1 ? agents[0].id : undefined)),
+      ]);
+    }
+
     const conversation = existingConversation
       ? await this.prisma.conversation.update({
           where: { id: existingConversation.id },
@@ -400,13 +417,16 @@ export class SessionManager {
             contactId: contact.id,
             unreadCount: 1,
             lastMessageAt: new Date(),
+            departmentId: defaultDepartment?.id,
+            assignedUserId: defaultAgentId,
           },
         });
 
     // Cliente nuevo escribiendo por primera vez = prospecto entrante. Los grupos no son
-    // prospectos de venta, así que se excluyen. Sin departamento todavía — un agente lo
-    // asigna al revisar la conversación (ver ConversationsService.update, que además hereda
-    // el departamento del agente asignado hacia la propia conversación).
+    // prospectos de venta, así que se excluyen. Si la empresa tiene un departamento y/o agente
+    // predeterminado ya quedaron asignados arriba; si no, un agente lo asigna al revisar la
+    // conversación (ver ConversationsService.update, que además hereda el departamento del
+    // agente asignado hacia la propia conversación).
     if (!existingConversation && !isGroup) {
       const lead = await this.prisma.lead.create({
         data: {
@@ -414,9 +434,11 @@ export class SessionManager {
           title: contact.name || contact.pushName || contact.phone || 'Prospecto de WhatsApp',
           personName: contact.name || contact.pushName || undefined,
           personPhone: contact.phone || undefined,
+          assignedUserId: defaultAgentId,
           channel: 'whatsapp',
           contactId: contact.id,
           conversationId: conversation.id,
+          departmentId: defaultDepartment?.id,
         },
       });
       await this.realtime.publish(instance.companyId, 'lead.created', lead);

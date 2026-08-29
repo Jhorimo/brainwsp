@@ -12,7 +12,7 @@ import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 type TeamUser = { id: string; name: string };
 type Tag = { id: string; name: string; color: string };
 type Stage = { id: string; name: string; color: string; isWon: boolean; order: number };
-type Department = { id: string; name: string; stages: Stage[] };
+type Department = { id: string; name: string; isDefault: boolean; stages: Stage[] };
 type Deal = {
   id: string; title: string; value?: number | null; stage: { id: string }; probability?: number | null;
   assignedUser?: TeamUser | null; companyName?: string | null; personName?: string | null;
@@ -84,8 +84,15 @@ export default function PipelinesPage() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
+    // Enlace directo desde /crm/leads ("Ver Pipelines") — si trae ?departmentId=, abrir ese
+    // tablero en vez del predeterminado de la empresa.
+    const requestedDepartmentId = new URLSearchParams(window.location.search).get('departmentId') || '';
     apiFetch<Department[]>('/crm/pipelines')
-      .then((items) => { setDepartments(items); setDepartmentId((current) => current || items[0]?.id || ''); })
+      .then((items) => {
+        setDepartments(items);
+        const requested = requestedDepartmentId && items.some((d) => d.id === requestedDepartmentId) ? requestedDepartmentId : '';
+        setDepartmentId((current) => current || requested || items.find((d) => d.isDefault)?.id || items[0]?.id || '');
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'No se pudieron cargar los departamentos'))
       .finally(() => setLoaded(true));
   }, []);

@@ -12,8 +12,8 @@ export class TeamService {
     return { id: company.id, name: company.name, slug: company.slug };
   }
 
-  listUsers(companyId: string) {
-    return this.prisma.user.findMany({
+  async listUsers(companyId: string) {
+    const users = await this.prisma.user.findMany({
       // Platform staff seeded into this company (SUPERADMIN) aren't part of anyone's
       // tenant team roster — keep them out of the company's own "Equipo y agentes" list.
       where: { companyId, role: { not: UserRole.SUPERADMIN } },
@@ -23,6 +23,7 @@ export class TeamService {
         email: true,
         role: true,
         active: true,
+        isDefaultAgent: true,
         allowedModules: true,
         lastLoginAt: true,
         createdAt: true,
@@ -32,6 +33,39 @@ export class TeamService {
       },
       orderBy: [{ active: 'desc' }, { name: 'asc' }],
     });
+    const effectiveDefaultId = this.computeEffectiveDefaultAgentId(users);
+    return users.map((user) => ({ ...user, effectiveDefault: user.id === effectiveDefaultId }));
+  }
+
+  // Un agente puede quedar marcado explícitamente como predeterminado (isDefaultAgent), pero
+  // si la empresa solo tiene un agente activo no tiene sentido obligar a fijarlo a mano: ese
+  // único agente ya actúa como predeterminado. Esta regla se usa tanto para pintar la
+  // insignia en /team como para asignar "responsable" a leads nuevos.
+  private computeEffectiveDefaultAgentId(users: Array<{ id: string; active: boolean; isDefaultAgent: boolean }>) {
+    const activeUsers = users.filter((user) => user.active);
+    const explicit = activeUsers.find((user) => user.isDefaultAgent);
+    if (explicit) return explicit.id;
+    return activeUsers.length === 1 ? activeUsers[0].id : null;
+  }
+
+  async setDefaultAgent(companyId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId, role: { not: UserRole.SUPERADMIN } } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (!user.active) throw new BadRequestException('No puedes marcar como predeterminado a un usuario desactivado');
+    // Solo un agente por empresa puede quedar marcado como predeterminado: se desmarca el
+    // anterior en la misma transacción.
+    await this.prisma.$transaction([
+      this.prisma.user.updateMany({ where: { companyId, isDefaultAgent: true }, data: { isDefaultAgent: false } }),
+      this.prisma.user.update({ where: { id: userId }, data: { isDefaultAgent: true } }),
+    ]);
+    return { success: true };
+  }
+
+  async clearDefaultAgent(companyId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId, role: { not: UserRole.SUPERADMIN } } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    await this.prisma.user.update({ where: { id: userId }, data: { isDefaultAgent: false } });
+    return { success: true };
   }
 
   private async assertDepartmentsBelongToCompany(companyId: string, departmentIds: string[]) {
@@ -91,8 +125,10 @@ export class TeamService {
           ...(input.active !== undefined ? { active: input.active } : {}),
           ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}),
           ...(input.allowedModules !== undefined ? { allowedModules: input.allowedModules } : {}),
+          // Un usuario desactivado no puede seguir siendo el agente predeterminado.
+          ...(input.active === false && user.isDefaultAgent ? { isDefaultAgent: false } : {}),
         },
-        select: { id: true, name: true, email: true, role: true, active: true, allowedModules: true, lastLoginAt: true, createdAt: true },
+        select: { id: true, name: true, email: true, role: true, active: true, isDefaultAgent: true, allowedModules: true, lastLoginAt: true, createdAt: true },
       });
       if (departmentIds !== undefined) {
         await tx.departmentUser.deleteMany({ where: { userId } });
@@ -133,8 +169,24 @@ export class TeamService {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
         ...(input.description !== undefined ? { description: input.description.trim() || null } : {}),
         ...(input.active !== undefined ? { active: input.active } : {}),
+        // Un departamento desactivado no puede seguir siendo el predeterminado para
+        // conversaciones nuevas.
+        ...(input.active === false && department.isDefault ? { isDefault: false } : {}),
       },
     });
+  }
+
+  async setDefaultDepartment(companyId: string, departmentId: string) {
+    const department = await this.prisma.department.findFirst({ where: { id: departmentId, companyId } });
+    if (!department) throw new NotFoundException('Departamento no encontrado');
+    if (!department.active) throw new BadRequestException('No puedes marcar como predeterminado un departamento desactivado');
+    // Solo un departamento por empresa puede ser el predeterminado: se desmarca el anterior
+    // en la misma transacción para que nunca haya cero o más de uno.
+    await this.prisma.$transaction([
+      this.prisma.department.updateMany({ where: { companyId, isDefault: true }, data: { isDefault: false } }),
+      this.prisma.department.update({ where: { id: departmentId }, data: { isDefault: true } }),
+    ]);
+    return { success: true };
   }
 
   async deleteDepartment(companyId: string, departmentId: string) {

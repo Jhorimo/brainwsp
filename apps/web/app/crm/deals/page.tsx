@@ -10,7 +10,7 @@ import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
 
 type TeamUser = { id: string; name: string };
 type Stage = { id: string; name: string; color: string; isWon: boolean };
-type Department = { id: string; name: string; stages: Stage[] };
+type Department = { id: string; name: string; isDefault: boolean; stages: Stage[] };
 type Tag = { id: string; name: string; color: string };
 type Deal = {
   id: string; title: string; value?: number | null; departmentId: string; stage: Stage; probability?: number | null;
@@ -38,7 +38,7 @@ export default function DealsPage() {
 
   useEffect(() => {
     void apiFetch<TeamUser[]>('/team/users').then(setTeamUsers).catch(() => undefined);
-    void apiFetch<Department[]>('/crm/pipelines').then((items) => { setDepartments(items); setDepartmentId((current) => current || items[0]?.id || ''); }).catch(() => undefined);
+    void apiFetch<Department[]>('/crm/pipelines').then((items) => { setDepartments(items); setDepartmentId((current) => current || items.find((d) => d.isDefault)?.id || items[0]?.id || ''); }).catch(() => undefined);
   }, []);
   useEffect(() => { const t = setTimeout(() => setQ(qInput.trim()), 300); return () => clearTimeout(t); }, [qInput]);
 
