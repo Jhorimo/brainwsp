@@ -94,7 +94,7 @@ export default function AdminClientsPage() {
           <thead>
             <tr>
               <th>Nombre</th>
-              <th>Correo electrónico</th>
+              <th>Propietario</th>
               <th>Rol</th>
               <th>Estado</th>
               <th>Plan</th>
@@ -115,7 +115,7 @@ export default function AdminClientsPage() {
                       <span className="row-main">{company.name}</span>
                     </div>
                   </td>
-                  <td>{owner?.email || '—'}</td>
+                  <td><span className="row-main">{owner?.name || '—'}</span><span className="row-sub">{owner?.email || '—'}</span></td>
                   <td><span className="status-pill neutral">Cliente</span></td>
                   <td><span className={`status-pill ${company.active ? 'success' : 'neutral'}`}><span className="status-dot" />{company.active ? 'Activo' : 'Suspendido'}</span></td>
                   <td>
