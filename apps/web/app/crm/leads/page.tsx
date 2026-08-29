@@ -230,9 +230,8 @@ export default function LeadsPage() {
                 <td>{new Date(lead.createdAt).toLocaleDateString('es-PE')}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {lead.convertedDealId
-                    ? <Link className="button small" href="/crm/deals"><Handshake size={13} />Ver trato</Link>
+                    ? <><Link className="button small" href="/crm/deals"><Handshake size={13} />Ver trato</Link>{' '}<Link className="button small" href={lead.departmentId ? `/crm/pipelines?departmentId=${lead.departmentId}` : '/crm/pipelines'}><Kanban size={13} />Ver Pipelines</Link></>
                     : <button className="button small primary" disabled={busyId === lead.id + 'convert' || !lead.departmentId} title={!lead.departmentId ? 'Asigna un departamento antes de convertir' : undefined} onClick={() => void convert(lead)}><Handshake size={13} />Convertir</button>}{' '}
-                  <Link className="button small" href={lead.departmentId ? `/crm/pipelines?departmentId=${lead.departmentId}` : '/crm/pipelines'}><Kanban size={13} />Ver Pipelines</Link>{' '}
                   <button className="button small danger" disabled={busyId === lead.id + 'delete'} onClick={() => void remove(lead)}><Trash2 size={13} /></button>
                 </td>
               </tr>
