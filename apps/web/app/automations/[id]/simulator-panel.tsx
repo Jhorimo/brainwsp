@@ -22,6 +22,7 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
   const [items, setItems] = useState<ChatItem[]>([{ from: 'system', text: 'Simulador listo. Envía un mensaje o palabra clave para iniciar el flujo.' }]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
+  const [waitingMenuNodeId, setWaitingMenuNodeId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [items]);
@@ -32,8 +33,10 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
     setInput('');
     setItems((current) => [...current, { from: 'user', text: message }]);
     setRunning(true);
+    const resumeFromNodeId = waitingMenuNodeId || undefined;
+    setWaitingMenuNodeId(null);
     try {
-      const result = await apiFetch<SimulateResult>(`/automations/flows/${flowId}/simulate`, { method: 'POST', body: JSON.stringify({ message }) });
+      const result = await apiFetch<SimulateResult>(`/automations/flows/${flowId}/simulate`, { method: 'POST', body: JSON.stringify({ message, resumeFromNodeId }) });
       if (!result.triggered) {
         setItems((current) => [...current, { from: 'system', text: 'Ese mensaje no coincide con ninguna palabra clave de este flujo.' }]);
         return;
@@ -44,6 +47,9 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
       }
       if (result.status === 'COMPLETED') {
         setItems((current) => [...current, { from: 'system', text: 'Flujo completado.' }]);
+      } else if (result.waitingNodeId) {
+        setWaitingMenuNodeId(result.waitingNodeId);
+        setItems((current) => [...current, { from: 'system', text: 'Esperando tu respuesta al menú...' }]);
       } else {
         setItems((current) => [...current, { from: 'system', text: 'El flujo llegó a un nodo que todavía no se puede simular (próxima fase).' }]);
       }
@@ -94,7 +100,7 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
       <div className="simulator-footer">
         <div className="simulator-context-row">Variables de contexto <span className="status-pill neutral">0</span></div>
         <div className="simulator-input-row">
-          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void send(); }} placeholder="Escribe un mensaje de prueba..." disabled={running} />
+          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void send(); }} placeholder={waitingMenuNodeId ? 'Responde con el número o texto de una opción...' : 'Escribe un mensaje de prueba...'} disabled={running} />
           <button type="button" className="send-button" disabled={running || !input.trim()} onClick={() => void send()}><Send size={16} /></button>
         </div>
       </div>

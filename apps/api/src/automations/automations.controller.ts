@@ -99,6 +99,6 @@ export class AutomationsController {
   @Post('flows/:id/simulate')
   @Roles(...MANAGE_ROLES)
   simulate(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SimulateFlowDto) {
-    return this.service.simulate(user.companyId, id, dto.message);
+    return this.service.simulate(user.companyId, id, dto.message, dto.resumeFromNodeId);
   }
 }

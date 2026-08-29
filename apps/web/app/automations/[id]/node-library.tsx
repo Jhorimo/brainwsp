@@ -10,16 +10,16 @@ type LibraryItem = {
   enabled: boolean;
 };
 
-// Solo "Mensaje Chat" (nuestro nodo CONTENIDO) está construido — el resto refleja las fases
-// siguientes acordadas (Menú/Espera/Remarketing = fase 3, Validación Pago con IA = fase 4) y
-// se muestra deshabilitado en vez de omitirse, para que quede claro qué sigue en el roadmap.
+// "Mensaje Chat" (CONTENIDO), "Espera" (TEMPORIZADOR) y "Menú" ya están construidos. El resto
+// refleja las fases siguientes acordadas (Remarketing = fase 3, Validación Pago con IA = fase
+// 4) y se muestra deshabilitado en vez de omitirse, para que quede claro qué sigue el roadmap.
 const CATEGORIES: Array<{ label: string; items: LibraryItem[] }> = [
   {
     label: 'BÁSICOS',
     items: [
       { key: 'content', label: 'Mensaje Chat', icon: MessageSquareText, color: 'pink', enabled: true },
-      { key: 'menu', label: 'Menú', icon: ListTree, color: 'purple', enabled: false },
-      { key: 'wait', label: 'Espera', icon: Timer, color: 'teal', enabled: false },
+      { key: 'menu', label: 'Menú', icon: ListTree, color: 'purple', enabled: true },
+      { key: 'wait', label: 'Espera', icon: Timer, color: 'teal', enabled: true },
     ],
   },
   {
@@ -31,10 +31,12 @@ const CATEGORIES: Array<{ label: string; items: LibraryItem[] }> = [
   },
 ];
 
-export function NodeLibrary({ onSelectContent, onClose }: { onSelectContent: () => void; onClose: () => void }) {
+export function NodeLibrary({ onSelectContent, onSelectWait, onSelectMenu, onClose }: { onSelectContent: () => void; onSelectWait: () => void; onSelectMenu: () => void; onClose: () => void }) {
   const handlePick = (item: LibraryItem) => {
     if (!item.enabled) return;
     if (item.key === 'content') onSelectContent();
+    if (item.key === 'wait') onSelectWait();
+    if (item.key === 'menu') onSelectMenu();
     onClose();
   };
 

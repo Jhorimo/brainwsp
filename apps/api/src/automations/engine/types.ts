@@ -24,11 +24,37 @@ export type ContentNode = {
   data: { label: string; blocks: ContentBlock[] };
 };
 
-// Only START and CONTENT ship in this phase. The union stays open (`FlowNode` below) so a
-// graph saved by a future node type (menu, remarketing, pago) still round-trips through the
-// API untouched instead of getting rejected — the engine just stops there (see run-flow.ts)
-// until that node type's execution logic is built.
-export type FlowNode = StartNode | ContentNode | { id: string; type: string; position: NodePosition; data: unknown };
+// "Temporizador" — pauses the flow for a fixed duration before continuing to whatever it's
+// connected to. Executes exactly like a `delay` content block (see run-flow.ts), just as its
+// own visual node instead of nested inside a message sequence.
+export type WaitNode = {
+  id: string;
+  type: 'wait';
+  position: NodePosition;
+  data: { seconds: number };
+};
+
+export type MenuOption = { id: string; text: string };
+
+// The first node type that genuinely branches. Sends `prompt` + a numbered list of `options`
+// as one text message, then the engine STOPS (see run-flow.ts) — resuming requires the
+// customer's next message, matched against the options (see resumeFlow / matchMenuOption).
+// Each option is its own outgoing edge, identified by `sourceHandle === option.id`; a reply
+// that matches nothing follows the edge with `sourceHandle === NO_RESPONSE_HANDLE`, if any.
+export type MenuNode = {
+  id: string;
+  type: 'menu';
+  position: NodePosition;
+  data: { label: string; prompt: string; options: MenuOption[] };
+};
+
+export const NO_RESPONSE_HANDLE = 'no-response';
+
+// Only START, CONTENT, WAIT and MENU ship in this phase. The union stays open (`FlowNode`
+// below) so a graph saved by a future node type (remarketing, pago) still round-trips through
+// the API untouched instead of getting rejected — the engine just stops there (see
+// run-flow.ts) until that node type's execution logic is built.
+export type FlowNode = StartNode | ContentNode | WaitNode | MenuNode | { id: string; type: string; position: NodePosition; data: unknown };
 
 export type FlowEdge = { id: string; source: string; target: string; sourceHandle?: string | null };
 
@@ -57,9 +83,10 @@ export type EngineEffect = {
 
 export type EngineResult = {
   effects: EngineEffect[];
-  // COMPLETED: reached the end of the graph (no next node). WAITING_INPUT: stopped at a node
-  // this phase doesn't know how to run yet (menu/pago/remarketing) — reserved for when those
-  // land in a later phase; nothing produces it today since only START/CONTENT exist.
+  // COMPLETED: reached the end of the graph (no next node). WAITING_INPUT: paused at a menu
+  // node, waiting for the customer's reply — `waitingNodeId` says which one, so the caller can
+  // resume from there (see resumeFlow) once the next inbound message arrives.
   status: 'COMPLETED' | 'WAITING_INPUT';
+  waitingNodeId?: string;
   context: Record<string, unknown>;
 };

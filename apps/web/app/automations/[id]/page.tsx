@@ -17,11 +17,13 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Plus, Save, Settings, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { MenuConfigModal } from './menu-config-modal';
 import { nodeTypes } from './flow-nodes';
 import { NodeConfigModal } from './node-config-modal';
 import { NodeLibrary } from './node-library';
 import { SimulatorPanel } from './simulator-panel';
-import { newNodeId, type ContentBlock, type ContentNodeData, type FlowDetail } from '../types';
+import { WaitConfigModal } from './wait-config-modal';
+import { newNodeId, newOptionId, NO_RESPONSE_HANDLE, type ContentBlock, type ContentNodeData, type FlowDetail, type MenuNodeData, type MenuOption, type WaitNodeData } from '../types';
 
 function toReactFlow(graph: FlowDetail['graph']): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = graph.nodes.map((node) => ({
@@ -31,7 +33,7 @@ function toReactFlow(graph: FlowDetail['graph']): { nodes: Node[]; edges: Edge[]
     data: (node.data as Record<string, unknown>) || {},
     deletable: node.type !== 'start',
   }));
-  const edges: Edge[] = graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target }));
+  const edges: Edge[] = graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle || undefined, animated: true }));
   return { nodes, edges };
 }
 
@@ -77,18 +79,39 @@ function EditorInner() {
   // render en vez de guardarse en `data`, así el JSON que se persiste se queda limpio.
   const displayNodes = useMemo(() => nodes.map((node) => {
     if (node.type === 'start') return { ...node, data: { keywords: flow?.triggerKeywords || [] } };
-    if (node.type === 'content') return { ...node, data: { ...node.data, onEdit: editNode, onDelete: deleteNode } };
+    if (node.type === 'content' || node.type === 'wait' || node.type === 'menu') return { ...node, data: { ...node.data, onEdit: editNode, onDelete: deleteNode } };
     return node;
   }), [nodes, flow?.triggerKeywords, editNode, deleteNode]);
 
+  // Un nodo de menú tiene una salida por opción (más "sin respuesta"), cada una identificada
+  // por su propio `sourceHandle` — así que solo se reemplaza la conexión existente que salga
+  // de ESE mismo handle, no cualquier otra que salga del mismo nodo. El lado destino no se
+  // deduplica: que varias opciones converjan en un mismo nodo es válido y esperado.
   const onConnect = useCallback((connection: Connection) => {
-    setEdges((current) => addEdge(connection, current.filter((edge) => edge.source !== connection.source && edge.target !== connection.target)));
+    setEdges((current) => addEdge({ ...connection, animated: true }, current.filter((edge) => !(edge.source === connection.source && edge.sourceHandle === connection.sourceHandle))));
   }, [setEdges]);
 
-  const addContentNode = () => {
+  const nextPosition = () => {
     const rightmost = nodes.reduce((max, node) => Math.max(max, node.position.x), 0);
+    return { x: rightmost + 320, y: 200 };
+  };
+
+  const addContentNode = () => {
     const id = newNodeId();
-    setNodes((current) => [...current, { id, type: 'content', position: { x: rightmost + 320, y: 200 }, data: { label: 'Contenido', blocks: [] } as ContentNodeData }]);
+    setNodes((current) => [...current, { id, type: 'content', position: nextPosition(), data: { label: 'Contenido', blocks: [] } as ContentNodeData }]);
+    setEditingNodeId(id);
+  };
+
+  const addWaitNode = () => {
+    const id = newNodeId();
+    setNodes((current) => [...current, { id, type: 'wait', position: nextPosition(), data: { seconds: 60 } as WaitNodeData }]);
+    setEditingNodeId(id);
+  };
+
+  const addMenuNode = () => {
+    const id = newNodeId();
+    const menuData: MenuNodeData = { label: 'Menú', prompt: '', options: [{ id: newOptionId(), text: '' }, { id: newOptionId(), text: '' }] };
+    setNodes((current) => [...current, { id, type: 'menu', position: nextPosition(), data: menuData }]);
     setEditingNodeId(id);
   };
 
@@ -100,6 +123,24 @@ function EditorInner() {
     setEditingNodeId(null);
   };
 
+  const saveWaitConfig = (seconds: number) => {
+    if (!editingNodeId) return;
+    setNodes((current) => current.map((node) => (node.id === editingNodeId ? { ...node, data: { seconds } } : node)));
+    setEditingNodeId(null);
+  };
+
+  const saveMenuConfig = (label: string, prompt: string, options: MenuOption[]) => {
+    if (!editingNodeId) return;
+    const nodeId = editingNodeId;
+    const validHandles = new Set(options.map((option) => option.id));
+    setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, data: { label, prompt, options } } : node)));
+    // Si se borró una opción, su conexión en el canvas queda apuntando a un handle que ya no
+    // existe — se quita para no dejar un edge "fantasma" (sourceHandle nunca vuelve a hacer
+    // match en nextNodeId, así que sin esto el flujo simplemente se detendría ahí en silencio).
+    setEdges((current) => current.filter((edge) => edge.source !== nodeId || !edge.sourceHandle || edge.sourceHandle === NO_RESPONSE_HANDLE || validHandles.has(edge.sourceHandle)));
+    setEditingNodeId(null);
+  };
+
   const persistGraph = async () => {
     setSaving(true);
     setSaveError('');
@@ -108,9 +149,15 @@ function EditorInner() {
         id: node.id,
         type: node.type,
         position: node.position,
-        data: node.type === 'content' ? { label: (node.data as ContentNodeData).label, blocks: (node.data as ContentNodeData).blocks } : {},
+        data: node.type === 'content'
+          ? { label: (node.data as ContentNodeData).label, blocks: (node.data as ContentNodeData).blocks }
+          : node.type === 'wait'
+            ? { seconds: (node.data as WaitNodeData).seconds }
+            : node.type === 'menu'
+              ? { label: (node.data as MenuNodeData).label, prompt: (node.data as MenuNodeData).prompt, options: (node.data as MenuNodeData).options }
+              : {},
       }));
-      const cleanEdges = edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target }));
+      const cleanEdges = edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle || undefined }));
       const updated = await apiFetch<FlowDetail>(`/automations/flows/${flowId}`, {
         method: 'PATCH',
         body: JSON.stringify({ graph: { schemaVersion: 1, nodes: cleanNodes, edges: cleanEdges } }),
@@ -160,7 +207,7 @@ function EditorInner() {
         <div className="flow-editor-toolbar-right">
           <div className="node-library-anchor">
             <button className={`button primary small`} type="button" onClick={() => setLibraryOpen((v) => !v)}><Plus size={14} /> Añadir módulo</button>
-            {libraryOpen && <NodeLibrary onSelectContent={addContentNode} onClose={() => setLibraryOpen(false)} />}
+            {libraryOpen && <NodeLibrary onSelectContent={addContentNode} onSelectWait={addWaitNode} onSelectMenu={addMenuNode} onClose={() => setLibraryOpen(false)} />}
           </div>
           <button className="button small" type="button" onClick={openConfig}><Settings size={14} /> Configurar</button>
           <button className={`button small ${simulatorOpen ? 'info' : ''}`} type="button" onClick={() => setSimulatorOpen((v) => !v)}><Sparkles size={14} /> Simular</button>
@@ -181,6 +228,7 @@ function EditorInner() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
+            defaultEdgeOptions={{ animated: true }}
             fitView
             deleteKeyCode={null}
           >
@@ -197,6 +245,24 @@ function EditorInner() {
           blocks={(editingNode.data as ContentNodeData).blocks}
           onClose={() => setEditingNodeId(null)}
           onSave={saveNodeConfig}
+        />
+      )}
+
+      {editingNode && editingNode.type === 'wait' && (
+        <WaitConfigModal
+          seconds={(editingNode.data as WaitNodeData).seconds}
+          onClose={() => setEditingNodeId(null)}
+          onSave={saveWaitConfig}
+        />
+      )}
+
+      {editingNode && editingNode.type === 'menu' && (
+        <MenuConfigModal
+          label={(editingNode.data as MenuNodeData).label}
+          prompt={(editingNode.data as MenuNodeData).prompt}
+          options={(editingNode.data as MenuNodeData).options}
+          onClose={() => setEditingNodeId(null)}
+          onSave={saveMenuConfig}
         />
       )}
 

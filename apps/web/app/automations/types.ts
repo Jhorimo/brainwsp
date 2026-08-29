@@ -14,8 +14,13 @@ export type ContentBlock =
 
 export type StartNodeData = Record<string, never>;
 export type ContentNodeData = { label: string; blocks: ContentBlock[] };
+export type WaitNodeData = { seconds: number };
+export type MenuOption = { id: string; text: string };
+export type MenuNodeData = { label: string; prompt: string; options: MenuOption[] };
 
-export type FlowNodeType = 'start' | 'content';
+export const NO_RESPONSE_HANDLE = 'no-response';
+
+export type FlowNodeType = 'start' | 'content' | 'wait' | 'menu';
 
 export type FlowFolder = { id: string; name: string };
 export type FlowInstance = { id: string; name: string; phoneNumber?: string | null; displayName?: string | null };
@@ -35,7 +40,7 @@ export type FlowSummary = {
 export type FlowDetail = FlowSummary & {
   companyId: string;
   folderId: string | null;
-  graph: { schemaVersion: 1; nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: unknown }>; edges: Array<{ id: string; source: string; target: string }> };
+  graph: { schemaVersion: 1; nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: unknown }>; edges: Array<{ id: string; source: string; target: string; sourceHandle?: string | null }> };
 };
 
 export type FlowStats = { total: number; active: number; withAi: number; shared: number };
@@ -66,7 +71,7 @@ export function blockMediaSrc(mediaUrl: string, mimeType?: string, fileName?: st
   return `${API_URL}/automations/media/${objectName}?${params.toString()}`;
 }
 
-export type SimulateResult = { triggered: boolean; effects: SimulateEffect[]; status: 'COMPLETED' | 'WAITING_INPUT'; context: Record<string, unknown> };
+export type SimulateResult = { triggered: boolean; effects: SimulateEffect[]; status: 'COMPLETED' | 'WAITING_INPUT'; waitingNodeId?: string; context: Record<string, unknown> };
 
 export function newBlockId() {
   return `blk_${Math.random().toString(36).slice(2, 10)}`;
@@ -74,4 +79,8 @@ export function newBlockId() {
 
 export function newNodeId() {
   return `node_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function newOptionId() {
+  return `opt_${Math.random().toString(36).slice(2, 10)}`;
 }

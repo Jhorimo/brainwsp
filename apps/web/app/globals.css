@@ -934,3 +934,56 @@ tr:last-child td { border-bottom: 0; }
 .node-library-tile-icon.orange { background: linear-gradient(145deg,#fb923c,#ea580c); }
 .node-library-tile-icon.green { background: linear-gradient(145deg,#4ade80,#16a34a); }
 .node-library-soon { position: absolute; top: 4px; right: 4px; background: var(--warning-soft); color: var(--warning); font-size: 7px; font-weight: 800; padding: 2px 4px; border-radius: 5px; text-transform: uppercase; letter-spacing: .3px; }
+
+/* Nodo Temporizador (Espera) */
+.flow-node-wait { border-color: #e3d9fb; }
+.flow-node-icon.wait { background: linear-gradient(145deg,#a78bfa,#7c3aed); color: white; }
+.flow-node-badge.wait { background: #efe6fe; color: #7c3aed; }
+.flow-node-dot.wait { background: #7c3aed; }
+.wait-node-countdown { border: 1px solid #e3d9fb; background: linear-gradient(180deg,#f6f2ff,#ffffff); border-radius: 12px; padding: 14px 10px 12px; text-align: center; }
+.wait-node-time { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 28px; font-weight: 800; letter-spacing: -.5px; color: var(--text); font-variant-numeric: tabular-nums; }
+.wait-node-colon { color: #c4b5fd; }
+.wait-node-labels { display: flex; justify-content: center; gap: 34px; font-size: 8.5px; font-weight: 800; color: var(--muted); letter-spacing: .5px; margin-top: 2px; }
+.wait-node-bar { height: 4px; border-radius: 3px; background: #ece5fc; margin-top: 12px; overflow: hidden; }
+.wait-node-bar-fill { height: 100%; width: 55%; border-radius: 3px; background: linear-gradient(90deg,#c4b5fd,#7c3aed); }
+.wait-config-modal { width: min(360px, 100%); }
+
+/* Selector de duración (Sec/Min/Hour/Day) — usado en el bloque Retraso y en el nodo Temporizador */
+.duration-picker { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface-2); }
+.duration-picker-stepper { display: flex; align-items: center; justify-content: center; gap: 22px; }
+.duration-picker-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: white; color: var(--text); display: grid; place-items: center; flex-shrink: 0; }
+.duration-picker-btn:hover:not(:disabled) { border-color: #9dbbfb; color: var(--brand); }
+.duration-picker-btn:disabled { opacity: .4; }
+.duration-picker-value { min-width: 70px; text-align: center; }
+.duration-picker-value strong { display: block; font-size: 26px; font-weight: 800; line-height: 1; }
+.duration-picker-value span { display: block; font-size: 8.5px; font-weight: 800; color: var(--muted); letter-spacing: .5px; margin-top: 4px; }
+.duration-picker-units { display: flex; gap: 6px; margin-top: 14px; }
+.duration-picker-unit { flex: 1; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: white; font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.duration-picker-unit.active { background: var(--brand); border-color: var(--brand); color: white; }
+.duration-picker-unit:not(.active):hover { background: var(--surface-2); color: var(--text); }
+
+/* Nodo Menú (branching) */
+.flow-node-menu { border-color: #e3d9fb; }
+.flow-node-icon.menu { background: linear-gradient(145deg,#a78bfa,#7c3aed); color: white; }
+.flow-node-badge.menu { background: #efe6fe; color: #7c3aed; }
+.flow-node-menu-prompt { font-size: 10.5px; color: var(--muted); padding-bottom: 8px; border-bottom: 1px solid #f0f2f6; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-node-option-row { position: relative; display: flex; align-items: center; padding: 7px 18px 7px 0; font-size: 10.5px; color: var(--text); border-top: 1px solid #f5f6f8; }
+.flow-node-option-row:first-of-type { border-top: 0; }
+.flow-node-option-row.no-response { color: var(--danger); background: var(--danger-soft); margin: 4px -12px -10px; padding: 8px 30px 8px 12px; border-top: 1px dashed #f1c9cc; }
+.flow-node-option-row .react-flow__handle { background: var(--success); width: 9px; height: 9px; border: 2px solid white; }
+.flow-node-option-row.no-response .react-flow__handle { background: var(--danger); }
+
+/* Modal de configuración del Menú */
+.menu-config-modal { width: min(560px, 100%); }
+.menu-config-intro { display: flex; gap: 10px; padding: 12px; background: var(--success-soft); border: 1px solid #bfe6c9; border-radius: 10px; }
+.menu-config-intro strong { display: block; font-size: 11px; color: #1a6b3f; }
+.menu-config-intro p { margin: 4px 0 0; font-size: 10.5px; color: #2c7a4d; line-height: 1.5; }
+.menu-config-intro svg { flex-shrink: 0; margin-top: 1px; color: #1a6b3f; }
+.menu-option-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.menu-option-row { display: flex; align-items: center; gap: 9px; }
+.menu-option-index { width: 22px; height: 22px; flex-shrink: 0; border-radius: 7px; background: var(--success-soft); color: var(--success); font-size: 10.5px; font-weight: 800; display: grid; place-items: center; }
+.menu-option-row input { flex: 1; min-width: 0; }
+.menu-add-option-btn { width: 100%; margin-top: 8px; height: 38px; border: 1px dashed #bfe6c9; border-radius: 10px; background: var(--success-soft); color: var(--success); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.menu-add-option-btn:hover { background: #dcf5e4; }
+.menu-config-hint { display: flex; gap: 9px; margin-top: 14px; padding: 11px 12px; background: var(--brand-soft); border-radius: 10px; font-size: 10.5px; color: #2c4f8f; line-height: 1.5; }
+.menu-config-hint svg { flex-shrink: 0; margin-top: 1px; color: var(--brand); }

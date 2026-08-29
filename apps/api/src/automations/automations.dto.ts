@@ -79,4 +79,11 @@ export class SimulateFlowDto {
   @MinLength(1)
   @MaxLength(4000)
   message!: string;
+
+  // Enviado por el simulador cuando la corrida anterior quedó pausada en un nodo de Menú —
+  // este mensaje es la respuesta del cliente a esas opciones, no una nueva palabra clave.
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  resumeFromNodeId?: string;
 }

@@ -1,8 +1,14 @@
 'use client';
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { FileText, Image as ImageIcon, Mic, MessageSquareText, Pencil, Play, Timer, Trash2, Video } from 'lucide-react';
-import type { ContentBlock, ContentNodeData } from '../types';
+import { FileText, Image as ImageIcon, ListTree, Mic, MessageSquareText, Pencil, Play, Timer, Trash2, Video } from 'lucide-react';
+import { NO_RESPONSE_HANDLE, type ContentBlock, type ContentNodeData, type MenuNodeData, type WaitNodeData } from '../types';
+
+function formatMinSec(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return { minutes: String(minutes).padStart(2, '0'), seconds: String(seconds).padStart(2, '0') };
+}
 
 const BLOCK_ICONS: Record<ContentBlock['kind'], typeof MessageSquareText> = {
   text: MessageSquareText,
@@ -84,4 +90,72 @@ export function ContentNodeView({ data, id }: NodeProps) {
   );
 }
 
-export const nodeTypes = { start: StartNodeView, content: ContentNodeView };
+export function WaitNodeView({ data, id }: NodeProps) {
+  const nodeData = data as WaitNodeData & { onEdit?: (nodeId: string) => void; onDelete?: (nodeId: string) => void };
+  const { minutes, seconds } = formatMinSec(Math.max(0, nodeData.seconds || 0));
+
+  return (
+    <div className="flow-node flow-node-wait">
+      <Handle type="target" position={Position.Left} />
+      <div className="flow-node-head">
+        <div className="flow-node-icon wait"><Timer size={14} /></div>
+        <div>
+          <strong>TEMPORIZADOR</strong>
+          <span>Duración de espera</span>
+        </div>
+        <span className="flow-node-badge wait">WAIT</span>
+        <button type="button" className="icon-button ghost small nodrag flow-node-action" title="Editar duración" onClick={() => nodeData.onEdit?.(id)}><Pencil size={13} /></button>
+        <button type="button" className="icon-button ghost small nodrag flow-node-action" title="Eliminar nodo" onClick={() => nodeData.onDelete?.(id)}><Trash2 size={13} /></button>
+      </div>
+      <div className="flow-node-body">
+        <div className="wait-node-countdown">
+          <div className="wait-node-time">
+            <strong>{minutes}</strong>
+            <span className="wait-node-colon">:</span>
+            <strong>{seconds}</strong>
+          </div>
+          <div className="wait-node-labels"><span>Min</span><span>Seg</span></div>
+          <div className="wait-node-bar"><div className="wait-node-bar-fill" /></div>
+        </div>
+      </div>
+      <div className="flow-node-foot"><span className="flow-node-dot wait" /> Pausar flujo</div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}
+
+export function MenuNodeView({ data, id }: NodeProps) {
+  const nodeData = data as MenuNodeData & { onEdit?: (nodeId: string) => void; onDelete?: (nodeId: string) => void };
+  const options = nodeData.options || [];
+
+  return (
+    <div className="flow-node flow-node-menu">
+      <Handle type="target" position={Position.Left} />
+      <div className="flow-node-head">
+        <div className="flow-node-icon menu"><ListTree size={14} /></div>
+        <div>
+          <strong>{nodeData.label || 'Menú'}</strong>
+          <span>Menú de opciones</span>
+        </div>
+        <span className="flow-node-badge menu">MENU</span>
+        <button type="button" className="icon-button ghost small nodrag flow-node-action" title="Editar menú" onClick={() => nodeData.onEdit?.(id)}><Pencil size={13} /></button>
+        <button type="button" className="icon-button ghost small nodrag flow-node-action" title="Eliminar nodo" onClick={() => nodeData.onDelete?.(id)}><Trash2 size={13} /></button>
+      </div>
+      <div className="flow-node-body">
+        <div className="flow-node-menu-prompt">{nodeData.prompt?.trim() || 'Escribe un mensaje...'}</div>
+        {options.map((option, index) => (
+          <div className="flow-node-option-row" key={option.id}>
+            <span>{index + 1}. {option.text.trim() || `Opción ${index + 1}`}</span>
+            <Handle type="source" position={Position.Right} id={option.id} style={{ position: 'absolute', right: -7, top: '50%', transform: 'translateY(-50%)' }} />
+          </div>
+        ))}
+        <div className="flow-node-option-row no-response">
+          <span>Sin respuesta</span>
+          <Handle type="source" position={Position.Right} id={NO_RESPONSE_HANDLE} style={{ position: 'absolute', right: -7, top: '50%', transform: 'translateY(-50%)' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const nodeTypes = { start: StartNodeView, content: ContentNodeView, wait: WaitNodeView, menu: MenuNodeView };

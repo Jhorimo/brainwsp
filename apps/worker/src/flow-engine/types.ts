@@ -25,7 +25,25 @@ export type ContentNode = {
   data: { label: string; blocks: ContentBlock[] };
 };
 
-export type FlowNode = StartNode | ContentNode | { id: string; type: string; position: NodePosition; data: unknown };
+export type WaitNode = {
+  id: string;
+  type: 'wait';
+  position: NodePosition;
+  data: { seconds: number };
+};
+
+export type MenuOption = { id: string; text: string };
+
+export type MenuNode = {
+  id: string;
+  type: 'menu';
+  position: NodePosition;
+  data: { label: string; prompt: string; options: MenuOption[] };
+};
+
+export const NO_RESPONSE_HANDLE = 'no-response';
+
+export type FlowNode = StartNode | ContentNode | WaitNode | MenuNode | { id: string; type: string; position: NodePosition; data: unknown };
 
 export type FlowEdge = { id: string; source: string; target: string; sourceHandle?: string | null };
 
@@ -52,5 +70,6 @@ export type EngineEffect = {
 export type EngineResult = {
   effects: EngineEffect[];
   status: 'COMPLETED' | 'WAITING_INPUT';
+  waitingNodeId?: string;
   context: Record<string, unknown>;
 };

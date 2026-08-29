@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { CreateFlowDto, UpdateFlowDto } from './automations.dto';
 import { emptyGraph } from './engine/graph';
 import { matchesKeyword } from './engine/keyword-match';
-import { runFlow } from './engine/run-flow';
+import { resumeFlow, runFlow } from './engine/run-flow';
 import type { FlowGraph } from './engine/types';
 
 const INSTANCE_SELECT = { id: true, name: true, phoneNumber: true, displayName: true } satisfies Prisma.WhatsAppInstanceSelect;
@@ -167,12 +167,19 @@ export class AutomationsService {
   // FlowExecution en schema.prisma): es una prueba efímera para quien está editando, no una
   // conversación real. Exige la misma palabra clave que exigiría producción para que "lo que
   // ves en el simulador" sea fiel a "lo que pasaría de verdad".
-  async simulate(companyId: string, id: string, message: string) {
+  async simulate(companyId: string, id: string, message: string, resumeFromNodeId?: string) {
     const flow = await this.getOwnedFlow(companyId, id);
+    const graph = flow.graph as unknown as FlowGraph;
+
+    if (resumeFromNodeId) {
+      const result = resumeFlow(graph, resumeFromNodeId, message);
+      return { triggered: true, ...result };
+    }
+
     if (!matchesKeyword(flow.triggerKeywords, message)) {
       return { triggered: false, effects: [], status: 'COMPLETED' as const, context: {} };
     }
-    const result = runFlow(flow.graph as unknown as FlowGraph);
+    const result = runFlow(graph);
     return { triggered: true, ...result };
   }
 }

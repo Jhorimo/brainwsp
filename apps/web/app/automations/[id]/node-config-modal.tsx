@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, Mic, MessageSquareText, Paperclip, Timer, Trash2, Upload, Video, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { newBlockId, type ContentBlock } from '../types';
+import { DurationPicker } from './duration-picker';
 
 type Props = {
   label: string;
@@ -119,10 +120,7 @@ export function NodeConfigModal({ label: initialLabel, blocks: initialBlocks, on
                     <textarea value={block.text} onChange={(e) => updateBlock(block.id, { text: e.target.value } as Partial<ContentBlock>)} placeholder="Escribe el mensaje..." rows={3} />
                   )}
                   {block.kind === 'delay' && (
-                    <div className="field-with-action">
-                      <input type="number" min={1} max={3600} value={block.seconds} onChange={(e) => updateBlock(block.id, { seconds: Math.max(1, Number(e.target.value) || 1) } as Partial<ContentBlock>)} style={{ maxWidth: 110 }} />
-                      <span className="row-sub" style={{ marginTop: 0 }}>segundos de pausa antes de continuar</span>
-                    </div>
+                    <DurationPicker seconds={block.seconds} onChange={(seconds) => updateBlock(block.id, { seconds } as Partial<ContentBlock>)} />
                   )}
                   {(block.kind === 'image' || block.kind === 'video' || block.kind === 'audio' || block.kind === 'file') && (
                     <div className="node-block-media">
