@@ -1,15 +1,16 @@
 import { MessageStatus, MessageType, type PrismaClient } from '@prisma/client';
 import { BufferJSON, proto, type WAMessage } from '@whiskeysockets/baileys';
-import { Worker, type Job } from 'bullmq';
+import { Worker, type Job, type Queue } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import type { Logger } from 'pino';
+import { resumeFlowDispatch, type FlowResumeJobData } from './automation-engine.js';
 import { config } from './config.js';
 import type { RealtimePublisher } from './realtime.js';
 import type { SessionManager } from './session-manager.js';
 import { downloadObjectBuffer, objectNameFromUrl } from './storage.js';
 import { transcodeToOggOpus } from './audio-transcode.js';
 
-type OutboundJobData = { messageId: string } | { instanceId: string; targetMessageId: string; emoji: string } | { instanceId: string; targetMessageId: string };
+type OutboundJobData = { messageId: string } | { instanceId: string; targetMessageId: string; emoji: string } | { instanceId: string; targetMessageId: string } | FlowResumeJobData;
 
 export class OutboundWorker {
   private readonly connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
@@ -20,6 +21,7 @@ export class OutboundWorker {
     private readonly sessions: SessionManager,
     private readonly realtime: RealtimePublisher,
     private readonly logger: Logger,
+    private readonly outboundQueue: Queue,
   ) {
     this.worker = new Worker('whatsapp.outbound', (job) => this.process(job), {
       connection: this.connection,
@@ -40,6 +42,10 @@ export class OutboundWorker {
     if (job.name === 'delete-message') {
       const data = job.data as { instanceId: string; targetMessageId: string };
       return this.sessions.deleteMessage(data.instanceId, data.targetMessageId);
+    }
+
+    if (job.name === 'flow-resume') {
+      return resumeFlowDispatch(this.prisma, this.outboundQueue, this.realtime, this.logger, job.data as FlowResumeJobData);
     }
 
     const { messageId } = job.data as { messageId: string };

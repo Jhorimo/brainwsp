@@ -13,7 +13,7 @@ const realtime = new RealtimePublisher();
 const outboundQueueConnection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 const outboundQueue = new Queue('whatsapp.outbound', { connection: outboundQueueConnection });
 const sessions = new SessionManager(prisma, realtime, logger, outboundQueue);
-const outbound = new OutboundWorker(prisma, sessions, realtime, logger);
+const outbound = new OutboundWorker(prisma, sessions, realtime, logger, outboundQueue);
 const commands = new CommandWorker(sessions, logger);
 
 async function start() {

@@ -4,10 +4,13 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { FileText, Image as ImageIcon, ListTree, Mic, MessageSquareText, Pencil, Play, Timer, Trash2, Video } from 'lucide-react';
 import { NO_RESPONSE_HANDLE, type ContentBlock, type ContentNodeData, type MenuNodeData, type WaitNodeData } from '../types';
 
-function formatMinSec(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return { minutes: String(minutes).padStart(2, '0'), seconds: String(seconds).padStart(2, '0') };
+// Escala la unidad mostrada según la magnitud — a partir de DurationPicker un nodo Wait puede
+// guardar días/horas, y mostrarlos siempre como MM:SS (ej. "2880:00" para 2 días) era ilegible.
+function formatDuration(totalSeconds: number) {
+  const s = Math.max(0, totalSeconds);
+  if (s < 3600) return { primary: Math.floor(s / 60), secondary: s % 60, labelPrimary: 'Min', labelSecondary: 'Seg' };
+  if (s < 86400) return { primary: Math.floor(s / 3600), secondary: Math.floor((s % 3600) / 60), labelPrimary: 'Hora', labelSecondary: 'Min' };
+  return { primary: Math.floor(s / 86400), secondary: Math.floor((s % 86400) / 3600), labelPrimary: 'Día', labelSecondary: 'Hora' };
 }
 
 const BLOCK_ICONS: Record<ContentBlock['kind'], typeof MessageSquareText> = {
@@ -92,7 +95,7 @@ export function ContentNodeView({ data, id }: NodeProps) {
 
 export function WaitNodeView({ data, id }: NodeProps) {
   const nodeData = data as WaitNodeData & { onEdit?: (nodeId: string) => void; onDelete?: (nodeId: string) => void };
-  const { minutes, seconds } = formatMinSec(Math.max(0, nodeData.seconds || 0));
+  const { primary, secondary, labelPrimary, labelSecondary } = formatDuration(nodeData.seconds || 0);
 
   return (
     <div className="flow-node flow-node-wait">
@@ -110,11 +113,11 @@ export function WaitNodeView({ data, id }: NodeProps) {
       <div className="flow-node-body">
         <div className="wait-node-countdown">
           <div className="wait-node-time">
-            <strong>{minutes}</strong>
+            <strong>{String(primary).padStart(2, '0')}</strong>
             <span className="wait-node-colon">:</span>
-            <strong>{seconds}</strong>
+            <strong>{String(secondary).padStart(2, '0')}</strong>
           </div>
-          <div className="wait-node-labels"><span>Min</span><span>Seg</span></div>
+          <div className="wait-node-labels"><span>{labelPrimary}</span><span>{labelSecondary}</span></div>
           <div className="wait-node-bar"><div className="wait-node-bar-fill" /></div>
         </div>
       </div>
