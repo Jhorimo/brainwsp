@@ -105,7 +105,7 @@ export class AdminService {
     return this.prisma.plan.findMany({ orderBy: { price: 'asc' }, include: { _count: { select: { companies: true } } } });
   }
 
-  createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number }) {
+  createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number }) {
     return this.prisma.plan.create({
       data: {
         name: input.name.trim(),
@@ -114,6 +114,7 @@ export class AdminService {
         priceUsd: input.priceUsd ?? 0,
         maxAgents: input.maxAgents,
         maxInstances: input.maxInstances,
+        maxMessages: input.maxMessages,
       },
     }).catch((error: unknown) => {
       if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe un plan con ese nombre');
@@ -121,7 +122,7 @@ export class AdminService {
     });
   }
 
-  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; active?: boolean }) {
+  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; active?: boolean }) {
     const plan = await this.prisma.plan.findUnique({ where: { id } });
     if (!plan) throw new NotFoundException('Plan no encontrado');
     return this.prisma.plan.update({
@@ -133,6 +134,7 @@ export class AdminService {
         ...(input.priceUsd !== undefined ? { priceUsd: input.priceUsd } : {}),
         ...(input.maxAgents !== undefined ? { maxAgents: input.maxAgents } : {}),
         ...(input.maxInstances !== undefined ? { maxInstances: input.maxInstances } : {}),
+        ...(input.maxMessages !== undefined ? { maxMessages: input.maxMessages } : {}),
         ...(input.active !== undefined ? { active: input.active } : {}),
       },
     });

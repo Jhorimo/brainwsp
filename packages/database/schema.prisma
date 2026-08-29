@@ -152,6 +152,10 @@ model Plan {
   priceUsd     Int       @default(0)
   maxAgents    Int?
   maxInstances Int?
+  // Cuota mensual de mensajes (entrantes + salientes) incluida en el plan — null significa
+  // sin límite. La cuota "de hoy" que se muestra en el dashboard se deriva de esta (mensual /
+  // 30) en vez de guardarse aparte, para no tener dos números que se puedan desincronizar.
+  maxMessages  Int?
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

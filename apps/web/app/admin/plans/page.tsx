@@ -8,7 +8,7 @@ import { apiFetch } from '@/lib/api';
 
 type Plan = {
   id: string; name: string; billingCycle: string; price: number; priceUsd: number;
-  maxAgents?: number | null; maxInstances?: number | null; active: boolean;
+  maxAgents?: number | null; maxInstances?: number | null; maxMessages?: number | null; active: boolean;
   _count: { companies: number };
 };
 
@@ -29,8 +29,8 @@ export default function AdminPlansPage() {
   const [modal, setModal] = useState(false);
   const [editPlan, setEditPlan] = useState<Plan | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '' });
-  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '' });
+  const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '' });
+  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '' });
 
   const load = useCallback(async () => {
     try { setPlans(await apiFetch<Plan[]>('/admin/plans')); }
@@ -52,10 +52,11 @@ export default function AdminPlansPage() {
           priceUsd: form.priceUsd ? Math.round(Number(form.priceUsd) * 100) : 0,
           maxAgents: form.maxAgents ? Number(form.maxAgents) : undefined,
           maxInstances: form.maxInstances ? Number(form.maxInstances) : undefined,
+          maxMessages: form.maxMessages ? Number(form.maxMessages) : undefined,
         }),
       });
       setModal(false);
-      setForm({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '' });
+      setForm({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '' });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el plan'); }
     finally { setSaving(false); }
@@ -69,6 +70,7 @@ export default function AdminPlansPage() {
       priceUsd: plan.priceUsd ? (plan.priceUsd / 100).toFixed(2) : '',
       maxAgents: plan.maxAgents ? String(plan.maxAgents) : '',
       maxInstances: plan.maxInstances ? String(plan.maxInstances) : '',
+      maxMessages: plan.maxMessages ? String(plan.maxMessages) : '',
     });
     setEditPlan(plan);
   };
@@ -86,6 +88,7 @@ export default function AdminPlansPage() {
           priceUsd: editForm.priceUsd ? Math.round(Number(editForm.priceUsd) * 100) : 0,
           maxAgents: editForm.maxAgents ? Number(editForm.maxAgents) : null,
           maxInstances: editForm.maxInstances ? Number(editForm.maxInstances) : null,
+          maxMessages: editForm.maxMessages ? Number(editForm.maxMessages) : null,
         }),
       });
       setPlans((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
@@ -118,7 +121,7 @@ export default function AdminPlansPage() {
             <div className="stat-label">{plan.name} · {cycleLabels[plan.billingCycle] || plan.billingCycle}</div>
             <div className="stat-value">{formatPrices(plan)}</div>
             <div className="stat-meta">
-              {plan._count.companies} cliente(s) · {plan.maxAgents ? `${plan.maxAgents} agentes` : 'agentes ilimitados'} · {plan.maxInstances ? `${plan.maxInstances} WhatsApp` : 'WhatsApp ilimitado'}
+              {plan._count.companies} cliente(s) · {plan.maxAgents ? `${plan.maxAgents} agentes` : 'agentes ilimitados'} · {plan.maxInstances ? `${plan.maxInstances} WhatsApp` : 'WhatsApp ilimitado'} · {plan.maxMessages ? `${plan.maxMessages.toLocaleString('es-PE')} msj/mes` : 'mensajes ilimitados'}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
               <button className="button small" onClick={() => openEdit(plan)}><Pencil size={13} />Editar</button>
@@ -148,6 +151,7 @@ export default function AdminPlansPage() {
                 <div className="field"><label>Precio en dólares (US$)</label><input type="number" min="0" step="0.01" value={form.priceUsd} onChange={(e) => setForm({ ...form, priceUsd: e.target.value })} placeholder="27.00" /></div>
                 <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={form.maxAgents} onChange={(e) => setForm({ ...form, maxAgents: e.target.value })} placeholder="10" /></div>
                 <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={form.maxInstances} onChange={(e) => setForm({ ...form, maxInstances: e.target.value })} placeholder="3" /></div>
+                <div className="field"><label>Cuota de mensajes al mes (opcional)</label><input type="number" min="1" value={form.maxMessages} onChange={(e) => setForm({ ...form, maxMessages: e.target.value })} placeholder="75000" /></div>
               </div>
             </div>
             <div className="modal-actions">
@@ -176,6 +180,7 @@ export default function AdminPlansPage() {
                 <div className="field"><label>Precio en dólares (US$)</label><input type="number" min="0" step="0.01" value={editForm.priceUsd} onChange={(e) => setEditForm({ ...editForm, priceUsd: e.target.value })} /></div>
                 <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={editForm.maxAgents} onChange={(e) => setEditForm({ ...editForm, maxAgents: e.target.value })} placeholder="Ilimitado" /></div>
                 <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={editForm.maxInstances} onChange={(e) => setEditForm({ ...editForm, maxInstances: e.target.value })} placeholder="Ilimitado" /></div>
+                <div className="field"><label>Cuota de mensajes al mes (opcional)</label><input type="number" min="1" value={editForm.maxMessages} onChange={(e) => setEditForm({ ...editForm, maxMessages: e.target.value })} placeholder="Ilimitado" /></div>
               </div>
             </div>
             <div className="modal-actions">

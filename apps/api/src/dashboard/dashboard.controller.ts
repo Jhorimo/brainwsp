@@ -1,6 +1,6 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ConversationStatus, InstanceStatus, MessageDirection } from '@prisma/client';
+import { ConversationStatus, InstanceStatus, MessageDirection, WhatsAppProvider } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequireModule } from '../common/decorators/require-module.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -65,21 +65,28 @@ export class DashboardController {
 
     const messages = await this.prisma.message.findMany({
       where: { companyId: user.companyId, createdAt: { gte: start, lt: end } },
-      select: { createdAt: true, direction: true },
+      select: { createdAt: true, direction: true, conversationId: true },
     });
 
     const days: string[] = [];
     for (const cursor = new Date(start); cursor < end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
       days.push(localDayKey(cursor));
     }
-    const counts = new Map(days.map((day) => [day, { inbound: 0, outbound: 0 }]));
+    // `interactions` = conversaciones DISTINTAS con al menos un mensaje ese día — a diferencia
+    // de inbound+outbound (volumen), no crece solo porque una misma charla tuvo muchos
+    // mensajes; mide cuántas charlas separadas hubo, no cuánto se escribió.
+    const counts = new Map(days.map((day) => [day, { inbound: 0, outbound: 0, conversationIds: new Set<string>() }]));
     for (const message of messages) {
       const bucket = counts.get(localDayKey(message.createdAt));
       if (!bucket) continue;
       if (message.direction === MessageDirection.INBOUND) bucket.inbound += 1;
       else bucket.outbound += 1;
+      bucket.conversationIds.add(message.conversationId);
     }
-    return days.map((date) => ({ date, ...counts.get(date)! }));
+    return days.map((date) => {
+      const bucket = counts.get(date)!;
+      return { date, inbound: bucket.inbound, outbound: bucket.outbound, interactions: bucket.conversationIds.size };
+    });
   }
 
   // Per-agent KPI for managerial control: messages a human agent actually sent (not
@@ -198,5 +205,103 @@ export class DashboardController {
         })),
         noStage: countByDeptStage.get(`${department.id}:none`) || 0,
       }));
+  }
+
+  // Same per-day-with-zeros shape as message-volume, but counting new Contact rows instead
+  // of messages — feeds the "Nuevos Contactos" tab of the activity chart.
+  @Get('contacts-new')
+  async contactsNew(
+    @CurrentUser() user: JwtUser,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('tzOffsetMinutes') tzOffsetMinutesRaw?: string,
+  ) {
+    const { start, end } = this.resolveRange(from, to);
+    const tzOffsetMinutes = Number(tzOffsetMinutesRaw) || 0;
+    const localDayKey = (date: Date) => new Date(date.getTime() - tzOffsetMinutes * 60_000).toISOString().slice(0, 10);
+
+    const contacts = await this.prisma.contact.findMany({
+      where: { companyId: user.companyId, createdAt: { gte: start, lt: end } },
+      select: { createdAt: true },
+    });
+
+    const days: string[] = [];
+    for (const cursor = new Date(start); cursor < end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      days.push(localDayKey(cursor));
+    }
+    const counts = new Map(days.map((day) => [day, 0]));
+    for (const contact of contacts) {
+      const bucket = localDayKey(contact.createdAt);
+      if (counts.has(bucket)) counts.set(bucket, counts.get(bucket)! + 1);
+    }
+    return days.map((date) => ({ date, count: counts.get(date)! }));
+  }
+
+  // Message count bucketed by hour-of-day (0-23), summed across every day in the range —
+  // "¿a qué hora escriben más los clientes?" for staffing/AI-schedule decisions. Bucketing is
+  // done in JS (not SQL EXTRACT(HOUR ...)) so the same tzOffsetMinutes convention as the other
+  // range endpoints applies, instead of bucketing by the DB server's own timezone.
+  @Get('hourly-distribution')
+  async hourlyDistribution(
+    @CurrentUser() user: JwtUser,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('tzOffsetMinutes') tzOffsetMinutesRaw?: string,
+  ) {
+    const { start, end } = this.resolveRange(from, to);
+    const tzOffsetMinutes = Number(tzOffsetMinutesRaw) || 0;
+
+    const messages = await this.prisma.message.findMany({
+      where: { companyId: user.companyId, createdAt: { gte: start, lt: end } },
+      select: { createdAt: true },
+    });
+
+    const counts = new Array(24).fill(0);
+    for (const message of messages) {
+      const localHour = new Date(message.createdAt.getTime() - tzOffsetMinutes * 60_000).getUTCHours();
+      counts[localHour] += 1;
+    }
+    return counts.map((count, hour) => ({ hour, count }));
+  }
+
+  // "¿Cuánto me falta antes de que me corten?" — cuota mensual del plan (mensajes entrantes +
+  // salientes contados desde el 1 del mes en curso) y cuándo vence la licencia, para el banner
+  // y las barras de uso del dashboard. La cuota "de hoy" se deriva de la mensual (÷30) en vez
+  // de guardarse aparte, para no tener dos límites que se puedan desincronizar.
+  @Get('plan-usage')
+  async planUsage(@CurrentUser() user: JwtUser) {
+    const company = await this.prisma.company.findUniqueOrThrow({
+      where: { id: user.companyId },
+      select: { licenseRenewsAt: true, plan: { select: { name: true, maxMessages: true } } },
+    });
+    const primaryInstance = await this.prisma.whatsAppInstance.findFirst({
+      where: { companyId: user.companyId, active: true },
+      select: { provider: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const todayStart = new Date(now); todayStart.setUTCHours(0, 0, 0, 0);
+    const [messagesThisMonth, messagesToday] = await Promise.all([
+      this.prisma.message.count({ where: { companyId: user.companyId, createdAt: { gte: monthStart } } }),
+      this.prisma.message.count({ where: { companyId: user.companyId, createdAt: { gte: todayStart } } }),
+    ]);
+
+    const maxMessages = company.plan?.maxMessages ?? null;
+    const daysUntilRenewal = company.licenseRenewsAt
+      ? Math.ceil((company.licenseRenewsAt.getTime() - now.getTime()) / (24 * 3600 * 1000))
+      : null;
+
+    return {
+      planName: company.plan?.name ?? null,
+      mode: primaryInstance?.provider === WhatsAppProvider.META_CLOUD ? 'API' : 'QR',
+      licenseRenewsAt: company.licenseRenewsAt,
+      daysUntilRenewal,
+      maxMessages,
+      messagesThisMonth,
+      dailyBudget: maxMessages ? Math.max(1, Math.round(maxMessages / 30)) : null,
+      messagesToday,
+    };
   }
 }

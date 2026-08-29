@@ -52,6 +52,12 @@ export class CreatePlanDto {
   @IsInt()
   @Min(1)
   maxInstances?: number;
+
+  @ApiPropertyOptional({ description: 'Cuota mensual de mensajes (entrantes + salientes). Vacío = sin límite.' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxMessages?: number;
 }
 
 export class UpdatePlanDto {
@@ -89,6 +95,12 @@ export class UpdatePlanDto {
   @IsInt()
   @Min(1)
   maxInstances?: number;
+
+  @ApiPropertyOptional({ description: 'Cuota mensual de mensajes (entrantes + salientes). Vacío = sin límite.' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxMessages?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
