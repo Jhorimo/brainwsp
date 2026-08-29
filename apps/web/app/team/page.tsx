@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, Layers, Plus, ShieldCheck, Star, Trash2, UserRoundCog, Users, Workflow, X } from 'lucide-react';
+import { Building2, Layers, Plus, ShieldCheck, Star, Trash2, UserRoundCog, Users, Workflow } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
 
@@ -339,15 +339,21 @@ export default function TeamPage() {
                   <td>{roleNames[user.role]}</td>
                   <td>{user.departments?.length ? user.departments.map((item) => item.department.name).join(', ') : '—'}</td>
                   <td><span className={`status-pill ${user.active ? 'success' : 'neutral'}`}><span className="status-dot" />{user.active ? 'Activo' : 'Inactivo'}</span></td>
-                  <td style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
-                    {user.effectiveDefault ? (
-                      <span className="default-badge" title={user.isDefaultAgent ? 'Se asigna como responsable a los leads nuevos' : 'Único agente activo: predeterminado automáticamente'}><Star size={11} />Predeterminado</span>
-                    ) : user.active ? (
-                      <button className="button small" title="Asignar como responsable a los leads nuevos" onClick={() => void setDefaultAgent(user)}><Star size={13} />Fijar por defecto</button>
+                  <td>
+                    {user.active ? (
+                      <button
+                        className={`icon-button ${user.effectiveDefault ? 'is-default' : ''}`}
+                        disabled={user.effectiveDefault && !user.isDefaultAgent}
+                        title={
+                          user.isDefaultAgent ? 'Quitar como predeterminado'
+                            : user.effectiveDefault ? 'Único agente activo: predeterminado automáticamente'
+                            : 'Fijar como responsable predeterminado de los leads nuevos'
+                        }
+                        onClick={() => void (user.isDefaultAgent ? clearDefaultAgent(user) : setDefaultAgent(user))}
+                      >
+                        <Star size={15} fill={user.effectiveDefault ? 'currentColor' : 'none'} />
+                      </button>
                     ) : '—'}
-                    {user.effectiveDefault && user.isDefaultAgent && (
-                      <button className="icon-button" title="Quitar como predeterminado" onClick={() => void clearDefaultAgent(user)}><X size={12} /></button>
-                    )}
                   </td>
                   <td style={{ textAlign: 'right', display: 'flex', gap: '.5rem', justifyContent: 'flex-end' }}>
                     <button className="button small" onClick={() => openEdit(user)}>Editar</button>
@@ -368,11 +374,16 @@ export default function TeamPage() {
                   <div className="department-icon"><Building2 size={17} /></div>
                   <div className="department-copy"><strong>{department.name}</strong><span>{department.description || 'Sin descripción'} · {department.users.length} miembro(s){!department.active && ' · Inactivo'}</span></div>
                   <div className="department-row-actions">
-                    {department.isDefault ? (
-                      <span className="default-badge" title="Se asigna automáticamente a las conversaciones nuevas"><Star size={11} />Predeterminado</span>
-                    ) : department.active ? (
-                      <button className="button small" title="Asignar automáticamente a las conversaciones nuevas" onClick={() => void setDefaultDepartment(department)}><Star size={13} />Fijar por defecto</button>
-                    ) : null}
+                    {department.active && (
+                      <button
+                        className={`icon-button ${department.isDefault ? 'is-default' : ''}`}
+                        disabled={department.isDefault}
+                        title={department.isDefault ? 'Predeterminado: se asigna automáticamente a las conversaciones nuevas' : 'Fijar como departamento predeterminado'}
+                        onClick={() => void setDefaultDepartment(department)}
+                      >
+                        <Star size={15} fill={department.isDefault ? 'currentColor' : 'none'} />
+                      </button>
+                    )}
                     <button className="button small" onClick={() => void openStages(department)}><Workflow size={13} />Etapas</button>
                     <button className="button small" onClick={() => openMembers(department)}>Miembros</button>
                     <button className={`button small ${department.active ? 'danger' : 'primary'}`} onClick={() => void toggleDepartment(department)}>{department.active ? 'Desactivar' : 'Activar'}</button>
