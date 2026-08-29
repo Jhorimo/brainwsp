@@ -693,6 +693,10 @@ tr:last-child td { border-bottom: 0; }
 .default-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; background: #efe6fe; color: #7c3aed; white-space: nowrap; }
 .icon-button.is-default { color: #7c3aed; border-color: #ddd0fb; background: #f5f0fe; }
 .icon-button.is-default:hover { color: #6d28d9; background: #efe6fe; }
+.icon-button.small { width: 28px; height: 28px; border-radius: 8px; }
+.icon-button.primary { border-color: var(--accent); background: var(--accent); color: white; }
+.icon-button.primary:hover { background: var(--accent-dark); color: white; }
+.icon-button.primary:disabled { background: white; color: #627087; border-color: var(--line); }
 .member-picker { display: grid; gap: 8px; max-height: 390px; overflow: auto; }
 .member-option { display: grid; grid-template-columns: 18px 1fr; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; cursor: pointer; }
 .member-option:hover { background: #f8faff; }

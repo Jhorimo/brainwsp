@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Info, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import Link from 'next/link';
+import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -62,6 +63,13 @@ type Appointment = {
   endAt: string;
   conversation?: { id: string } | null;
   createdByUser?: { id: string; name: string } | null;
+};
+
+type Lead = {
+  id: string;
+  conversationId?: string | null;
+  departmentId?: string | null;
+  convertedDealId?: string | null;
 };
 
 const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: typeof Lightbulb }> = [
@@ -243,6 +251,8 @@ export default function ConversationsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [converting, setConverting] = useState(false);
   const [companyTags, setCompanyTags] = useState<Tag[]>([]);
   const [stagesByDept, setStagesByDept] = useState<Record<string, Stage[]>>({});
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
@@ -381,7 +391,14 @@ export default function ConversationsPage() {
     try {
       const data = await apiFetch<Conversation[]>('/conversations');
       setConversations(sortConversations(data));
-      setSelectedId((current) => current || data[0]?.id || null);
+      setSelectedId((current) => {
+        if (current) return current;
+        // Enlace directo desde otra página (ej. "Ver conversación" en Pipelines) — abre esa
+        // conversación en vez de la primera de la lista.
+        const requestedId = new URLSearchParams(window.location.search).get('id');
+        if (requestedId && data.some((item) => item.id === requestedId)) return requestedId;
+        return data[0]?.id || null;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar las conversaciones');
     }
@@ -399,6 +416,10 @@ export default function ConversationsPage() {
     void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags'), apiFetch<QuickReply[]>('/quick-replies'), apiFetch<Appointment[]>('/calendar/appointments')])
       .then(([users, deps, projs, incs, tags, replies, appts]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); setQuickReplies(replies); setAppointments(appts); })
       .catch(() => undefined);
+    // Aparte del Promise.all de arriba: el módulo CRM puede estar deshabilitado para este
+    // agente (403), y eso no debe tumbar la carga del resto del panel — solo el botón de
+    // "Convertir a trato" se queda sin mostrar.
+    apiFetch<Lead[]>('/crm/leads').then(setLeads).catch(() => undefined);
   }, [loadConversations]);
 
   useEffect(() => {
@@ -685,6 +706,7 @@ export default function ConversationsPage() {
     () => appointments.filter((a) => a.conversation?.id === selectedId).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
     [appointments, selectedId],
   );
+  const conversationLead = useMemo(() => leads.find((lead) => lead.conversationId === selectedId) || null, [leads, selectedId]);
 
   useEffect(() => { setNotesDraft(selected?.contact.notes || ''); setNotesSaved(false); }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1040,6 +1062,17 @@ export default function ConversationsPage() {
       await apiFetch(`/conversations/${selectedId}`, { method: 'PATCH', body: JSON.stringify({ [field]: value || null }) });
       await loadConversations();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo transferir la conversación'); }
+  };
+
+  const convertToDeal = async () => {
+    if (!conversationLead) return;
+    setConverting(true);
+    try {
+      await apiFetch(`/crm/leads/${conversationLead.id}/convert`, { method: 'POST' });
+      const refreshed = await apiFetch<Lead[]>('/crm/leads');
+      setLeads(refreshed);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo convertir el prospecto en trato'); }
+    finally { setConverting(false); }
   };
 
   const addTag = async (tagId: string) => {
@@ -1961,7 +1994,7 @@ export default function ConversationsPage() {
                   {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
                 </select>
               ) : <p className="contact-empty-hint">"{selected.department.name}" todavía no tiene etapas configuradas. Créalas desde Equipo y agentes.</p>;
-            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div><div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">Sin departamento</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Citas</h4><button className="button small" onClick={openAppointmentModal}><CalendarDays size={13} />Nueva</button></div>{conversationAppointments.map((appointment) => (<div className="incident-row" key={appointment.id}><div className="incident-row-copy"><strong>{appointment.title}</strong><span>{new Date(appointment.startAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span></div><button className="icon-button" onClick={() => void cancelAppointment(appointment)} title="Cancelar cita"><Trash2 size={12} /></button></div>))}{!conversationAppointments.length && <p className="contact-empty-hint">Sin citas agendadas para este cliente.</p>}</div></> : null}
+            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div>{conversationLead && <div className="contact-line"><span>Prospecto</span><span style={{ display: 'flex', gap: 6 }}>{conversationLead.convertedDealId ? <><Link className="icon-button small" href="/crm/deals" title="Ver trato"><Handshake size={14} /></Link><Link className="icon-button small" href={conversationLead.departmentId ? `/crm/pipelines?departmentId=${conversationLead.departmentId}` : '/crm/pipelines'} title="Ver Pipelines"><Kanban size={14} /></Link></> : <button className="icon-button small primary" disabled={converting || !conversationLead.departmentId} title={!conversationLead.departmentId ? 'Asigna un departamento antes de convertir' : 'Convertir en trato'} onClick={() => void convertToDeal()}><Handshake size={14} /></button>}</span></div>}<div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">Sin departamento</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Citas</h4><button className="button small" onClick={openAppointmentModal}><CalendarDays size={13} />Nueva</button></div>{conversationAppointments.map((appointment) => (<div className="incident-row" key={appointment.id}><div className="incident-row-copy"><strong>{appointment.title}</strong><span>{new Date(appointment.startAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span></div><button className="icon-button" onClick={() => void cancelAppointment(appointment)} title="Cancelar cita"><Trash2 size={12} /></button></div>))}{!conversationAppointments.length && <p className="contact-empty-hint">Sin citas agendadas para este cliente.</p>}</div></> : null}
         </aside>
       </section>
 

@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { io } from 'socket.io-client';
-import { Kanban, Plus } from 'lucide-react';
+import { Kanban, MessageCircle, Plus } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { NoteButton } from '@/components/note-button';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
@@ -14,7 +15,7 @@ type Tag = { id: string; name: string; color: string };
 type Stage = { id: string; name: string; color: string; isWon: boolean; order: number };
 type Department = { id: string; name: string; isDefault: boolean; stages: Stage[] };
 type Deal = {
-  id: string; title: string; value?: number | null; stage: { id: string }; probability?: number | null;
+  id: string; title: string; value?: number | null; stage: { id: string }; probability?: number | null; conversationId?: string | null;
   assignedUser?: TeamUser | null; companyName?: string | null; personName?: string | null;
   phone?: string | null; notes?: string | null; contactTags?: Tag[]; project?: { id: string; name: string } | null;
 };
@@ -30,7 +31,20 @@ function DealCard({ deal }: { deal: Deal }) {
     <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="kanban-card">
       <div className="kanban-card-title-row">
         <strong>{deal.title}</strong>
-        {deal.notes && <NoteButton notes={deal.notes} />}
+        <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          {deal.conversationId && (
+            <Link
+              className="row-note-icon"
+              href={`/conversations?id=${deal.conversationId}`}
+              title="Ver conversación"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MessageCircle size={12} />
+            </Link>
+          )}
+          {deal.notes && <NoteButton notes={deal.notes} />}
+        </span>
       </div>
       {deal.value ? <span className="kanban-card-value">USD {deal.value.toLocaleString('es-PE')}</span> : null}
       {(deal.companyName || deal.personName) && <span className="kanban-card-meta">{deal.companyName || deal.personName}</span>}

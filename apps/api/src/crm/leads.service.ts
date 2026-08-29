@@ -9,6 +9,7 @@ export interface LeadFilters {
   status?: LeadStatus;
   channel?: string;
   assignedUserId?: string;
+  conversationId?: string;
 }
 
 // Mismo criterio que DEAL_INCLUDE: teléfono/notas/etiquetas vienen del Contacto y el
@@ -33,6 +34,7 @@ export class LeadsService {
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.channel ? { channel: filters.channel } : {}),
       ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
+      ...(filters.conversationId ? { conversationId: filters.conversationId } : {}),
       ...(filters.q
         ? { OR: [{ title: { contains: filters.q, mode: 'insensitive' } }, { personName: { contains: filters.q, mode: 'insensitive' } }, { companyName: { contains: filters.q, mode: 'insensitive' } }, { personEmail: { contains: filters.q, mode: 'insensitive' } }] }
         : {}),
