@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { io } from 'socket.io-client';
 import { Handshake, Kanban, Plus, Search, Trash2, UserPlus } from 'lucide-react';
@@ -25,6 +25,23 @@ const statusLabels: Record<LeadStatus, string> = { NONE: 'Sin estado', COLD: 'Fr
 
 const emptyForm = { title: '', personName: '', personEmail: '', personPhone: '', companyName: '', channel: '', source: '', value: '' };
 
+type Preset = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month' | 'custom';
+const presetLabels: Record<Preset, string> = { all: 'Todos', today: 'Hoy', yesterday: 'Ayer', '7d': 'Últimos 7 días', '30d': 'Últimos 30 días', month: 'Este mes', custom: 'Personalizado' };
+
+function toDateInputValue(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+// Un string de solo fecha como "2026-08-21" parseado con `new Date(...)` se lee como
+// medianoche UTC, cayendo en el día calendario equivocado al pasar a la zona horaria local
+// del navegador — se parsean los componentes directo a un Date en hora local en su lugar.
+function parseDateInputValue(value: string) {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
 export default function LeadsPage() {
   const confirm = useConfirm();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -40,6 +57,26 @@ export default function LeadsPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const todayValue = useMemo(() => toDateInputValue(new Date()), []);
+  const [fromDate, setFromDate] = useState(todayValue);
+  const [toDate, setToDate] = useState(todayValue);
+  const [preset, setPreset] = useState<Preset>('all');
+
+  const applyPreset = (next: Preset) => {
+    if (next === 'all') { setPreset('all'); return; }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    const end = new Date(today);
+    if (next === 'yesterday') { start.setDate(start.getDate() - 1); end.setDate(end.getDate() - 1); }
+    else if (next === '7d') { start.setDate(start.getDate() - 6); }
+    else if (next === '30d') { start.setDate(start.getDate() - 29); }
+    else if (next === 'month') { start.setDate(1); }
+    setFromDate(toDateInputValue(start));
+    setToDate(toDateInputValue(end));
+    setPreset(next);
+  };
+
   useEffect(() => { void apiFetch<TeamUser[]>('/team/users').then(setTeamUsers).catch(() => undefined); }, []);
   useEffect(() => { void apiFetch<Department[]>('/team/departments').then((items) => setDepartments(items.filter((d) => d.active))).catch(() => undefined); }, []);
   useEffect(() => { const t = setTimeout(() => setQ(qInput.trim()), 300); return () => clearTimeout(t); }, [qInput]);
@@ -48,10 +85,20 @@ export default function LeadsPage() {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (filterStatus) params.set('status', filterStatus);
+    // `to` viaja como límite superior EXCLUSIVO (medianoche del día siguiente al "hasta"
+    // elegido) — mismo criterio que Dashboard/Pipelines/Tratos, así un rango de un solo día
+    // cubre el día completo en vez de no matchear nada.
+    if (preset !== 'all') {
+      const start = parseDateInputValue(fromDate);
+      const end = parseDateInputValue(toDate);
+      end.setDate(end.getDate() + 1);
+      params.set('from', start.toISOString());
+      params.set('to', end.toISOString());
+    }
     const query = params.toString();
     apiFetch<Lead[]>(`/crm/leads${query ? `?${query}` : ''}`).then(setLeads).catch((err) => setError(err instanceof Error ? err.message : 'No se pudieron cargar los prospectos'));
   };
-  useEffect(load, [q, filterStatus]);
+  useEffect(load, [q, filterStatus, preset, fromDate, toDate]);
 
   // Un prospecto puede llegar solo (mensaje nuevo de WhatsApp) o cambiar desde otra
   // pestaña/usuario (Conversaciones, Tratos) — se refresca la lista en vivo en vez de
@@ -114,6 +161,19 @@ export default function LeadsPage() {
           <option value="">Todos los estados</option>
           {Object.entries(statusLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}
         </select>
+      </div>
+
+      <div className="dashboard-range-bar">
+        <div className="dashboard-range-presets">
+          {(['all', 'today', 'yesterday', '7d', '30d', 'month'] as Preset[]).map((item) => (
+            <button key={item} className={`chat-quick-tab ${preset === item ? 'active' : ''}`} onClick={() => applyPreset(item)}>{presetLabels[item]}</button>
+          ))}
+        </div>
+        <div className="dashboard-range-custom">
+          <input type="date" value={fromDate} max={toDate} onChange={(e) => { setFromDate(e.target.value); setPreset('custom'); }} />
+          <span>–</span>
+          <input type="date" value={toDate} min={fromDate} max={todayValue} onChange={(e) => { setToDate(e.target.value); setPreset('custom'); }} />
+        </div>
       </div>
 
       <section className="table-card">

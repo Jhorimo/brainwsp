@@ -10,6 +10,8 @@ export interface LeadFilters {
   channel?: string;
   assignedUserId?: string;
   conversationId?: string;
+  from?: string;
+  to?: string;
 }
 
 // Mismo criterio que DEAL_INCLUDE: teléfono/notas/etiquetas vienen del Contacto y el
@@ -35,6 +37,8 @@ export class LeadsService {
       ...(filters.channel ? { channel: filters.channel } : {}),
       ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
       ...(filters.conversationId ? { conversationId: filters.conversationId } : {}),
+      // `to` llega como límite superior EXCLUSIVO — mismo criterio que Dashboard/Deals.
+      ...(filters.from && filters.to ? { createdAt: { gte: new Date(filters.from), lt: new Date(filters.to) } } : {}),
       ...(filters.q
         ? { OR: [{ title: { contains: filters.q, mode: 'insensitive' } }, { personName: { contains: filters.q, mode: 'insensitive' } }, { companyName: { contains: filters.q, mode: 'insensitive' } }, { personEmail: { contains: filters.q, mode: 'insensitive' } }] }
         : {}),

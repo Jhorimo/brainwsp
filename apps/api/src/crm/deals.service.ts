@@ -8,6 +8,8 @@ export interface DealFilters {
   departmentId?: string;
   stageId?: string;
   assignedUserId?: string;
+  from?: string;
+  to?: string;
 }
 
 // El contacto/conversación de origen traen datos que ya se ven en Conversaciones (teléfono,
@@ -34,6 +36,10 @@ export class DealsService {
       ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
       ...(filters.stageId ? { stageId: filters.stageId } : {}),
       ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
+      // `to` llega como límite superior EXCLUSIVO (medianoche del día siguiente al "hasta"
+      // elegido) — mismo criterio que DashboardController, así un rango de un solo día
+      // cubre el día completo en vez de no matchear nada.
+      ...(filters.from && filters.to ? { createdAt: { gte: new Date(filters.from), lt: new Date(filters.to) } } : {}),
       ...(filters.q
         ? { OR: [{ title: { contains: filters.q, mode: 'insensitive' } }, { personName: { contains: filters.q, mode: 'insensitive' } }, { companyName: { contains: filters.q, mode: 'insensitive' } }] }
         : {}),

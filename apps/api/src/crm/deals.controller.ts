@@ -23,8 +23,10 @@ export class DealsController {
     @Query('departmentId') departmentId?: string,
     @Query('stageId') stageId?: string,
     @Query('assignedUserId') assignedUserId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.service.list(user.companyId, { q, departmentId, stageId, assignedUserId });
+    return this.service.list(user.companyId, { q, departmentId, stageId, assignedUserId, from, to });
   }
 
   @Post()

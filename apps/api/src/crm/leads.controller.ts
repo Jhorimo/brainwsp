@@ -25,8 +25,10 @@ export class LeadsController {
     @Query('channel') channel?: string,
     @Query('assignedUserId') assignedUserId?: string,
     @Query('conversationId') conversationId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.service.list(user.companyId, { q, status, channel, assignedUserId, conversationId });
+    return this.service.list(user.companyId, { q, status, channel, assignedUserId, conversationId, from, to });
   }
 
   @Post()

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { Handshake, Plus, Search, Trash2 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
@@ -21,6 +21,23 @@ type Deal = {
 
 const emptyForm = { title: '', companyName: '', personName: '', personEmail: '', personPhone: '', value: '' };
 
+type Preset = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month' | 'custom';
+const presetLabels: Record<Preset, string> = { all: 'Todos', today: 'Hoy', yesterday: 'Ayer', '7d': 'Últimos 7 días', '30d': 'Últimos 30 días', month: 'Este mes', custom: 'Personalizado' };
+
+function toDateInputValue(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+// Un string de solo fecha como "2026-08-21" parseado con `new Date(...)` se lee como
+// medianoche UTC, cayendo en el día calendario equivocado al pasar a la zona horaria local
+// del navegador — se parsean los componentes directo a un Date en hora local en su lugar.
+function parseDateInputValue(value: string) {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
 export default function DealsPage() {
   const confirm = useConfirm();
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -36,6 +53,26 @@ export default function DealsPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const todayValue = useMemo(() => toDateInputValue(new Date()), []);
+  const [fromDate, setFromDate] = useState(todayValue);
+  const [toDate, setToDate] = useState(todayValue);
+  const [preset, setPreset] = useState<Preset>('all');
+
+  const applyPreset = (next: Preset) => {
+    if (next === 'all') { setPreset('all'); return; }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    const end = new Date(today);
+    if (next === 'yesterday') { start.setDate(start.getDate() - 1); end.setDate(end.getDate() - 1); }
+    else if (next === '7d') { start.setDate(start.getDate() - 6); }
+    else if (next === '30d') { start.setDate(start.getDate() - 29); }
+    else if (next === 'month') { start.setDate(1); }
+    setFromDate(toDateInputValue(start));
+    setToDate(toDateInputValue(end));
+    setPreset(next);
+  };
+
   useEffect(() => {
     void apiFetch<TeamUser[]>('/team/users').then(setTeamUsers).catch(() => undefined);
     void apiFetch<Department[]>('/crm/pipelines').then((items) => { setDepartments(items); setDepartmentId((current) => current || items.find((d) => d.isDefault)?.id || items[0]?.id || ''); }).catch(() => undefined);
@@ -46,10 +83,20 @@ export default function DealsPage() {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (departmentId) params.set('departmentId', departmentId);
+    // `to` viaja como límite superior EXCLUSIVO (medianoche del día siguiente al "hasta"
+    // elegido) — mismo criterio que Dashboard/Pipelines, así un rango de un solo día cubre
+    // el día completo en vez de no matchear nada.
+    if (preset !== 'all') {
+      const start = parseDateInputValue(fromDate);
+      const end = parseDateInputValue(toDate);
+      end.setDate(end.getDate() + 1);
+      params.set('from', start.toISOString());
+      params.set('to', end.toISOString());
+    }
     const query = params.toString();
     apiFetch<Deal[]>(`/crm/deals${query ? `?${query}` : ''}`).then(setDeals).catch((err) => setError(err instanceof Error ? err.message : 'No se pudieron cargar los tratos'));
   };
-  useEffect(load, [q, departmentId]);
+  useEffect(load, [q, departmentId, preset, fromDate, toDate]);
 
   // Un trato puede moverse de etapa desde Conversaciones o desde el Kanban de Pipelines —
   // se refresca en vivo en vez de requerir recargar la página para ver el cambio acá.
@@ -104,6 +151,19 @@ export default function DealsPage() {
         <select className="status-select" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
           {departments.map((d) => <option value={d.id} key={d.id}>Departamento: {d.name}</option>)}
         </select>
+      </div>
+
+      <div className="dashboard-range-bar">
+        <div className="dashboard-range-presets">
+          {(['all', 'today', 'yesterday', '7d', '30d', 'month'] as Preset[]).map((item) => (
+            <button key={item} className={`chat-quick-tab ${preset === item ? 'active' : ''}`} onClick={() => applyPreset(item)}>{presetLabels[item]}</button>
+          ))}
+        </div>
+        <div className="dashboard-range-custom">
+          <input type="date" value={fromDate} max={toDate} onChange={(e) => { setFromDate(e.target.value); setPreset('custom'); }} />
+          <span>–</span>
+          <input type="date" value={toDate} min={fromDate} max={todayValue} onChange={(e) => { setToDate(e.target.value); setPreset('custom'); }} />
+        </div>
       </div>
 
       <section className="table-card">
