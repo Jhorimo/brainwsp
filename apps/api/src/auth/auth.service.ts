@@ -105,20 +105,29 @@ export class AuthService {
     return { success: true };
   }
 
-  async register(input: { companyName: string; name: string; email: string; password: string }, ip?: string, userAgent?: string) {
+  async register(input: { companyName: string; name: string; email: string; password: string; phone?: string; requestedPlanId?: string }, ip?: string, userAgent?: string) {
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const { user, company, apiCredential } = await this.createCompanyWithOwner({ ...input, passwordHash });
+    const { user, company, apiCredential, needsPayment } = await this.createCompanyWithOwner({ ...input, passwordHash });
     void this.logAccess({ action: 'REGISTER', success: true, userId: user.id, companyId: company.id, ip, userAgent });
     // El AUTH KEY "Principal" viaja en texto plano en esta respuesta y luego queda
     // cifrado para poder revelarlo bajo demanda — el frontend lo muestra al registrarse
     // para que el OWNER no dependa de entrar a "API e integraciones" a buscarlo.
-    return { ...(await this.issueSession(user, company)), apiCredential };
+    // `needsPayment` le dice al frontend si el plan elegido en el selector de registro era
+    // uno pago (no el gratuito/default) — ahí conviene mandarlo directo a "Mi Plan" en vez
+    // del dashboard, para que complete el pago manual de una vez.
+    return { ...(await this.issueSession(user, company)), apiCredential, needsPayment };
+  }
+
+  // Planes activos, visibles sin sesión — los usa el selector de plan de /register antes de
+  // que exista un JWT. Mismos campos que BillingService#listPlans (ver ese comentario).
+  listPublicPlans() {
+    return this.prisma.plan.findMany({ where: { active: true }, orderBy: { price: 'asc' } });
   }
 
   // Shared by email/password registration and by the "sign up with Google" completion
   // step — both ultimately need the same thing: a brand-new Company plus its OWNER user
   // and starter API credential.
-  private async createCompanyWithOwner(input: { companyName: string; name: string; email: string; passwordHash?: string; googleId?: string }) {
+  private async createCompanyWithOwner(input: { companyName: string; name: string; email: string; passwordHash?: string; googleId?: string; phone?: string; requestedPlanId?: string }) {
     const email = input.email.trim().toLowerCase();
 
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
@@ -128,7 +137,28 @@ export class AuthService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const company = await tx.company.create({ data: { name: input.companyName.trim(), slug } });
+        // El plan marcado isDefault (si el operador de la plataforma configuró uno) se asigna
+        // automáticamente con licencia de trialDays días — ver Plan.isDefault/trialDays en el
+        // schema. Sin un plan default configurado (instalación nueva sin admin todavía), la
+        // empresa arranca sin plan/vencimiento, igual que antes de esta función existir.
+        //
+        // El plan que el usuario haya elegido en el selector de /register (`requestedPlanId`)
+        // NUNCA se asigna directamente acá aunque sea distinto del default — un plan pago se
+        // otorga recién cuando se aprueba un pago (ver AdminService#approvePaymentRequest).
+        // Elegir un plan pago en el registro solo sirve para mostrar el precio y, al terminar,
+        // mandar al usuario directo a "Mi Plan" con ese plan pre-seleccionado.
+        const defaultPlan = await tx.plan.findFirst({ where: { isDefault: true, active: true } });
+        const needsPayment = !!input.requestedPlanId && input.requestedPlanId !== defaultPlan?.id;
+        const company = await tx.company.create({
+          data: {
+            name: input.companyName.trim(),
+            slug,
+            ...(input.phone?.trim() ? { phone: input.phone.trim() } : {}),
+            ...(defaultPlan
+              ? { planId: defaultPlan.id, planStartedAt: new Date(), licenseRenewsAt: new Date(Date.now() + defaultPlan.trialDays * 24 * 3600 * 1000) }
+              : {}),
+          },
+        });
         const user = await tx.user.create({
           data: {
             companyId: company.id,
@@ -157,7 +187,7 @@ export class AuthService {
         });
 
         await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-        return { user, company, apiCredential: { appKey, authKey } };
+        return { user, company, apiCredential: { appKey, authKey }, needsPayment };
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

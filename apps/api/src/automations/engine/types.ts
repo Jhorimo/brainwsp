@@ -45,7 +45,11 @@ export type MenuNode = {
   id: string;
   type: 'menu';
   position: NodePosition;
-  data: { label: string; prompt: string; options: MenuOption[] };
+  // 'buttons' sends real WhatsApp reply buttons instead of a numbered text list — capped at 3
+  // by WhatsApp itself (see run-flow.ts), so it only actually renders as buttons when
+  // options.length <= 3; beyond that it silently falls back to the numbered list. Undefined
+  // (older saved graphs) behaves as 'list'.
+  data: { label: string; prompt: string; options: MenuOption[]; displayMode?: 'list' | 'buttons' };
 };
 
 export const NO_RESPONSE_HANDLE = 'no-response';
@@ -64,17 +68,29 @@ export type ContentBlock =
   | { id: string; kind: 'video'; mediaUrl: string; mimeType?: string; caption?: string; fileName?: string }
   | { id: string; kind: 'audio'; mediaUrl: string; mimeType?: string; fileName?: string }
   | { id: string; kind: 'file'; mediaUrl: string; mimeType?: string; fileName?: string }
+  | { id: string; kind: 'contact'; contactName: string; contactPhone: string; contactCompany?: string }
+  // Suprime automatizaciones + respuesta de IA para este contacto durante `seconds` — ver el
+  // gate en apps/worker/src/session-manager.ts, justo antes de maybeRunFlow/maybeReplyWithAi.
+  | { id: string; kind: 'autooff'; seconds: number }
   | { id: string; kind: 'delay'; seconds: number };
 
 export type EngineEffect = {
   nodeId: string;
   blockId: string;
-  kind: 'text' | 'image' | 'video' | 'audio' | 'file';
+  kind: 'text' | 'image' | 'video' | 'audio' | 'file' | 'contact' | 'autooff';
   text?: string;
   mediaUrl?: string;
   mimeType?: string;
   caption?: string;
   fileName?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactCompany?: string;
+  autooffSeconds?: number;
+  // Presente solo en el prompt de un nodo Menú con displayMode: 'buttons' (y <= 3 opciones) —
+  // ver dispatchEffects/sendOneEffect en apps/worker/src/automation-engine.ts, que lo traduce
+  // a un mensaje `buttons` real de Baileys en vez de texto plano.
+  buttons?: MenuOption[];
   // Milliseconds to wait before this effect fires, counted from the previous one — mirrors
   // the "Retraso" blocks between content in the editor. A consumer can honor it (simulator
   // replay) or ignore it and dispatch immediately (nothing does that today).

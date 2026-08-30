@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InstanceStatus, MessageDirection, WhatsAppProvider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
@@ -71,6 +71,15 @@ export class InstancesService {
   }
 
   async connect(companyId: string, id: string) {
+    // No bloquea una sesión ya conectada (esta ruta solo se llama para conectar/reconectar) —
+    // ver el comentario en "Mi Plan" del plan de implementación: solo se corta la posibilidad
+    // de conectar algo nuevo, no lo que ya estaba andando.
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { licenseRenewsAt: true } });
+    if (company?.licenseRenewsAt && company.licenseRenewsAt < new Date()) {
+      const formatted = company.licenseRenewsAt.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+      throw new ForbiddenException(`Tu plan venció el ${formatted} — actualiza tu plan en "Mi Plan" para volver a conectar tu WhatsApp.`);
+    }
+
     const instance = await this.getOwned(companyId, id);
     if (instance.provider !== WhatsAppProvider.BAILEYS) {
       throw new ConflictException('Esta acción está disponible para instancias Baileys');

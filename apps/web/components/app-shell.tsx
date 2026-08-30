@@ -11,12 +11,14 @@ import {
   Check,
   ChevronDown,
   Copy,
+  CreditCard,
   Eye,
   EyeOff,
   Handshake,
   Kanban,
   KeyRound,
   LayoutDashboard,
+  LayoutTemplate,
   Lightbulb,
   LogOut,
   Menu,
@@ -52,6 +54,7 @@ const navigation = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, module: 'dashboard' },
   { href: '/instances', label: 'WhatsApp', icon: Wifi, module: 'instances' },
   { href: '/automations', label: 'Automatizaciones', icon: Zap, module: 'automations' },
+  { href: '/automations/templates', label: 'Galería de Plantillas', icon: LayoutTemplate, module: 'automations' },
   { href: '/team', label: 'Equipo y agentes', icon: Users, module: 'team' },
   { href: '/incidents', label: 'Incidencias', icon: AlertTriangle, module: 'incidents' },
   { href: '/api-settings', label: 'API e integraciones', icon: KeyRound, module: 'api-settings' },
@@ -83,6 +86,11 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const [companySaving, setCompanySaving] = useState(false);
   const [companySaved, setCompanySaved] = useState(false);
   const [companyError, setCompanyError] = useState('');
+  const [phoneDraft, setPhoneDraft] = useState('');
+  const [phoneOriginal, setPhoneOriginal] = useState('');
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [phoneSaved, setPhoneSaved] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
   const [masterCredential, setMasterCredential] = useState<MasterCredential | null>(null);
   const [masterAuthKey, setMasterAuthKey] = useState('');
   const [masterAuthVisible, setMasterAuthVisible] = useState(false);
@@ -150,12 +158,29 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
     setCompanyDraft(identity.company);
     setCompanyError('');
     setCompanySaved(false);
+    setPhoneDraft('');
+    setPhoneOriginal('');
+    setPhoneError('');
+    setPhoneSaved(false);
     setMasterCredential(null);
     setMasterAuthKey('');
     setMasterAuthVisible(false);
     setMasterError('');
     setProfileModal(true);
-    if (identity.role === 'OWNER' || identity.role === 'ADMIN') void loadMasterCredential();
+    if (identity.role === 'OWNER' || identity.role === 'ADMIN') {
+      void loadMasterCredential();
+      void loadCompanyPhone();
+    }
+  };
+
+  // El teléfono no viaja en el token ni en el company guardado en localStorage (solo
+  // id/name/slug desde el login) — hay que pedirlo aparte, igual que el AUTH KEY maestro.
+  const loadCompanyPhone = async () => {
+    try {
+      const company = await apiFetch<{ phone?: string | null }>('/team/company');
+      setPhoneDraft(company.phone || '');
+      setPhoneOriginal(company.phone || '');
+    } catch {}
   };
 
   const loadMasterCredential = async () => {
@@ -237,6 +262,24 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
       setCompanyError(err instanceof Error ? err.message : 'No se pudo actualizar la empresa');
     } finally {
       setCompanySaving(false);
+    }
+  };
+
+  const savePhone = async () => {
+    const trimmed = phoneDraft.trim();
+    if (trimmed === phoneOriginal) return;
+    setPhoneSaving(true);
+    setPhoneError('');
+    setPhoneSaved(false);
+    try {
+      const updated = await apiFetch<{ phone?: string | null }>('/team/company', { method: 'PATCH', body: JSON.stringify({ phone: trimmed }) });
+      setPhoneOriginal(updated.phone || '');
+      setPhoneDraft(updated.phone || '');
+      setPhoneSaved(true);
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : 'No se pudo actualizar el teléfono');
+    } finally {
+      setPhoneSaving(false);
     }
   };
 
@@ -334,6 +377,15 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                 })}
               </>
             )}
+            {identity.role === 'OWNER' && (
+              <>
+                <div className="nav-caption nav-gap">CUENTA</div>
+                <Link className={`nav-item ${pathname.startsWith('/my-plan') ? 'active' : ''}`} href="/my-plan">
+                  <CreditCard size={19} />
+                  <span>Mi Plan</span>
+                </Link>
+              </>
+            )}
             <div className="nav-caption nav-gap">PRÓXIMAMENTE</div>
             <div className="nav-item muted"><Bot size={19} /><span>Agentes IA</span></div>
           </nav>
@@ -403,6 +455,21 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                     <input value={identity.company} disabled title="Solo el propietario o un administrador puede cambiar el nombre de la empresa" />
                   )}
                 </div>
+                {isAccountManager && (
+                  <div className="field">
+                    <label>Teléfono de contacto</label>
+                    <div className="field-with-action">
+                      <input value={phoneDraft} onChange={(e) => { setPhoneDraft(e.target.value); setPhoneSaved(false); }} onKeyDown={(e) => { if (e.key === 'Enter') void savePhone(); }} placeholder="+51 999 888 777" />
+                      {phoneDraft.trim() !== phoneOriginal && (
+                        <button className={`button small notes-save-button ${phoneSaved ? 'saved' : ''}`} disabled={phoneSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void savePhone()} title="Guardar teléfono">
+                          {phoneSaving ? '...' : <Check size={13} />}
+                        </button>
+                      )}
+                    </div>
+                    {phoneError && <span className="row-sub" style={{ color: 'var(--danger)' }}>{phoneError}</span>}
+                    <span className="row-sub">Así nuestro equipo puede contactarte para coordinar tu plan o soporte.</span>
+                  </div>
+                )}
                 <div className="field"><label>Rol</label><input value={roleLabels[identity.role] || identity.role} disabled title="El rol lo asigna un administrador desde Equipo y agentes" /></div>
               </div>
 

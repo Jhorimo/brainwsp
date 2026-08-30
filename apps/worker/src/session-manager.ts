@@ -526,16 +526,24 @@ export class SessionManager {
       conversation: realtimeConversation ? { ...realtimeConversation, messages: [created] } : { ...conversation, contact, messages: [created] },
     }, realtimeConversation?.departmentId ?? conversation.departmentId);
 
+    // Un nodo "Auto Off" marca `botDisabledUntil` en el futuro — mientras dure, se suprimen
+    // TANTO las automatizaciones por keyword COMO la respuesta libre de IA para este contacto,
+    // sin tocar el flujo que ya está en curso (ese sigue avanzando normalmente; esto solo evita
+    // que un NUEVO mensaje entrante dispare algo automático).
+    const botDisabled = !!conversation.botDisabledUntil && conversation.botDisabledUntil > new Date();
+
     // Una automatización con keyword coincidente gana sobre la IA genérica — si disparó un
     // flujo, no tiene sentido además contestar con una respuesta libre de IA para el mismo
     // mensaje entrante.
-    maybeRunFlow(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id)
-      .then((triggered) => {
-        if (!triggered) return maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id);
-      })
-      .catch((error) => {
-        this.logger.warn({ err: error, conversationId: conversation.id }, 'Automation/AI auto-reply failed');
-      });
+    if (!botDisabled) {
+      maybeRunFlow(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id)
+        .then((triggered) => {
+          if (!triggered) return maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id);
+        })
+        .catch((error) => {
+          this.logger.warn({ err: error, conversationId: conversation.id }, 'Automation/AI auto-reply failed');
+        });
+    }
   }
 
   // `targetKey` identifies the message being reacted to; `reaction.key` is the reactor's own

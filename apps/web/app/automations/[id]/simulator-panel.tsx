@@ -1,14 +1,38 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, X } from 'lucide-react';
+import { Contact as ContactIcon, Power, Send, Sparkles, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { blockMediaSrc, type SimulateResult } from '../types';
+import { blockMediaSrc, type MenuOption, type SimulateResult } from '../types';
 
 type ChatItem =
   | { from: 'system'; text: string }
   | { from: 'user'; text: string }
-  | { from: 'bot'; kind: 'text' | 'image' | 'video' | 'audio' | 'file'; text?: string; mediaUrl?: string; mimeType?: string; caption?: string; fileName?: string; delayMs: number };
+  | {
+      from: 'bot';
+      kind: 'text' | 'image' | 'video' | 'audio' | 'file' | 'contact' | 'autooff';
+      text?: string;
+      mediaUrl?: string;
+      mimeType?: string;
+      caption?: string;
+      fileName?: string;
+      contactName?: string;
+      contactPhone?: string;
+      contactCompany?: string;
+      autooffSeconds?: number;
+      buttons?: MenuOption[];
+      delayMs: number;
+    };
+
+// Mismo criterio que formatCompactDuration en flow-nodes.tsx, reimplementado acá porque este
+// panel no importa de ese archivo (ver el comentario de duplicación en automations/types.ts).
+function formatDurationLabel(totalSeconds: number) {
+  const s = Math.max(0, totalSeconds);
+  if (s % 86400 === 0 && s >= 86400) return `${s / 86400} día${s / 86400 === 1 ? '' : 's'}`;
+  if (s % 3600 === 0 && s >= 3600) return `${s / 3600} hora${s / 3600 === 1 ? '' : 's'}`;
+  if (s % 60 === 0 && s >= 60) return `${s / 60} minuto${s / 60 === 1 ? '' : 's'}`;
+  return `${s} seg`;
+}
 
 // Real delays (remarketing/temporizador, futuras fases) se comprimen así de rápido en vez de
 // hacer esperar minutos reales al probar — el motor no cambia, solo cuánto se espera aquí.
@@ -27,10 +51,10 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [items]);
 
-  const send = async () => {
-    const message = input.trim();
+  const send = async (overrideText?: string) => {
+    const message = (overrideText ?? input).trim();
     if (!message || running) return;
-    setInput('');
+    if (overrideText === undefined) setInput('');
     setItems((current) => [...current, { from: 'user', text: message }]);
     setRunning(true);
     const resumeFromNodeId = waitingMenuNodeId || undefined;
@@ -43,7 +67,21 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
       }
       for (const effect of result.effects) {
         await sleep(Math.min(effect.delayMs, MAX_REPLAY_DELAY_MS));
-        setItems((current) => [...current, { from: 'bot', kind: effect.kind, text: effect.text, mediaUrl: effect.mediaUrl, mimeType: effect.mimeType, caption: effect.caption, fileName: effect.fileName, delayMs: effect.delayMs }]);
+        setItems((current) => [...current, {
+          from: 'bot',
+          kind: effect.kind,
+          text: effect.text,
+          mediaUrl: effect.mediaUrl,
+          mimeType: effect.mimeType,
+          caption: effect.caption,
+          fileName: effect.fileName,
+          contactName: effect.contactName,
+          contactPhone: effect.contactPhone,
+          contactCompany: effect.contactCompany,
+          autooffSeconds: effect.autooffSeconds,
+          buttons: effect.buttons,
+          delayMs: effect.delayMs,
+        }]);
       }
       if (result.status === 'COMPLETED') {
         setItems((current) => [...current, { from: 'system', text: 'Flujo completado.' }]);
@@ -74,10 +112,35 @@ export function SimulatorPanel({ flowId, onClose }: { flowId: string; onClose: (
         {items.map((item, index) => {
           if (item.from === 'system') return <div className="simulator-system-msg" key={index}>{item.text}</div>;
           if (item.from === 'user') return <div className="message-bubble out simulator-bubble" key={index}>{item.text}</div>;
+          if (item.kind === 'autooff') {
+            return (
+              <div className="simulator-autooff-msg" key={index}>
+                <Power size={12} /> Bot desactivado para este contacto por {formatDurationLabel(item.autooffSeconds || 0)}
+              </div>
+            );
+          }
           return (
             <div className="message-bubble simulator-bubble" key={index}>
               <div className="simulator-sender">BrainWSP</div>
               {item.kind === 'text' && item.text}
+              {item.buttons && item.buttons.length > 0 && (
+                <div className="simulator-menu-buttons">
+                  {item.buttons.map((option) => (
+                    <button key={option.id} type="button" className="simulator-menu-button" disabled={running} onClick={() => void send(option.text)}>
+                      {option.text}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {item.kind === 'contact' && (
+                <div className="simulator-contact-card">
+                  <span className="simulator-contact-icon"><ContactIcon size={14} /></span>
+                  <div>
+                    <strong>{item.contactName || 'Contacto'}</strong>
+                    <span>{item.contactPhone}{item.contactCompany ? ` · ${item.contactCompany}` : ''}</span>
+                  </div>
+                </div>
+              )}
               {item.kind === 'image' && item.mediaUrl && (
                 <>
                   <img src={blockMediaSrc(item.mediaUrl, item.mimeType, item.fileName)} alt={item.caption || 'imagen'} style={{ maxWidth: 220, borderRadius: 8, display: 'block' }} />

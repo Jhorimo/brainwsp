@@ -6,13 +6,26 @@ import { resumeFlow, runFlow } from './flow-engine/run-flow.js';
 import type { EngineEffect, EngineResult, FlowGraph } from './flow-engine/types.js';
 import type { RealtimePublisher } from './realtime.js';
 
-const KIND_TO_MESSAGE_TYPE: Record<EngineEffect['kind'], MessageType> = {
+const KIND_TO_MESSAGE_TYPE: Record<Exclude<EngineEffect['kind'], 'autooff'>, MessageType> = {
   text: MessageType.TEXT,
   image: MessageType.IMAGE,
   video: MessageType.VIDEO,
   audio: MessageType.AUDIO,
   file: MessageType.DOCUMENT,
+  contact: MessageType.CONTACT,
 };
+
+// vCard 3.0 mínima que Baileys acepta para un mensaje `contacts` — mismo shape que Baileys
+// entrega al recibir un contacto compartido (ver 'contactMessage' en message-utils.ts), así
+// que un contacto enviado por un nodo Contacto se ve igual en WhatsApp que uno reenviado a mano.
+function buildVcard(name: string, phone: string, company?: string) {
+  const digits = phone.replace(/[^\d]/g, '');
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${name}`];
+  if (company) lines.push(`ORG:${company};`);
+  lines.push(`TEL;type=CELL;type=VOICE;waid=${digits}:${phone}`);
+  lines.push('END:VCARD');
+  return lines.join('\n');
+}
 
 type Conversation = { id: string; companyId: string; instanceId: string; contactId: string };
 
@@ -38,6 +51,22 @@ async function sendOneEffect(
   executionId: string,
   effect: EngineEffect,
 ) {
+  // No manda mensaje alguno — actualiza directamente la conversación, igual que "AI Enabled"
+  // pero temporal. El gate real vive en session-manager.ts (justo antes de maybeRunFlow /
+  // maybeReplyWithAi), esto solo deja la marca de tiempo.
+  if (effect.kind === 'autooff') {
+    const disabledUntil = new Date(Date.now() + Math.max(0, effect.autooffSeconds || 0) * 1000);
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { botDisabledUntil: disabledUntil } });
+    return;
+  }
+
+  const contactMetadata = effect.kind === 'contact'
+    ? { contacts: [{ displayName: effect.contactName || 'Contacto', vcard: buildVcard(effect.contactName || 'Contacto', effect.contactPhone || '', effect.contactCompany) }] }
+    : {};
+  // Puesto por el prompt de un nodo Menú en modo "botones" — leído por outbound-worker.ts para
+  // mandar un mensaje `buttons` real de Baileys en vez de texto plano.
+  const buttonsMetadata = effect.buttons?.length ? { buttons: effect.buttons } : {};
+
   const message = await prisma.message.create({
     data: {
       companyId: conversation.companyId,
@@ -52,7 +81,7 @@ async function sendOneEffect(
       mimeType: effect.mimeType || null,
       caption: effect.caption || null,
       fileName: effect.fileName || null,
-      metadata: { flowId, flowExecutionId: executionId },
+      metadata: { flowId, flowExecutionId: executionId, ...contactMetadata, ...buttonsMetadata },
     },
   });
 

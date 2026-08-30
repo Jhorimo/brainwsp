@@ -59,12 +59,16 @@ export class AdminService {
       if (!plan) throw new NotFoundException('Plan no encontrado');
     }
 
+    // Se pisa "desde cuándo" el plan/licencia actual está activo cada vez que el plan cambia
+    // o se toca la fecha de vencimiento a mano — no cuando solo se activa/suspende la empresa.
+    const touchesLicense = (data.planId !== undefined && data.planId !== company.planId) || data.licenseRenewsAt !== undefined;
     const updated = await this.prisma.company.update({
       where: { id: companyId },
       data: {
         ...(data.active !== undefined ? { active: data.active } : {}),
         ...(data.planId !== undefined ? { planId: data.planId } : {}),
         ...(data.licenseRenewsAt !== undefined ? { licenseRenewsAt: data.licenseRenewsAt ? new Date(data.licenseRenewsAt) : null } : {}),
+        ...(touchesLicense ? { planStartedAt: new Date() } : {}),
       },
       include: { plan: { select: { id: true, name: true } } },
     });
@@ -105,7 +109,10 @@ export class AdminService {
     return this.prisma.plan.findMany({ orderBy: { price: 'asc' }, include: { _count: { select: { companies: true } } } });
   }
 
-  createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number }) {
+  async createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; isDefault?: boolean; trialDays?: number; features?: string[] }) {
+    // Solo un plan puede ser el default de registro — mismo patrón que Department.isDefault
+    // (ver team.service.ts): desmarcar todos antes de crear este con la marca puesta.
+    if (input.isDefault) await this.prisma.plan.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
     return this.prisma.plan.create({
       data: {
         name: input.name.trim(),
@@ -115,6 +122,9 @@ export class AdminService {
         maxAgents: input.maxAgents,
         maxInstances: input.maxInstances,
         maxMessages: input.maxMessages,
+        isDefault: input.isDefault ?? false,
+        ...(input.trialDays !== undefined ? { trialDays: input.trialDays } : {}),
+        ...(input.features !== undefined ? { features: input.features } : {}),
       },
     }).catch((error: unknown) => {
       if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe un plan con ese nombre');
@@ -122,9 +132,10 @@ export class AdminService {
     });
   }
 
-  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; active?: boolean }) {
+  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; active?: boolean; isDefault?: boolean; trialDays?: number; features?: string[] }) {
     const plan = await this.prisma.plan.findUnique({ where: { id } });
     if (!plan) throw new NotFoundException('Plan no encontrado');
+    if (input.isDefault) await this.prisma.plan.updateMany({ where: { isDefault: true, id: { not: id } }, data: { isDefault: false } });
     return this.prisma.plan.update({
       where: { id },
       data: {
@@ -136,6 +147,9 @@ export class AdminService {
         ...(input.maxInstances !== undefined ? { maxInstances: input.maxInstances } : {}),
         ...(input.maxMessages !== undefined ? { maxMessages: input.maxMessages } : {}),
         ...(input.active !== undefined ? { active: input.active } : {}),
+        ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
+        ...(input.trialDays !== undefined ? { trialDays: input.trialDays } : {}),
+        ...(input.features !== undefined ? { features: input.features } : {}),
       },
     });
   }
@@ -145,6 +159,115 @@ export class AdminService {
     if (!plan) throw new NotFoundException('Plan no encontrado');
     await this.prisma.plan.delete({ where: { id } });
     return { success: true };
+  }
+
+  // --- Métodos de pago manual (catálogo global de la plataforma) ---
+
+  listPaymentMethods() {
+    return this.prisma.platformPaymentMethod.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+  }
+
+  async getPaymentMethodQrObjectName(id: string) {
+    const method = await this.prisma.platformPaymentMethod.findUnique({ where: { id }, select: { qrImageUrl: true } });
+    if (!method?.qrImageUrl) throw new NotFoundException('Este método de pago no tiene QR');
+    return method.qrImageUrl.split('/').pop() as string;
+  }
+
+  createPaymentMethod(input: { label: string; accountNumber: string; accountHolder: string; instructions?: string; qrImageUrl?: string }) {
+    return this.prisma.platformPaymentMethod.create({
+      data: {
+        label: input.label.trim(),
+        accountNumber: input.accountNumber.trim(),
+        accountHolder: input.accountHolder.trim(),
+        instructions: input.instructions?.trim() || null,
+        qrImageUrl: input.qrImageUrl || null,
+      },
+    });
+  }
+
+  async updatePaymentMethod(id: string, input: { label?: string; accountNumber?: string; accountHolder?: string; instructions?: string; qrImageUrl?: string | null; active?: boolean; sortOrder?: number }) {
+    const method = await this.prisma.platformPaymentMethod.findUnique({ where: { id } });
+    if (!method) throw new NotFoundException('Método de pago no encontrado');
+    return this.prisma.platformPaymentMethod.update({
+      where: { id },
+      data: {
+        ...(input.label !== undefined ? { label: input.label.trim() } : {}),
+        ...(input.accountNumber !== undefined ? { accountNumber: input.accountNumber.trim() } : {}),
+        ...(input.accountHolder !== undefined ? { accountHolder: input.accountHolder.trim() } : {}),
+        ...(input.instructions !== undefined ? { instructions: input.instructions?.trim() || null } : {}),
+        ...(input.qrImageUrl !== undefined ? { qrImageUrl: input.qrImageUrl } : {}),
+        ...(input.active !== undefined ? { active: input.active } : {}),
+        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+      },
+    });
+  }
+
+  async deletePaymentMethod(id: string) {
+    const method = await this.prisma.platformPaymentMethod.findUnique({ where: { id } });
+    if (!method) throw new NotFoundException('Método de pago no encontrado');
+    await this.prisma.platformPaymentMethod.delete({ where: { id } });
+    return { success: true };
+  }
+
+  // --- Solicitudes de pago manual ---
+
+  listPaymentRequests(status?: 'PENDING' | 'APPROVED' | 'REJECTED') {
+    return this.prisma.paymentRequest.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        company: { select: { id: true, name: true } },
+        plan: { select: { id: true, name: true, billingCycle: true, price: true, priceUsd: true } },
+        paymentMethod: { select: { id: true, label: true } },
+        reviewedBy: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async getPaymentRequestProof(id: string) {
+    const request = await this.prisma.paymentRequest.findUnique({ where: { id }, select: { proofUrl: true, proofMimeType: true } });
+    if (!request) throw new NotFoundException('Solicitud no encontrada');
+    return request;
+  }
+
+  // Aprobar mueve la licencia real de la empresa — la duración sale del billingCycle del plan
+  // solicitado (mensual = +30 días, anual = +365), contados desde HOY (no se acumula sobre el
+  // vencimiento anterior, para no premiar a alguien que pagó tarde con más días de los que
+  // compró). FREE no debería llegar a un pago real, pero por las dudas no mueve la fecha.
+  async approvePaymentRequest(actorUserId: string, id: string, ip?: string, userAgent?: string) {
+    const request = await this.prisma.paymentRequest.findUnique({ where: { id }, include: { plan: true } });
+    if (!request) throw new NotFoundException('Solicitud no encontrada');
+    if (request.status !== 'PENDING') throw new BadRequestException('Esta solicitud ya fue revisada');
+
+    const days = request.plan.billingCycle === 'ANNUAL' ? 365 : request.plan.billingCycle === 'MONTHLY' ? 30 : 0;
+    const licenseRenewsAt = days > 0 ? new Date(Date.now() + days * 24 * 3600 * 1000) : undefined;
+
+    const [updatedRequest] = await this.prisma.$transaction([
+      this.prisma.paymentRequest.update({
+        where: { id },
+        data: { status: 'APPROVED', reviewedByUserId: actorUserId, reviewedAt: new Date() },
+      }),
+      this.prisma.company.update({
+        where: { id: request.companyId },
+        data: { planId: request.planId, planStartedAt: new Date(), ...(licenseRenewsAt ? { licenseRenewsAt } : {}) },
+      }),
+    ]);
+
+    await this.logAction({ companyId: request.companyId, userId: actorUserId, action: 'PAYMENT_REQUEST_APPROVED', entity: 'PaymentRequest', entityId: id, ip, userAgent, metadata: { planId: request.planId } });
+    return updatedRequest;
+  }
+
+  async rejectPaymentRequest(actorUserId: string, id: string, note?: string, ip?: string, userAgent?: string) {
+    const request = await this.prisma.paymentRequest.findUnique({ where: { id } });
+    if (!request) throw new NotFoundException('Solicitud no encontrada');
+    if (request.status !== 'PENDING') throw new BadRequestException('Esta solicitud ya fue revisada');
+
+    const updated = await this.prisma.paymentRequest.update({
+      where: { id },
+      data: { status: 'REJECTED', reviewNote: note?.trim() || null, reviewedByUserId: actorUserId, reviewedAt: new Date() },
+    });
+    await this.logAction({ companyId: request.companyId, userId: actorUserId, action: 'PAYMENT_REQUEST_REJECTED', entity: 'PaymentRequest', entityId: id, ip, userAgent });
+    return updated;
   }
 
   listSuggestions() {

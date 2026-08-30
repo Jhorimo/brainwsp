@@ -10,13 +10,21 @@ export type ContentBlock =
   | { id: string; kind: 'video'; mediaUrl: string; mimeType?: string; caption?: string; fileName?: string }
   | { id: string; kind: 'audio'; mediaUrl: string; mimeType?: string; fileName?: string }
   | { id: string; kind: 'file'; mediaUrl: string; mimeType?: string; fileName?: string }
+  | { id: string; kind: 'contact'; contactName: string; contactPhone: string; contactCompany?: string }
+  // Suprime automatizaciones + respuesta de IA para este contacto durante `seconds` — ver el
+  // gate en apps/worker/src/session-manager.ts, justo antes de maybeRunFlow/maybeReplyWithAi.
+  | { id: string; kind: 'autooff'; seconds: number }
   | { id: string; kind: 'delay'; seconds: number };
 
 export type StartNodeData = Record<string, never>;
 export type ContentNodeData = { label: string; blocks: ContentBlock[] };
 export type WaitNodeData = { seconds: number };
 export type MenuOption = { id: string; text: string };
-export type MenuNodeData = { label: string; prompt: string; options: MenuOption[] };
+// 'buttons' manda botones interactivos reales de WhatsApp en vez de una lista numerada de
+// texto — solo funciona con <= 3 opciones (límite del propio WhatsApp) y no está oficialmente
+// soportado fuera de la Business Cloud API, así que es best-effort (ver automation-engine.ts
+// en apps/worker). Sin definir (grafos guardados antes de esto) se comporta como 'list'.
+export type MenuNodeData = { label: string; prompt: string; options: MenuOption[]; displayMode?: 'list' | 'buttons' };
 
 export const NO_RESPONSE_HANDLE = 'no-response';
 
@@ -48,12 +56,17 @@ export type FlowStats = { total: number; active: number; withAi: number; shared:
 export type SimulateEffect = {
   nodeId: string;
   blockId: string;
-  kind: 'text' | 'image' | 'video' | 'audio' | 'file';
+  kind: 'text' | 'image' | 'video' | 'audio' | 'file' | 'contact' | 'autooff';
   text?: string;
   mediaUrl?: string;
   mimeType?: string;
   caption?: string;
   fileName?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactCompany?: string;
+  autooffSeconds?: number;
+  buttons?: MenuOption[];
   delayMs: number;
 };
 

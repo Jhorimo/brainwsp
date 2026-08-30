@@ -30,6 +30,9 @@ export default function AutomationsPage() {
   const [optionsOpenId, setOptionsOpenId] = useState<string | null>(null);
   const [moveOpenId, setMoveOpenId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState('');
+  const [moveNewFolderName, setMoveNewFolderName] = useState('');
+  const [moveError, setMoveError] = useState('');
+  const [moveSaving, setMoveSaving] = useState(false);
   const [shareOpenId, setShareOpenId] = useState<string | null>(null);
   const [shareTargets, setShareTargets] = useState<string[]>([]);
   const [shareSaving, setShareSaving] = useState(false);
@@ -134,14 +137,32 @@ export default function AutomationsPage() {
   const openMove = (flow: FlowSummary) => {
     setOptionsOpenId(null);
     setMoveTarget(flow.folder?.id || '');
+    setMoveNewFolderName('');
+    setMoveError('');
     setMoveOpenId(flow.id);
   };
 
   const submitMove = async (flow: FlowSummary) => {
-    await apiFetch(`/automations/flows/${flow.id}`, { method: 'PATCH', body: JSON.stringify({ folderId: moveTarget || null }) });
-    const nextFolder = folders.find((folder) => folder.id === moveTarget) || null;
-    setFlows((current) => current.map((item) => (item.id === flow.id ? { ...item, folder: nextFolder } : item)));
-    setMoveOpenId(null);
+    setMoveError('');
+    setMoveSaving(true);
+    try {
+      let folderId = moveTarget;
+      let nextFolder = folders.find((folder) => folder.id === moveTarget) || null;
+      if (folderId === NEW_FOLDER_VALUE) {
+        if (!moveNewFolderName.trim()) { setMoveError('Ponle un nombre a la carpeta nueva'); return; }
+        const created = await apiFetch<FlowFolder>('/automations/folders', { method: 'POST', body: JSON.stringify({ name: moveNewFolderName.trim() }) });
+        setFolders((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+        folderId = created.id;
+        nextFolder = created;
+      }
+      await apiFetch(`/automations/flows/${flow.id}`, { method: 'PATCH', body: JSON.stringify({ folderId: folderId || null }) });
+      setFlows((current) => current.map((item) => (item.id === flow.id ? { ...item, folder: nextFolder } : item)));
+      setMoveOpenId(null);
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : 'No se pudo mover el flujo');
+    } finally {
+      setMoveSaving(false);
+    }
   };
 
   const openShare = (flow: FlowSummary) => {
@@ -270,11 +291,16 @@ export default function AutomationsPage() {
                       <div className="flow-move-row">
                         <FolderInput size={15} />
                         <span>Mover a:</span>
-                        <select value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)}>
+                        <select value={moveTarget} onChange={(e) => { setMoveTarget(e.target.value); if (e.target.value !== NEW_FOLDER_VALUE) setMoveNewFolderName(''); }}>
                           <option value="">Sin carpeta</option>
                           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                          <option value={NEW_FOLDER_VALUE}>+ Crear nueva carpeta...</option>
                         </select>
-                        <button className="button small primary" type="button" onClick={() => void submitMove(flow)}>Mover</button>
+                        {moveTarget === NEW_FOLDER_VALUE && (
+                          <input value={moveNewFolderName} onChange={(e) => setMoveNewFolderName(e.target.value)} placeholder="Nombre de la carpeta" autoFocus style={{ maxWidth: 180 }} />
+                        )}
+                        {moveError && <span className="row-sub" style={{ color: 'var(--danger)' }}>{moveError}</span>}
+                        <button className="button small primary" type="button" disabled={moveSaving} onClick={() => void submitMove(flow)}>{moveSaving ? 'Moviendo...' : 'Mover'}</button>
                         <button className="button small" type="button" onClick={() => setMoveOpenId(null)}>Cancelar</button>
                       </div>
                     </td>

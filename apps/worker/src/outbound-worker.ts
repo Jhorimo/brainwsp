@@ -83,7 +83,34 @@ export class OutboundWorker {
       let response;
 
       if (message.type === MessageType.TEXT) {
-        response = await socket.sendMessage(message.contact.waId, { text: message.body || '' }, options);
+        // Escrito por sendOneEffect (automation-engine.ts) para el prompt de un nodo Menú en
+        // modo "botones" — WhatsApp responde con `buttonsResponseMessage` cuando lo tocan,
+        // parseado a texto plano en message-utils.ts (mismo body que el nombre del botón), así
+        // que matchMenuOption lo matchea igual que una respuesta escrita a mano.
+        //
+        // sendMessage() ya no ofrece un atajo para esto — Baileys lo quitó de su API amigable
+        // porque WhatsApp dejó de renderizar buttonsMessage de forma confiable fuera de la
+        // Business Cloud API oficial de Meta. El tipo de proto sigue existiendo, así que se
+        // arma a mano y se manda con relayMessage (nivel más bajo); en clientes de WhatsApp
+        // recientes puede no aparecer como botones tocables — best-effort, no garantizado.
+        const buttons = (message.metadata as { buttons?: { id: string; text: string }[] } | null)?.buttons;
+        if (buttons?.length) {
+          const buttonsContent: proto.IMessage = {
+            buttonsMessage: {
+              contentText: message.body || '',
+              headerType: proto.Message.ButtonsMessage.HeaderType.EMPTY,
+              buttons: buttons.map((b) => ({
+                buttonId: b.id,
+                buttonText: { displayText: b.text },
+                type: proto.Message.ButtonsMessage.Button.Type.RESPONSE,
+              })),
+            },
+          };
+          const msgId = await socket.relayMessage(message.contact.waId, buttonsContent, {});
+          response = { key: { id: msgId, remoteJid: message.contact.waId, fromMe: true }, message: buttonsContent } as WAMessage;
+        } else {
+          response = await socket.sendMessage(message.contact.waId, { text: message.body || '' }, options);
+        }
       } else if (message.type === MessageType.IMAGE) {
         if (!message.mediaUrl) throw new Error('La imagen no tiene URL');
         const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
@@ -125,6 +152,15 @@ export class OutboundWorker {
         if (!message.mediaUrl) throw new Error('El sticker no tiene URL');
         const buffer = await downloadObjectBuffer(objectNameFromUrl(message.mediaUrl));
         response = await socket.sendMessage(message.contact.waId, { sticker: buffer }, options);
+      } else if (message.type === MessageType.CONTACT) {
+        // Escrito por sendOneEffect (automation-engine.ts) para un nodo Contacto — mismo shape
+        // {displayName, vcard} que message-utils.ts arma al RECIBIR un contacto compartido.
+        const contacts = (message.metadata as { contacts?: { displayName?: string; vcard?: string }[] } | null)?.contacts || [];
+        const first = contacts[0];
+        if (!first?.vcard) throw new Error('El contacto no tiene vcard');
+        response = await socket.sendMessage(message.contact.waId, {
+          contacts: { displayName: first.displayName || 'Contacto', contacts: [{ vcard: first.vcard }] },
+        }, options);
       } else {
         throw new Error(`Tipo de mensaje todavía no implementado: ${message.type}`);
       }

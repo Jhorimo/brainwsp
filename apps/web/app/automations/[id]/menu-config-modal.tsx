@@ -1,26 +1,32 @@
 'use client';
 
 import { useState } from 'react';
-import { Lightbulb, ListTree, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Lightbulb, ListTree, Plus, Trash2, X } from 'lucide-react';
 import { newOptionId, type MenuOption } from '../types';
+
+type DisplayMode = 'list' | 'buttons';
+const MAX_BUTTONS = 3; // límite del propio WhatsApp para un mensaje de botones — ver run-flow.ts
 
 type Props = {
   label: string;
   prompt: string;
   options: MenuOption[];
+  displayMode?: DisplayMode;
   onClose: () => void;
-  onSave: (label: string, prompt: string, options: MenuOption[]) => void;
+  onSave: (label: string, prompt: string, options: MenuOption[], displayMode: DisplayMode) => void;
 };
 
-export function MenuConfigModal({ label: initialLabel, prompt: initialPrompt, options: initialOptions, onClose, onSave }: Props) {
+export function MenuConfigModal({ label: initialLabel, prompt: initialPrompt, options: initialOptions, displayMode: initialDisplayMode, onClose, onSave }: Props) {
   const [label, setLabel] = useState(initialLabel);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [options, setOptions] = useState<MenuOption[]>(initialOptions.length ? initialOptions : [{ id: newOptionId(), text: '' }, { id: newOptionId(), text: '' }]);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(initialDisplayMode || 'list');
 
   const updateOption = (id: string, text: string) => setOptions((current) => current.map((option) => (option.id === id ? { ...option, text } : option)));
   const removeOption = (id: string) => setOptions((current) => current.filter((option) => option.id !== id));
   const addOption = () => setOptions((current) => [...current, { id: newOptionId(), text: '' }]);
 
+  const atButtonCap = displayMode === 'buttons' && options.length >= MAX_BUTTONS;
   const canSave = prompt.trim().length > 0 && options.some((option) => option.text.trim().length > 0);
 
   return (
@@ -48,6 +54,24 @@ export function MenuConfigModal({ label: initialLabel, prompt: initialPrompt, op
             <span className="row-sub">Este texto se envía junto con las opciones del menú.</span>
           </div>
 
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Modo de visualización</label>
+            <div className="menu-mode-toggle">
+              <button type="button" className={`menu-mode-btn ${displayMode === 'list' ? 'active' : ''}`} onClick={() => setDisplayMode('list')}>Lista numerada</button>
+              <button type="button" className={`menu-mode-btn ${displayMode === 'buttons' ? 'active' : ''}`} onClick={() => setDisplayMode('buttons')}>Botones (máx. {MAX_BUTTONS})</button>
+            </div>
+          </div>
+
+          <div className="menu-buttons-warning">
+            <AlertTriangle size={14} />
+            <span>
+              <strong>Los botones son experimentales.</strong> WhatsApp no los soporta de forma oficial fuera de su plataforma de negocios — algunos clientes podrían recibir el mensaje sin botones tocables o incompleto. Si necesitas que el menú funcione siempre, usa <strong>Lista numerada</strong> (el cliente responde escribiendo el número o el texto de la opción).
+              {displayMode === 'buttons' && options.length > MAX_BUTTONS && (
+                <> Además, tienes más de {MAX_BUTTONS} opciones — WhatsApp permite máximo {MAX_BUTTONS} botones, así que este menú se enviará como lista numerada de todas formas.</>
+              )}
+            </span>
+          </div>
+
           <div className="field" style={{ marginTop: 14 }}>
             <label>Opciones del menú</label>
             <div className="menu-option-list">
@@ -59,7 +83,7 @@ export function MenuConfigModal({ label: initialLabel, prompt: initialPrompt, op
                 </div>
               ))}
             </div>
-            <button type="button" className="menu-add-option-btn" onClick={addOption}><Plus size={14} /> Añadir opción</button>
+            <button type="button" className="menu-add-option-btn" onClick={addOption} disabled={atButtonCap} title={atButtonCap ? `WhatsApp permite máximo ${MAX_BUTTONS} botones` : undefined}><Plus size={14} /> Añadir opción</button>
           </div>
 
           <div className="menu-config-hint">
@@ -69,7 +93,7 @@ export function MenuConfigModal({ label: initialLabel, prompt: initialPrompt, op
         </div>
         <div className="modal-actions">
           <button className="button" type="button" onClick={onClose}>Cancelar</button>
-          <button className="button primary" type="button" disabled={!canSave} onClick={() => onSave(label.trim() || 'Menú', prompt.trim(), options.filter((option) => option.text.trim()))}>Guardar nodo</button>
+          <button className="button primary" type="button" disabled={!canSave} onClick={() => onSave(label.trim() || 'Menú', prompt.trim(), options.filter((option) => option.text.trim()), displayMode)}>Guardar nodo</button>
         </div>
       </div>
     </div>

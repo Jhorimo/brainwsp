@@ -37,6 +37,12 @@ enum ConversationStatus {
   CLOSED
 }
 
+enum PaymentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 
 enum MessageDirection {
   INBOUND
@@ -109,6 +115,10 @@ model Company {
   active         Boolean            @default(true)
   phone          String?
   planId         String?
+  // Cuándo se activó el plan actual (no cuándo se creó la empresa) — se pisa cada vez que el
+  // plan/licencia realmente cambia: registro con plan default, edición manual desde
+  // /admin/clients o "Licencias", o aprobar una solicitud de pago. Ver admin.service.ts.
+  planStartedAt  DateTime?
   licenseRenewsAt DateTime?
   aiSystemPrompt String?            @db.Text
   createdAt      DateTime           @default(now())
@@ -139,6 +149,7 @@ model Company {
   flowFolders    FlowFolder[]
   flows          Flow[]
   flowExecutions FlowExecution[]
+  paymentRequests PaymentRequest[]
 }
 
 // Platform-level catalog, managed by SUPERADMIN users — not scoped to any one company.
@@ -156,10 +167,65 @@ model Plan {
   // sin límite. La cuota "de hoy" que se muestra en el dashboard se deriva de esta (mensual /
   // 30) en vez de guardarse aparte, para no tener dos números que se puedan desincronizar.
   maxMessages  Int?
+  // El plan marcado como default es el que se asigna automáticamente al registrar una empresa
+  // nueva (ver auth.service.ts#createCompanyWithOwner) — solo uno puede estar en true a la vez,
+  // igual que Department.isDefault (ver team.service.ts).
+  isDefault    Boolean   @default(false)
+  // Días de licencia que se otorgan la primera vez que se asigna este plan (registro o cambio
+  // manual desde /admin) — típicamente solo tiene sentido en el plan gratuito/default.
+  trialDays    Int       @default(3)
+  // Lista de beneficios en texto libre que se muestra en las tarjetas de "Mi Plan" — cada
+  // elemento es una línea. Vacío (default) hace que el frontend arme la lista sola a partir de
+  // maxAgents/maxInstances/maxMessages en vez de no mostrar nada.
+  features     String[]  @default([])
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   companies    Company[]
+  paymentRequests PaymentRequest[]
+}
+
+// Catálogo global (no por empresa) de cuentas donde el cliente puede pagar manualmente su plan
+// — gestionado por SUPERADMIN desde /admin/payment-methods. Sin datos precargados a propósito:
+// son cuentas de dinero real, las carga el operador de la plataforma.
+model PlatformPaymentMethod {
+  id             String    @id @default(uuid())
+  label          String
+  accountNumber  String
+  accountHolder  String
+  instructions   String?   @db.Text
+  qrImageUrl     String?   @db.Text
+  active         Boolean   @default(true)
+  sortOrder      Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  paymentRequests PaymentRequest[]
+}
+
+// Solicitud de pago manual que un cliente sube desde "Mi Plan" (comprobante + monto elegido) y
+// que un SUPERADMIN aprueba o rechaza desde /admin/payment-requests. Aprobarla es lo único que
+// mueve Company.planId/licenseRenewsAt — ver admin.service.ts#approvePaymentRequest.
+model PaymentRequest {
+  id              String                @id @default(uuid())
+  companyId       String
+  planId          String
+  paymentMethodId String?
+  whatsappPhone   String
+  proofUrl        String                @db.Text
+  proofMimeType   String?
+  status          PaymentRequestStatus  @default(PENDING)
+  reviewNote      String?               @db.Text
+  reviewedByUserId String?
+  reviewedAt      DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan            Plan                  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  paymentMethod   PlatformPaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  reviewedBy      User?                 @relation(fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+  @@index([status])
 }
 
 model User {
@@ -188,6 +254,7 @@ model User {
   connectedCalendars   GoogleCalendarIntegration[]
   createdCalendarEvents CalendarEvent[]
   createdFlows         Flow[]
+  reviewedPaymentRequests PaymentRequest[]
 
   @@index([companyId])
 }
@@ -422,6 +489,10 @@ model Conversation {
   status         ConversationStatus @default(OPEN)
   subject        String?
   aiEnabled      Boolean            @default(false)
+  // Set by an "Auto Off" flow block — mientras esté en el futuro, se suprimen tanto las
+  // automatizaciones por keyword como la respuesta libre de IA para este contacto (ver el gate
+  // en session-manager.ts, justo antes de maybeRunFlow/maybeReplyWithAi).
+  botDisabledUntil DateTime?
   pinned         Boolean            @default(false)
   unreadCount    Int                @default(0)
   lastMessageAt  DateTime           @default(now())

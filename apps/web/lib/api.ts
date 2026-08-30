@@ -90,6 +90,18 @@ export function quickReplyFileUrl(quickReplyId: string) {
   return `${API_URL}/quick-replies/${quickReplyId}/file?token=${encodeURIComponent(getToken())}`;
 }
 
+export function paymentMethodQrUrl(methodId: string) {
+  return `${API_URL}/billing/payment-methods/${methodId}/qr?token=${encodeURIComponent(getToken())}`;
+}
+
+export function adminPaymentMethodQrUrl(methodId: string) {
+  return `${API_URL}/admin/payment-methods/${methodId}/qr?token=${encodeURIComponent(getToken())}`;
+}
+
+export function adminPaymentRequestProofUrl(requestId: string) {
+  return `${API_URL}/admin/payment-requests/${requestId}/proof?token=${encodeURIComponent(getToken())}`;
+}
+
 // Turns a quick reply's stored attachment back into a real File, so it can flow through
 // the same attach-and-send composer path as a freshly picked file.
 export async function fetchAsFile(url: string, fileName: string, mimeType: string): Promise<File> {

@@ -30,13 +30,17 @@ function walk(graph: FlowGraph, startId: string | undefined): EngineResult {
     }
 
     if (isMenuNode(node)) {
-      const numbered = node.data.options.map((option, index) => `${index + 1}. ${option.text}`).join('\n');
+      // WhatsApp's real reply-buttons message caps at 3 buttons — beyond that (or in 'list'
+      // mode) it falls back to the numbered text list, same as always.
+      const useButtons = node.data.displayMode === 'buttons' && node.data.options.length > 0 && node.data.options.length <= 3;
+      const numbered = useButtons ? '' : node.data.options.map((option, index) => `${index + 1}. ${option.text}`).join('\n');
       effects.push({
         nodeId: node.id,
         blockId: 'menu-prompt',
         kind: 'text',
         delayMs: pendingDelayMs,
         text: numbered ? `${node.data.prompt}\n\n${numbered}` : node.data.prompt,
+        ...(useButtons ? { buttons: node.data.options } : {}),
       });
       return { effects, status: 'WAITING_INPUT', waitingNodeId: node.id, context };
     }
@@ -61,6 +65,8 @@ function walk(graph: FlowGraph, startId: string | undefined): EngineResult {
         ...(block.kind === 'image' || block.kind === 'video' ? { mediaUrl: block.mediaUrl, mimeType: block.mimeType, caption: block.caption, fileName: block.fileName } : {}),
         ...(block.kind === 'audio' ? { mediaUrl: block.mediaUrl, mimeType: block.mimeType, fileName: block.fileName } : {}),
         ...(block.kind === 'file' ? { mediaUrl: block.mediaUrl, mimeType: block.mimeType, fileName: block.fileName } : {}),
+        ...(block.kind === 'contact' ? { contactName: block.contactName, contactPhone: block.contactPhone, contactCompany: block.contactCompany } : {}),
+        ...(block.kind === 'autooff' ? { autooffSeconds: block.seconds } : {}),
       });
       pendingDelayMs = 0;
     }

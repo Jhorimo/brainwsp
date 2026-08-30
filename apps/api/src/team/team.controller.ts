@@ -53,10 +53,15 @@ export class TeamController {
     return this.service.clearDefaultAgent(user.companyId, id);
   }
 
+  @Get('company')
+  companyProfile(@CurrentUser() user: JwtUser) {
+    return this.service.getCompanyProfile(user.companyId);
+  }
+
   @Patch('company')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   updateCompany(@CurrentUser() user: JwtUser, @Body() dto: UpdateCompanyDto) {
-    return this.service.updateCompanyName(user.companyId, dto.name);
+    return this.service.updateCompanyProfile(user.companyId, dto);
   }
 
   @Get('departments')

@@ -7,9 +7,22 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TeamService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async updateCompanyName(companyId: string, name: string) {
-    const company = await this.prisma.company.update({ where: { id: companyId }, data: { name: name.trim() } });
-    return { id: company.id, name: company.name, slug: company.slug };
+  async getCompanyProfile(companyId: string) {
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { id: true, name: true, slug: true, phone: true } });
+    return company;
+  }
+
+  async updateCompanyProfile(companyId: string, data: { name?: string; phone?: string }) {
+    const company = await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+        // Cadena vacía borra el teléfono en vez de guardarlo como "" — mismo criterio que el
+        // resto de campos opcionales de texto en el schema.
+        ...(data.phone !== undefined ? { phone: data.phone.trim() || null } : {}),
+      },
+    });
+    return { id: company.id, name: company.name, slug: company.slug, phone: company.phone };
   }
 
   async listUsers(companyId: string) {

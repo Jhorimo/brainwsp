@@ -50,6 +50,14 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
         fileSize: toFileSize(content.documentMessage?.fileLength),
         quotedStanzaId: content.documentMessage?.contextInfo?.stanzaId || undefined,
       };
+    // Respuesta a un mensaje `buttons` (ver outbound-worker.ts) — WhatsApp la entrega como un
+    // tipo de contenido aparte, no como texto normal. Se normaliza a MessageType.TEXT con el
+    // nombre del botón como body, para que matchMenuOption (run-flow.ts) la matchee exactamente
+    // igual que si el cliente hubiera escrito la opción a mano.
+    case 'buttonsResponseMessage':
+      return { type: MessageType.TEXT, body: content.buttonsResponseMessage?.selectedDisplayText || content.buttonsResponseMessage?.selectedButtonId || '' };
+    case 'templateButtonReplyMessage':
+      return { type: MessageType.TEXT, body: content.templateButtonReplyMessage?.selectedDisplayText || content.templateButtonReplyMessage?.selectedId || '' };
     case 'stickerMessage':
       return { type: MessageType.STICKER, mimeType: content.stickerMessage?.mimetype || undefined, quotedStanzaId: content.stickerMessage?.contextInfo?.stanzaId || undefined };
     case 'locationMessage': {

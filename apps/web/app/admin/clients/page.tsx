@@ -11,10 +11,15 @@ type Owner = { id: string; name: string; email: string };
 type Plan = { id: string; name: string };
 type Company = {
   id: string; name: string; active: boolean; phone?: string | null;
-  planId?: string | null; plan?: Plan | null; licenseRenewsAt?: string | null; createdAt: string;
+  planId?: string | null; plan?: Plan | null; planStartedAt?: string | null; licenseRenewsAt?: string | null; createdAt: string;
   users: Owner[];
   _count: { instances: number; conversations: number; users: number };
 };
+
+function daysUntil(dateIso?: string | null) {
+  if (!dateIso) return null;
+  return Math.ceil((new Date(dateIso).getTime() - Date.now()) / (24 * 3600 * 1000));
+}
 
 function initialsOf(name: string) {
   return name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
@@ -98,6 +103,9 @@ export default function AdminClientsPage() {
               <th>Rol</th>
               <th>Estado</th>
               <th>Plan</th>
+              <th>Suscrito desde</th>
+              <th>Vence</th>
+              <th>Días rest.</th>
               <th>Teléfono</th>
               <th>Actividad</th>
               <th>Registro</th>
@@ -107,6 +115,7 @@ export default function AdminClientsPage() {
           <tbody>
             {companies.map((company) => {
               const owner = company.users[0];
+              const remaining = daysUntil(company.licenseRenewsAt);
               return (
                 <tr key={company.id}>
                   <td>
@@ -123,6 +132,15 @@ export default function AdminClientsPage() {
                       <option value="">Sin plan</option>
                       {plans.map((plan) => <option value={plan.id} key={plan.id}>{plan.name}</option>)}
                     </select>
+                  </td>
+                  <td>{company.planStartedAt ? new Date(company.planStartedAt).toLocaleDateString('es-PE') : '—'}</td>
+                  <td>{company.licenseRenewsAt ? new Date(company.licenseRenewsAt).toLocaleDateString('es-PE') : '—'}</td>
+                  <td>
+                    {remaining === null ? <span className="row-sub">Sin vencimiento</span> : (
+                      <span className={`status-pill ${remaining < 0 ? 'danger' : remaining <= 3 ? 'neutral' : 'success'}`}>
+                        {remaining < 0 ? `Vencido hace ${Math.abs(remaining)}d` : remaining === 0 ? 'Vence hoy' : `${remaining}d`}
+                      </span>
+                    )}
                   </td>
                   <td>{company.phone || '—'}</td>
                   <td><Radio size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.instances} inst. · <MessagesSquare size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.conversations} conv.</td>

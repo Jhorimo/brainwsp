@@ -182,11 +182,18 @@ export class UpdateTagDto {
 }
 
 export class UpdateCompanyDto {
-  @ApiProperty({ example: 'Brain Tech Perú' })
+  @ApiPropertyOptional({ example: 'Brain Tech Perú' })
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  name!: string;
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'Teléfono de contacto — lo ve el equipo de la plataforma en Admin > Usuarios para coordinar pagos/soporte.', example: '+51 999 888 777' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phone?: string;
 }
 
 export class UpdateAiSettingsDto {

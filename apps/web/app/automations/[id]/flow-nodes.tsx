@@ -1,8 +1,8 @@
 'use client';
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { FileText, Image as ImageIcon, ListTree, Mic, MessageSquareText, Pencil, Play, Timer, Trash2, Video } from 'lucide-react';
-import { NO_RESPONSE_HANDLE, type ContentBlock, type ContentNodeData, type MenuNodeData, type WaitNodeData } from '../types';
+import { Contact as ContactIcon, FileText, Image as ImageIcon, ListTree, Mic, MessageSquareText, Pencil, Play, Power, Timer, Trash2, Video } from 'lucide-react';
+import { blockMediaSrc, NO_RESPONSE_HANDLE, type ContentBlock, type ContentNodeData, type MenuNodeData, type WaitNodeData } from '../types';
 
 // Escala la unidad mostrada según la magnitud — a partir de DurationPicker un nodo Wait puede
 // guardar días/horas, y mostrarlos siempre como MM:SS (ej. "2880:00" para 2 días) era ilegible.
@@ -19,6 +19,8 @@ const BLOCK_ICONS: Record<ContentBlock['kind'], typeof MessageSquareText> = {
   video: Video,
   audio: Mic,
   file: FileText,
+  contact: ContactIcon,
+  autooff: Power,
   delay: Timer,
 };
 
@@ -40,6 +42,8 @@ function blockPreview(block: ContentBlock) {
     case 'video': return block.caption?.trim() || block.fileName || 'Video';
     case 'audio': return block.fileName || 'Audio';
     case 'file': return block.fileName || 'Archivo';
+    case 'contact': return block.contactName.trim() || block.contactPhone || 'Contacto';
+    case 'autooff': return `Auto off · ${formatCompactDuration(block.seconds)}`;
     default: return '';
   }
 }
@@ -87,6 +91,22 @@ export function ContentNodeView({ data, id }: NodeProps) {
       <div className="flow-node-body">
         {preview.length === 0 && <span className="row-sub">Sin contenido — haz clic en editar</span>}
         {preview.map((block) => {
+          if ((block.kind === 'image' || block.kind === 'video') && block.mediaUrl) {
+            return (
+              <div className="flow-node-media-block" key={block.id}>
+                {block.kind === 'image' ? (
+                  <img src={blockMediaSrc(block.mediaUrl, block.mimeType, block.fileName)} alt="" />
+                ) : (
+                  <div className="flow-node-media-video">
+                    <video src={blockMediaSrc(block.mediaUrl, block.mimeType, block.fileName)} muted preload="metadata" />
+                    <span className="flow-node-media-badge">VIDEO</span>
+                    <span className="flow-node-media-play"><Play size={16} fill="white" /></span>
+                  </div>
+                )}
+                {block.caption?.trim() && <div className="flow-node-media-caption">{block.caption}</div>}
+              </div>
+            );
+          }
           const Icon = BLOCK_ICONS[block.kind];
           return (
             <div className="flow-node-block" key={block.id}>
@@ -151,6 +171,7 @@ export function MenuNodeView({ data, id }: NodeProps) {
           <span>Menú de opciones</span>
         </div>
         <span className="flow-node-badge menu">MENU</span>
+        {nodeData.displayMode === 'buttons' && <span className="flow-node-badge buttons" title="Envía botones interactivos (mejor esfuerzo, sin garantía de WhatsApp)">BOTONES</span>}
         <button type="button" className="icon-button ghost small nodrag flow-node-action" title="Editar menú" onClick={() => nodeData.onEdit?.(id)}><Pencil size={13} /></button>
         <button type="button" className="icon-button ghost small nodrag flow-node-action" title="Eliminar nodo" onClick={() => nodeData.onDelete?.(id)}><Trash2 size={13} /></button>
       </div>

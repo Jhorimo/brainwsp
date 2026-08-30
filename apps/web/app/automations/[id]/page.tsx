@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Plus, Save, Settings, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { edgeTypes } from './flow-edges';
 import { MenuConfigModal } from './menu-config-modal';
 import { nodeTypes } from './flow-nodes';
 import { NodeConfigModal } from './node-config-modal';
@@ -33,7 +34,7 @@ function toReactFlow(graph: FlowDetail['graph']): { nodes: Node[]; edges: Edge[]
     data: (node.data as Record<string, unknown>) || {},
     deletable: node.type !== 'start',
   }));
-  const edges: Edge[] = graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle || undefined, animated: true }));
+  const edges: Edge[] = graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle || undefined, animated: true, type: 'deletable' }));
   return { nodes, edges };
 }
 
@@ -88,7 +89,7 @@ function EditorInner() {
   // de ESE mismo handle, no cualquier otra que salga del mismo nodo. El lado destino no se
   // deduplica: que varias opciones converjan en un mismo nodo es válido y esperado.
   const onConnect = useCallback((connection: Connection) => {
-    setEdges((current) => addEdge({ ...connection, animated: true }, current.filter((edge) => !(edge.source === connection.source && edge.sourceHandle === connection.sourceHandle))));
+    setEdges((current) => addEdge({ ...connection, animated: true, type: 'deletable' }, current.filter((edge) => !(edge.source === connection.source && edge.sourceHandle === connection.sourceHandle))));
   }, [setEdges]);
 
   const nextPosition = () => {
@@ -129,11 +130,11 @@ function EditorInner() {
     setEditingNodeId(null);
   };
 
-  const saveMenuConfig = (label: string, prompt: string, options: MenuOption[]) => {
+  const saveMenuConfig = (label: string, prompt: string, options: MenuOption[], displayMode: 'list' | 'buttons') => {
     if (!editingNodeId) return;
     const nodeId = editingNodeId;
     const validHandles = new Set(options.map((option) => option.id));
-    setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, data: { label, prompt, options } } : node)));
+    setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, data: { label, prompt, options, displayMode } } : node)));
     // Si se borró una opción, su conexión en el canvas queda apuntando a un handle que ya no
     // existe — se quita para no dejar un edge "fantasma" (sourceHandle nunca vuelve a hacer
     // match en nextNodeId, así que sin esto el flujo simplemente se detendría ahí en silencio).
@@ -154,7 +155,7 @@ function EditorInner() {
           : node.type === 'wait'
             ? { seconds: (node.data as WaitNodeData).seconds }
             : node.type === 'menu'
-              ? { label: (node.data as MenuNodeData).label, prompt: (node.data as MenuNodeData).prompt, options: (node.data as MenuNodeData).options }
+              ? { label: (node.data as MenuNodeData).label, prompt: (node.data as MenuNodeData).prompt, options: (node.data as MenuNodeData).options, displayMode: (node.data as MenuNodeData).displayMode }
               : {},
       }));
       const cleanEdges = edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle || undefined }));
@@ -228,7 +229,8 @@ function EditorInner() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
-            defaultEdgeOptions={{ animated: true }}
+            edgeTypes={edgeTypes}
+            defaultEdgeOptions={{ animated: true, type: 'deletable' }}
             fitView
             deleteKeyCode={null}
           >
@@ -261,6 +263,7 @@ function EditorInner() {
           label={(editingNode.data as MenuNodeData).label}
           prompt={(editingNode.data as MenuNodeData).prompt}
           options={(editingNode.data as MenuNodeData).options}
+          displayMode={(editingNode.data as MenuNodeData).displayMode}
           onClose={() => setEditingNodeId(null)}
           onSave={saveMenuConfig}
         />

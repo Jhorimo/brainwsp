@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class LoginDto {
   @ApiProperty({ example: 'admin@braintech.com.pe' })
@@ -70,4 +70,15 @@ export class RegisterDto {
   @IsString()
   @MinLength(8)
   password!: string;
+
+  @ApiPropertyOptional({ example: '+51 999 888 777', description: 'Se guarda como el teléfono de contacto de la empresa (visible en Admin > Usuarios).' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phone?: string;
+
+  @ApiPropertyOptional({ description: 'Plan que el usuario eligió en el selector de registro. Si es un plan pago, la empresa igual arranca con el plan gratuito por defecto (si hay uno configurado) y queda pendiente de pago — no se otorga un plan pago sin pasar por "Mi Plan".' })
+  @IsOptional()
+  @IsUUID()
+  requestedPlanId?: string;
 }

@@ -25,6 +25,13 @@ export class AuthController {
     return this.auth.register(dto, req.ip, String(req.headers['user-agent'] || ''));
   }
 
+  // Público (sin JWT) — el selector de planes de /register lo necesita antes de que exista
+  // una sesión. Mismos datos que /billing/plans, sin el guard de compañía.
+  @Get('plans')
+  plans() {
+    return this.auth.listPublicPlans();
+  }
+
   @Get('google')
   googleStart(@Res() res: Response) {
     res.redirect(this.auth.buildGoogleAuthUrl());
