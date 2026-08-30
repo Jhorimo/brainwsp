@@ -19,7 +19,7 @@ type PaymentRequest = {
   reviewedBy?: { id: string; name: string } | null;
 };
 
-type Company = { id: string; name: string };
+type Company = { id: string; name: string; users: { id: string; name: string; email: string }[] };
 type Plan = { id: string; name: string; billingCycle: string; price: number; priceUsd: number; active: boolean };
 type PaymentMethod = { id: string; label: string; active: boolean };
 
@@ -51,6 +51,8 @@ export default function AdminPaymentRequestsPage() {
   const [newModal, setNewModal] = useState(false);
   const [newForm, setNewForm] = useState(emptyNewForm);
   const [saving, setSaving] = useState(false);
+  const [companySearch, setCompanySearch] = useState('');
+  const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -65,6 +67,8 @@ export default function AdminPaymentRequestsPage() {
 
   const openNew = async () => {
     setNewForm(emptyNewForm);
+    setCompanySearch('');
+    setCompanyPickerOpen(false);
     setNewModal(true);
     try {
       const [companyList, planList, methodList] = await Promise.all([
@@ -81,6 +85,19 @@ export default function AdminPaymentRequestsPage() {
   };
 
   const selectedPlan = plans.find((plan) => plan.id === newForm.planId);
+
+  const companyMatches = (company: Company, query: string) => {
+    const owner = company.users[0];
+    const haystack = `${company.name} ${owner?.name || ''} ${owner?.email || ''}`.toLowerCase();
+    return haystack.includes(query.trim().toLowerCase());
+  };
+  const filteredCompanies = companySearch.trim() ? companies.filter((c) => companyMatches(c, companySearch)) : companies;
+
+  const selectCompany = (company: Company) => {
+    setNewForm({ ...newForm, companyId: company.id });
+    setCompanySearch(company.name);
+    setCompanyPickerOpen(false);
+  };
 
   const createPaymentRequest = async () => {
     if (!newForm.companyId || !newForm.planId) return;
@@ -256,12 +273,35 @@ export default function AdminPaymentRequestsPage() {
             <div className="modal-header"><h2>Nuevo pago</h2><p>Registra un pago coordinado fuera de la app (transferencia, efectivo, etc). &quot;Completado&quot; activa el plan de inmediato.</p></div>
             <div className="modal-body">
               <div className="form-grid">
-                <div className="field">
+                <div className="field company-picker">
                   <label>Empresa</label>
-                  <select value={newForm.companyId} onChange={(e) => setNewForm({ ...newForm, companyId: e.target.value })}>
-                    <option value="">Selecciona una empresa</option>
-                    {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-                  </select>
+                  <input
+                    value={companySearch}
+                    onChange={(e) => { setCompanySearch(e.target.value); setNewForm({ ...newForm, companyId: '' }); setCompanyPickerOpen(true); }}
+                    onFocus={(e) => { e.target.select(); setCompanyPickerOpen(true); }}
+                    onBlur={() => setTimeout(() => setCompanyPickerOpen(false), 120)}
+                    placeholder="Busca por empresa, propietario o correo..."
+                    autoComplete="off"
+                  />
+                  {companyPickerOpen && (
+                    <div className="company-picker-panel">
+                      {filteredCompanies.length ? filteredCompanies.map((company) => {
+                        const owner = company.users[0];
+                        return (
+                          <button
+                            type="button"
+                            key={company.id}
+                            className={`company-picker-option ${newForm.companyId === company.id ? 'active' : ''}`}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => selectCompany(company)}
+                          >
+                            <strong>{company.name}</strong>
+                            {owner && <span>{owner.name} · {owner.email}</span>}
+                          </button>
+                        );
+                      }) : <div className="company-picker-empty">Sin resultados para &quot;{companySearch}&quot;</div>}
+                    </div>
+                  )}
                 </div>
                 <div className="field">
                   <label>Plan</label>
