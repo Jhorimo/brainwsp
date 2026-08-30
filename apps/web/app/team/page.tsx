@@ -4,21 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Building2, Layers, Plus, ShieldCheck, Star, Trash2, UserRoundCog, Users, Workflow } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
-
-// Debe coincidir con MODULE_KEYS en apps/api/src/common/constants/modules.ts.
-const MODULE_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'conversations', label: 'Conversaciones' },
-  { key: 'instances', label: 'WhatsApp' },
-  { key: 'team', label: 'Equipo y agentes' },
-  { key: 'incidents', label: 'Incidencias' },
-  { key: 'calendar', label: 'Calendario' },
-  { key: 'api-settings', label: 'API e integraciones' },
-  { key: 'feedback', label: 'Sugerencias y reportes' },
-  { key: 'crm', label: 'CRM' },
-  { key: 'automations', label: 'Automatizaciones' },
-];
-const ALL_MODULE_KEYS = MODULE_OPTIONS.map((item) => item.key);
+import { ALL_MODULE_KEYS, MODULE_OPTIONS } from '@/lib/modules';
 
 type DepartmentRef = { department: { id: string; name: string } };
 type TeamUser = {

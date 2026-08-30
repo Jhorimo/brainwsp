@@ -5,11 +5,12 @@ import { CreditCard, Pencil, Plus } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch } from '@/lib/api';
+import { ALL_MODULE_KEYS, MODULE_OPTIONS } from '@/lib/modules';
 
 type Plan = {
   id: string; name: string; billingCycle: string; price: number; priceUsd: number;
   maxAgents?: number | null; maxInstances?: number | null; maxMessages?: number | null; active: boolean;
-  isDefault: boolean; trialDays: number; features: string[];
+  isDefault: boolean; trialDays: number; features: string[]; moduleKeys: string[];
   _count: { companies: number };
 };
 
@@ -34,8 +35,8 @@ export default function AdminPlansPage() {
   const [modal, setModal] = useState(false);
   const [editPlan, setEditPlan] = useState<Plan | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '', isDefault: false, trialDays: '3', featuresText: '' });
-  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '', isDefault: false, trialDays: '3', featuresText: '' });
+  const [form, setForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '', isDefault: false, trialDays: '3', featuresText: '', moduleKeys: [...ALL_MODULE_KEYS] });
+  const [editForm, setEditForm] = useState({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '', isDefault: false, trialDays: '3', featuresText: '', moduleKeys: [...ALL_MODULE_KEYS] });
 
   const load = useCallback(async () => {
     try { setPlans(await apiFetch<Plan[]>('/admin/plans')); }
@@ -61,10 +62,11 @@ export default function AdminPlansPage() {
           isDefault: form.isDefault,
           trialDays: form.trialDays ? Number(form.trialDays) : 0,
           features: parseFeatures(form.featuresText),
+          moduleKeys: form.moduleKeys,
         }),
       });
       setModal(false);
-      setForm({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '', isDefault: false, trialDays: '3', featuresText: '' });
+      setForm({ name: '', billingCycle: 'MONTHLY', price: '', priceUsd: '', maxAgents: '', maxInstances: '', maxMessages: '', isDefault: false, trialDays: '3', featuresText: '', moduleKeys: [...ALL_MODULE_KEYS] });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el plan'); }
     finally { setSaving(false); }
@@ -82,6 +84,7 @@ export default function AdminPlansPage() {
       isDefault: plan.isDefault,
       trialDays: String(plan.trialDays ?? 3),
       featuresText: (plan.features || []).join('\n'),
+      moduleKeys: plan.moduleKeys?.length ? plan.moduleKeys : [...ALL_MODULE_KEYS],
     });
     setEditPlan(plan);
   };
@@ -103,6 +106,7 @@ export default function AdminPlansPage() {
           isDefault: editForm.isDefault,
           trialDays: editForm.trialDays ? Number(editForm.trialDays) : 0,
           features: parseFeatures(editForm.featuresText),
+          moduleKeys: editForm.moduleKeys,
         }),
       });
       setPlans((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
@@ -153,11 +157,11 @@ export default function AdminPlansPage() {
 
       {modal && (
         <div className="modal-backdrop" onClick={() => setModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header"><h2>Nuevo plan</h2><p>Se agrega al catálogo; luego lo asignas a cada cliente desde Usuarios.</p></div>
             <div className="modal-body">
-              <div className="form-grid">
-                <div className="field"><label>Nombre</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Anual" /></div>
+              <div className="form-grid plan-form-grid">
+                <div className="field field-full"><label>Nombre</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Anual" /></div>
                 <div className="field"><label>Ciclo de cobro</label>
                   <select value={form.billingCycle} onChange={(e) => setForm({ ...form, billingCycle: e.target.value })}>
                     <option value="FREE">Gratis</option>
@@ -165,18 +169,34 @@ export default function AdminPlansPage() {
                     <option value="ANNUAL">Anual</option>
                   </select>
                 </div>
+                <div className="field"><label>Días de prueba gratis</label><input type="number" min="0" value={form.trialDays} onChange={(e) => setForm({ ...form, trialDays: e.target.value })} placeholder="3" /></div>
                 <div className="field"><label>Precio en soles (S/)</label><input type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99.00" /></div>
                 <div className="field"><label>Precio en dólares (US$)</label><input type="number" min="0" step="0.01" value={form.priceUsd} onChange={(e) => setForm({ ...form, priceUsd: e.target.value })} placeholder="27.00" /></div>
                 <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={form.maxAgents} onChange={(e) => setForm({ ...form, maxAgents: e.target.value })} placeholder="10" /></div>
                 <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={form.maxInstances} onChange={(e) => setForm({ ...form, maxInstances: e.target.value })} placeholder="3" /></div>
-                <div className="field"><label>Cuota de mensajes al mes (opcional)</label><input type="number" min="1" value={form.maxMessages} onChange={(e) => setForm({ ...form, maxMessages: e.target.value })} placeholder="75000" /></div>
-                <div className="field"><label>Días de prueba gratis</label><input type="number" min="0" value={form.trialDays} onChange={(e) => setForm({ ...form, trialDays: e.target.value })} placeholder="3" /></div>
-                <div className="field">
+                <div className="field field-full"><label>Cuota de mensajes al mes (opcional)</label><input type="number" min="1" value={form.maxMessages} onChange={(e) => setForm({ ...form, maxMessages: e.target.value })} placeholder="75000" /></div>
+                <div className="field field-full">
                   <label>Beneficios (uno por línea)</label>
-                  <textarea rows={5} value={form.featuresText} onChange={(e) => setForm({ ...form, featuresText: e.target.value })} placeholder={'1 WhatsApp (Cód. QR)\nGenerador de flujo\nPalabras clave\nAsistente de IA\nSoporte 24/7'} />
-                  <span className="row-sub">Se muestran tal cual en la tarjeta del plan en &quot;Mi Plan&quot;. Vacío = se arma sola a partir de los límites de arriba.</span>
+                  <textarea rows={2} value={form.featuresText} onChange={(e) => setForm({ ...form, featuresText: e.target.value })} placeholder={'1 WhatsApp (Cód. QR)\nGenerador de flujo\nAsistente de IA'} />
+                  <span className="row-sub">Se muestran tal cual en &quot;Mi Plan&quot;. Vacío = se arma sola a partir de los límites de arriba.</span>
                 </div>
-                <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="field field-full">
+                  <label>Módulos incluidos</label>
+                  <span className="row-sub">Lo que no incluye queda oculto para toda la empresa (dueño, agentes, todos) hasta que suban de plan.</span>
+                  <div className="plan-modules-grid">
+                    {MODULE_OPTIONS.map((module) => (
+                      <label className="member-option" key={module.key}>
+                        <input
+                          type="checkbox"
+                          checked={form.moduleKeys.includes(module.key)}
+                          onChange={(e) => setForm({ ...form, moduleKeys: e.target.checked ? [...form.moduleKeys, module.key] : form.moduleKeys.filter((key) => key !== module.key) })}
+                        />
+                        <div><strong>{module.label}</strong></div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="field field-full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input type="checkbox" checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} style={{ width: 16, height: 16 }} />
                   <label style={{ margin: 0 }}>Plan por defecto al registrarse (reemplaza al que esté marcado)</label>
                 </div>
@@ -192,11 +212,11 @@ export default function AdminPlansPage() {
 
       {editPlan && (
         <div className="modal-backdrop" onClick={() => setEditPlan(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header"><h2>Editar plan</h2><p>Los cambios aplican a los clientes que ya tienen este plan asignado.</p></div>
             <div className="modal-body">
-              <div className="form-grid">
-                <div className="field"><label>Nombre</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
+              <div className="form-grid plan-form-grid">
+                <div className="field field-full"><label>Nombre</label><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
                 <div className="field"><label>Ciclo de cobro</label>
                   <select value={editForm.billingCycle} onChange={(e) => setEditForm({ ...editForm, billingCycle: e.target.value })}>
                     <option value="FREE">Gratis</option>
@@ -204,18 +224,34 @@ export default function AdminPlansPage() {
                     <option value="ANNUAL">Anual</option>
                   </select>
                 </div>
+                <div className="field"><label>Días de prueba gratis</label><input type="number" min="0" value={editForm.trialDays} onChange={(e) => setEditForm({ ...editForm, trialDays: e.target.value })} /></div>
                 <div className="field"><label>Precio en soles (S/)</label><input type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} /></div>
                 <div className="field"><label>Precio en dólares (US$)</label><input type="number" min="0" step="0.01" value={editForm.priceUsd} onChange={(e) => setEditForm({ ...editForm, priceUsd: e.target.value })} /></div>
                 <div className="field"><label>Máximo de agentes (opcional)</label><input type="number" min="1" value={editForm.maxAgents} onChange={(e) => setEditForm({ ...editForm, maxAgents: e.target.value })} placeholder="Ilimitado" /></div>
                 <div className="field"><label>Máximo de líneas WhatsApp (opcional)</label><input type="number" min="1" value={editForm.maxInstances} onChange={(e) => setEditForm({ ...editForm, maxInstances: e.target.value })} placeholder="Ilimitado" /></div>
-                <div className="field"><label>Cuota de mensajes al mes (opcional)</label><input type="number" min="1" value={editForm.maxMessages} onChange={(e) => setEditForm({ ...editForm, maxMessages: e.target.value })} placeholder="Ilimitado" /></div>
-                <div className="field"><label>Días de prueba gratis</label><input type="number" min="0" value={editForm.trialDays} onChange={(e) => setEditForm({ ...editForm, trialDays: e.target.value })} /></div>
-                <div className="field">
+                <div className="field field-full"><label>Cuota de mensajes al mes (opcional)</label><input type="number" min="1" value={editForm.maxMessages} onChange={(e) => setEditForm({ ...editForm, maxMessages: e.target.value })} placeholder="Ilimitado" /></div>
+                <div className="field field-full">
                   <label>Beneficios (uno por línea)</label>
-                  <textarea rows={5} value={editForm.featuresText} onChange={(e) => setEditForm({ ...editForm, featuresText: e.target.value })} placeholder={'1 WhatsApp (Cód. QR)\nGenerador de flujo\nPalabras clave\nAsistente de IA\nSoporte 24/7'} />
-                  <span className="row-sub">Se muestran tal cual en la tarjeta del plan en &quot;Mi Plan&quot;. Vacío = se arma sola a partir de los límites de arriba.</span>
+                  <textarea rows={2} value={editForm.featuresText} onChange={(e) => setEditForm({ ...editForm, featuresText: e.target.value })} placeholder={'1 WhatsApp (Cód. QR)\nGenerador de flujo\nAsistente de IA'} />
+                  <span className="row-sub">Se muestran tal cual en &quot;Mi Plan&quot;. Vacío = se arma sola a partir de los límites de arriba.</span>
                 </div>
-                <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="field field-full">
+                  <label>Módulos incluidos</label>
+                  <span className="row-sub">Lo que no incluye queda oculto para toda la empresa (dueño, agentes, todos) hasta que suban de plan.</span>
+                  <div className="plan-modules-grid">
+                    {MODULE_OPTIONS.map((module) => (
+                      <label className="member-option" key={module.key}>
+                        <input
+                          type="checkbox"
+                          checked={editForm.moduleKeys.includes(module.key)}
+                          onChange={(e) => setEditForm({ ...editForm, moduleKeys: e.target.checked ? [...editForm.moduleKeys, module.key] : editForm.moduleKeys.filter((key) => key !== module.key) })}
+                        />
+                        <div><strong>{module.label}</strong></div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="field field-full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input type="checkbox" checked={editForm.isDefault} onChange={(e) => setEditForm({ ...editForm, isDefault: e.target.checked })} style={{ width: 16, height: 16 }} />
                   <label style={{ margin: 0 }}>Plan por defecto al registrarse (reemplaza al que esté marcado)</label>
                 </div>

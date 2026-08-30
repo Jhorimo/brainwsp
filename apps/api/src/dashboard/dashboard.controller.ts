@@ -272,13 +272,16 @@ export class DashboardController {
   async planUsage(@CurrentUser() user: JwtUser) {
     const company = await this.prisma.company.findUniqueOrThrow({
       where: { id: user.companyId },
-      select: { licenseRenewsAt: true, plan: { select: { name: true, maxMessages: true } } },
+      select: { licenseRenewsAt: true, plan: { select: { name: true, maxMessages: true, maxInstances: true } } },
     });
-    const primaryInstance = await this.prisma.whatsAppInstance.findFirst({
-      where: { companyId: user.companyId, active: true },
-      select: { provider: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    const [primaryInstance, activeInstances] = await Promise.all([
+      this.prisma.whatsAppInstance.findFirst({
+        where: { companyId: user.companyId, active: true },
+        select: { provider: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.whatsAppInstance.count({ where: { companyId: user.companyId, active: true } }),
+    ]);
 
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -302,6 +305,8 @@ export class DashboardController {
       messagesThisMonth,
       dailyBudget: maxMessages ? Math.max(1, Math.round(maxMessages / 30)) : null,
       messagesToday,
+      activeInstances,
+      maxInstances: company.plan?.maxInstances ?? null,
     };
   }
 }

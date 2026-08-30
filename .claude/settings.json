@@ -31,7 +31,8 @@
       "Bash(sed -i \"s/admin@brainwsp.com/admin@braintech.com.pe/; s/admin1234/ChangeMe-123456!/\" test_delete.js)",
       "Bash(node test_delete.js)",
       "Bash(DATABASE_URL=\"postgresql://brainwsp:brainwsp@localhost:5432/brainwsp?schema=public\" npx -y prisma@6.19.0 migrate dev --schema schema.prisma --name merge_crm_pipeline_into_department_stages)",
-      "PowerShell(Get-Process \"Docker Desktop\", \"com.docker.backend\" -ErrorAction SilentlyContinue)"
+      "PowerShell(Get-Process \"Docker Desktop\", \"com.docker.backend\" -ErrorAction SilentlyContinue)",
+      "Bash(npx dotenv *)"
     ]
   }
 }

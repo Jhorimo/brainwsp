@@ -11,7 +11,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { StorageService } from '../storage/storage.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { AdminService } from './admin.service';
-import { CreatePaymentMethodDto, CreatePlanDto, RejectPaymentRequestDto, UpdateCompanyAdminDto, UpdatePaymentMethodDto, UpdatePlanDto } from './admin.dto';
+import { CancelPaymentRequestDto, CreatePaymentMethodDto, CreatePaymentRequestDto, CreatePlanDto, RejectPaymentRequestDto, UpdateCompanyAdminDto, UpdatePaymentMethodDto, UpdatePlanDto } from './admin.dto';
 
 const MAX_PROOF_BYTES = 16 * 1024 * 1024;
 
@@ -36,6 +36,11 @@ export class AdminController {
   @Patch('companies/:id')
   updateCompany(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateCompanyAdminDto, @Req() req: Request) {
     return this.service.updateCompany(user.sub, id, dto, req.ip, String(req.headers['user-agent'] || ''));
+  }
+
+  @Delete('companies/:id')
+  deleteCompany(@CurrentUser() user: JwtUser, @Param('id') id: string, @Req() req: Request) {
+    return this.service.deleteCompany(user.sub, id, req.ip, String(req.headers['user-agent'] || ''));
   }
 
   @Post('companies/:id/impersonate')
@@ -123,11 +128,17 @@ export class AdminController {
     return this.service.listPaymentRequests(status);
   }
 
+  @Post('payment-requests')
+  createPaymentRequest(@CurrentUser() user: JwtUser, @Body() dto: CreatePaymentRequestDto, @Req() req: Request) {
+    return this.service.createPaymentRequest(user.sub, dto, req.ip, String(req.headers['user-agent'] || ''));
+  }
+
   // Streams the payment proof back through the API (auth'd, SUPERADMIN only) instead of
   // exposing MinIO's internal URL — same proxy pattern as quick-replies.controller.ts#file.
   @Get('payment-requests/:id/proof')
   async paymentRequestProof(@Param('id') id: string, @Res() res: Response) {
     const request = await this.service.getPaymentRequestProof(id);
+    if (!request.proofUrl) throw new BadRequestException('Esta solicitud no tiene comprobante — se creó directamente desde el panel');
     const objectName = request.proofUrl.split('/').pop() as string;
     res.setHeader('Content-Type', request.proofMimeType || 'application/octet-stream');
     const stream = await this.storage.getObjectStream(objectName);
@@ -143,5 +154,10 @@ export class AdminController {
   @Post('payment-requests/:id/reject')
   rejectPaymentRequest(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: RejectPaymentRequestDto, @Req() req: Request) {
     return this.service.rejectPaymentRequest(user.sub, id, dto.note, req.ip, String(req.headers['user-agent'] || ''));
+  }
+
+  @Post('payment-requests/:id/cancel')
+  cancelPaymentRequest(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: CancelPaymentRequestDto, @Req() req: Request) {
+    return this.service.cancelPaymentRequest(user.sub, id, dto.note, req.ip, String(req.headers['user-agent'] || ''));
   }
 }

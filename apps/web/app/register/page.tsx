@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronDown, Building2, Check, Copy, KeyRound, MessageSquareText, Radio, Sparkles } from 'lucide-react';
+import { ChevronDown, Building2, Check, Copy, Eye, EyeOff, KeyRound, MessageSquareText, Radio, Sparkles } from 'lucide-react';
 import { API_URL, setAuthSession } from '@/lib/api';
 import { GoogleIcon } from '@/components/google-icon';
 import { BrandIcon } from '@/components/brand-mark';
@@ -42,6 +42,8 @@ export default function RegisterPage() {
   const [whatsapp, setWhatsapp] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [credential, setCredential] = useState<ApiCredential | null>(null);
@@ -188,8 +190,24 @@ export default function RegisterPage() {
               <div className="field"><label>WhatsApp</label><input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value.replace(/[^\d\s-]/g, ''))} type="tel" placeholder="999 888 777" /></div>
             </div>
             <span className="row-sub" style={{ marginTop: -8 }}>Así podemos contactarte para coordinar tu plan o soporte.</span>
-            <div className="field"><label>Contraseña</label><input value={password} onChange={(e) => setPassword(e.target.value)} type="password" /></div>
-            <div className="field"><label>Confirmar contraseña</label><input value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} type="password" /></div>
+            <div className="field">
+              <label>Contraseña</label>
+              <div className="password-input">
+                <input value={password} onChange={(e) => setPassword(e.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="new-password" />
+                <button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>
+                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
+            </div>
+            <div className="field">
+              <label>Confirmar contraseña</label>
+              <div className="password-input">
+                <input value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password" />
+                <button type="button" className="password-toggle" onClick={() => setShowConfirmPassword((current) => !current)} aria-label={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>
+                  {showConfirmPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
+            </div>
             <button className="button primary" disabled={loading}>{loading ? 'Creando cuenta...' : 'Crear cuenta'}</button>
           </div>
           <div style={{marginTop:16, textAlign:'center', fontSize:11, color:'#6b7690'}}>

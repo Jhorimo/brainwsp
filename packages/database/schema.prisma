@@ -41,6 +41,7 @@ enum PaymentRequestStatus {
   PENDING
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 
@@ -178,6 +179,9 @@ model Plan {
   // elemento es una línea. Vacío (default) hace que el frontend arme la lista sola a partir de
   // maxAgents/maxInstances/maxMessages en vez de no mostrar nada.
   features     String[]  @default([])
+  // Módulos incluidos en este plan (ver apps/api/src/common/constants/modules.ts) — vacío
+  // significa "sin restricción / todos los módulos", misma convención que User.allowedModules.
+  moduleKeys   String[]  @default([])
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -210,13 +214,25 @@ model PaymentRequest {
   companyId       String
   planId          String
   paymentMethodId String?
-  whatsappPhone   String
-  proofUrl        String                @db.Text
+  whatsappPhone   String?
+  // Null cuando la solicitud la crea directamente un SUPERADMIN desde /admin/payment-requests
+  // (sin comprobante que revisar) en vez de subirla el cliente desde "Mi Plan" — el frontend
+  // oculta el botón "Ver comprobante" en ese caso.
+  proofUrl        String?               @db.Text
   proofMimeType   String?
   status          PaymentRequestStatus  @default(PENDING)
   reviewNote      String?               @db.Text
   reviewedByUserId String?
   reviewedAt      DateTime?
+  // Snapshot del plan de la empresa justo antes de que esta solicitud lo pisara al aprobarse —
+  // solo se llena al aprobar (APPROVED), para poder revertirlo con precisión si luego se cancela.
+  // activatedAt es el mismo instante que se escribió en Company.planStartedAt en ese momento:
+  // cancelPaymentRequest solo revierte la empresa si su planStartedAt sigue siendo ese instante
+  // (o sea, nadie volvió a cambiar el plan después de esta aprobación).
+  previousPlanId  String?
+  previousPlanStartedAt DateTime?
+  previousLicenseRenewsAt DateTime?
+  activatedAt     DateTime?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)

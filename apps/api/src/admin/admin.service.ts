@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { JwtService } from '@nestjs/jwt';
 import type { Prisma } from '@prisma/client';
 import { describeUserAgent } from '../common/utils/user-agent';
+import { sortPlansByPrice } from '../common/utils/plan-price';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface LogActionInput {
@@ -48,6 +49,27 @@ export class AdminService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  // Borra la empresa y en cascada TODO lo que cuelga de ella (usuarios, instancias de
+  // WhatsApp, conversaciones, mensajes, contactos, etc. — ver onDelete: Cascade en el schema).
+  // No se puede deshacer, por eso se bloquea si tiene algún usuario SUPERADMIN: borrarla
+  // borraría también esa cuenta, que es la que administra toda la plataforma.
+  async deleteCompany(actorUserId: string, companyId: string, ip?: string, userAgent?: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      include: { users: { select: { role: true } } },
+    });
+    if (!company) throw new NotFoundException('Empresa no encontrada');
+    if (company.users.some((user) => user.role === 'SUPERADMIN')) {
+      throw new BadRequestException('No se puede eliminar una empresa que tiene un usuario SUPERADMIN');
+    }
+
+    await this.prisma.company.delete({ where: { id: companyId } });
+    // Sin companyId: la fila de auditoría cascadearía junto con la empresa que acaba de
+    // borrarse (AuditLog.company es onDelete: Cascade) y no quedaría rastro de la acción.
+    await this.logAction({ userId: actorUserId, action: 'COMPANY_DELETED', entity: 'Company', entityId: companyId, ip, userAgent, metadata: { name: company.name } });
+    return { success: true };
   }
 
   async updateCompany(actorUserId: string, companyId: string, data: { active?: boolean; planId?: string | null; licenseRenewsAt?: string | null }, ip?: string, userAgent?: string) {
@@ -105,11 +127,12 @@ export class AdminService {
     };
   }
 
-  listPlans() {
-    return this.prisma.plan.findMany({ orderBy: { price: 'asc' }, include: { _count: { select: { companies: true } } } });
+  async listPlans() {
+    const plans = await this.prisma.plan.findMany({ include: { _count: { select: { companies: true } } } });
+    return sortPlansByPrice(plans);
   }
 
-  async createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; isDefault?: boolean; trialDays?: number; features?: string[] }) {
+  async createPlan(input: { name: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; isDefault?: boolean; trialDays?: number; features?: string[]; moduleKeys?: string[] }) {
     // Solo un plan puede ser el default de registro — mismo patrón que Department.isDefault
     // (ver team.service.ts): desmarcar todos antes de crear este con la marca puesta.
     if (input.isDefault) await this.prisma.plan.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
@@ -125,6 +148,7 @@ export class AdminService {
         isDefault: input.isDefault ?? false,
         ...(input.trialDays !== undefined ? { trialDays: input.trialDays } : {}),
         ...(input.features !== undefined ? { features: input.features } : {}),
+        ...(input.moduleKeys !== undefined ? { moduleKeys: input.moduleKeys } : {}),
       },
     }).catch((error: unknown) => {
       if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe un plan con ese nombre');
@@ -132,7 +156,7 @@ export class AdminService {
     });
   }
 
-  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; active?: boolean; isDefault?: boolean; trialDays?: number; features?: string[] }) {
+  async updatePlan(id: string, input: { name?: string; billingCycle?: string; price?: number; priceUsd?: number; maxAgents?: number; maxInstances?: number; maxMessages?: number; active?: boolean; isDefault?: boolean; trialDays?: number; features?: string[]; moduleKeys?: string[] }) {
     const plan = await this.prisma.plan.findUnique({ where: { id } });
     if (!plan) throw new NotFoundException('Plan no encontrado');
     if (input.isDefault) await this.prisma.plan.updateMany({ where: { isDefault: true, id: { not: id } }, data: { isDefault: false } });
@@ -150,6 +174,7 @@ export class AdminService {
         ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
         ...(input.trialDays !== undefined ? { trialDays: input.trialDays } : {}),
         ...(input.features !== undefined ? { features: input.features } : {}),
+        ...(input.moduleKeys !== undefined ? { moduleKeys: input.moduleKeys } : {}),
       },
     });
   }
@@ -230,31 +255,115 @@ export class AdminService {
     return request;
   }
 
-  // Aprobar mueve la licencia real de la empresa — la duración sale del billingCycle del plan
-  // solicitado (mensual = +30 días, anual = +365), contados desde HOY (no se acumula sobre el
-  // vencimiento anterior, para no premiar a alguien que pagó tarde con más días de los que
-  // compró). FREE no debería llegar a un pago real, pero por las dudas no mueve la fecha.
+  // La duración de licencia que otorga activar un plan sale de su billingCycle (mensual = +30
+  // días, anual = +365), contada desde HOY (no se acumula sobre el vencimiento anterior, para
+  // no premiar a alguien que pagó tarde con más días de los que compró). Un plan FREE (Gratis)
+  // usa su trialDays en vez de quedar sin fecha — así "Gratis" vence igual sin importar si se
+  // asignó al registrarse o después, desde un pago. Siempre se escribe licenseRenewsAt de forma
+  // explícita (null incluido) para no dejar la fecha de un plan anterior colgada por accidente
+  // — ese fue justamente el bug que mostraba "Gratis" con 30 días de un plan Mensual previo.
+  private companyActivationData(plan: { billingCycle: string; trialDays: number }, now: Date) {
+    const cycleDays = plan.billingCycle === 'ANNUAL' ? 365 : plan.billingCycle === 'MONTHLY' ? 30 : 0;
+    const days = cycleDays > 0 ? cycleDays : plan.trialDays;
+    const licenseRenewsAt = days > 0 ? new Date(now.getTime() + days * 24 * 3600 * 1000) : null;
+    return { planStartedAt: now, licenseRenewsAt };
+  }
+
   async approvePaymentRequest(actorUserId: string, id: string, ip?: string, userAgent?: string) {
     const request = await this.prisma.paymentRequest.findUnique({ where: { id }, include: { plan: true } });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
     if (request.status !== 'PENDING') throw new BadRequestException('Esta solicitud ya fue revisada');
 
-    const days = request.plan.billingCycle === 'ANNUAL' ? 365 : request.plan.billingCycle === 'MONTHLY' ? 30 : 0;
-    const licenseRenewsAt = days > 0 ? new Date(Date.now() + days * 24 * 3600 * 1000) : undefined;
+    // Snapshot del plan de la empresa ANTES de pisarlo — permite que cancelPaymentRequest
+    // revierta con precisión si más adelante se cancela esta aprobación.
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: request.companyId }, select: { planId: true, planStartedAt: true, licenseRenewsAt: true } });
+    const now = new Date();
 
     const [updatedRequest] = await this.prisma.$transaction([
       this.prisma.paymentRequest.update({
         where: { id },
-        data: { status: 'APPROVED', reviewedByUserId: actorUserId, reviewedAt: new Date() },
+        data: {
+          status: 'APPROVED',
+          reviewedByUserId: actorUserId,
+          reviewedAt: now,
+          previousPlanId: company.planId,
+          previousPlanStartedAt: company.planStartedAt,
+          previousLicenseRenewsAt: company.licenseRenewsAt,
+          activatedAt: now,
+        },
       }),
       this.prisma.company.update({
         where: { id: request.companyId },
-        data: { planId: request.planId, planStartedAt: new Date(), ...(licenseRenewsAt ? { licenseRenewsAt } : {}) },
+        data: { planId: request.planId, ...this.companyActivationData(request.plan, now) },
       }),
     ]);
 
     await this.logAction({ companyId: request.companyId, userId: actorUserId, action: 'PAYMENT_REQUEST_APPROVED', entity: 'PaymentRequest', entityId: id, ip, userAgent, metadata: { planId: request.planId } });
     return updatedRequest;
+  }
+
+  // Registro directo de un SUPERADMIN desde /admin/payment-requests ("Nuevo pago") — sin
+  // comprobante de por medio, para casos como pagos por transferencia coordinados fuera de la
+  // app. status APPROVED activa el plan en el mismo paso; PENDING la deja igual que una
+  // solicitud subida por el cliente, para revisarla/aprobarla después con el flujo normal.
+  async createPaymentRequest(
+    actorUserId: string,
+    input: { companyId: string; planId: string; paymentMethodId?: string; status?: 'PENDING' | 'APPROVED' },
+    ip?: string,
+    userAgent?: string,
+  ) {
+    const [company, plan] = await Promise.all([
+      this.prisma.company.findUnique({ where: { id: input.companyId } }),
+      this.prisma.plan.findUnique({ where: { id: input.planId } }),
+    ]);
+    if (!company) throw new NotFoundException('Empresa no encontrada');
+    if (!plan) throw new NotFoundException('Plan no encontrado');
+
+    const approveNow = (input.status ?? 'APPROVED') === 'APPROVED';
+    const now = new Date();
+
+    const [request] = await this.prisma.$transaction([
+      this.prisma.paymentRequest.create({
+        data: {
+          companyId: input.companyId,
+          planId: input.planId,
+          paymentMethodId: input.paymentMethodId,
+          whatsappPhone: company.phone,
+          status: approveNow ? 'APPROVED' : 'PENDING',
+          ...(approveNow
+            ? {
+                reviewedByUserId: actorUserId,
+                reviewedAt: now,
+                previousPlanId: company.planId,
+                previousPlanStartedAt: company.planStartedAt,
+                previousLicenseRenewsAt: company.licenseRenewsAt,
+                activatedAt: now,
+              }
+            : {}),
+        },
+        include: {
+          company: { select: { id: true, name: true } },
+          plan: { select: { id: true, name: true, billingCycle: true, price: true, priceUsd: true } },
+          paymentMethod: { select: { id: true, label: true } },
+          reviewedBy: { select: { id: true, name: true } },
+        },
+      }),
+      ...(approveNow
+        ? [this.prisma.company.update({ where: { id: input.companyId }, data: { planId: input.planId, ...this.companyActivationData(plan, now) } })]
+        : []),
+    ]);
+
+    await this.logAction({
+      companyId: input.companyId,
+      userId: actorUserId,
+      action: approveNow ? 'PAYMENT_REQUEST_CREATED_AND_APPROVED' : 'PAYMENT_REQUEST_CREATED',
+      entity: 'PaymentRequest',
+      entityId: request.id,
+      ip,
+      userAgent,
+      metadata: { planId: input.planId },
+    });
+    return request;
   }
 
   async rejectPaymentRequest(actorUserId: string, id: string, note?: string, ip?: string, userAgent?: string) {
@@ -268,6 +377,47 @@ export class AdminService {
     });
     await this.logAction({ companyId: request.companyId, userId: actorUserId, action: 'PAYMENT_REQUEST_REJECTED', entity: 'PaymentRequest', entityId: id, ip, userAgent });
     return updated;
+  }
+
+  // Cancela una aprobación ya hecha (deshace "Nuevo pago"/"Aprobar"). Si nadie volvió a tocar
+  // el plan de la empresa desde entonces (mismo planId y mismo instante de activación que dejó
+  // esta solicitud), lo regresa al snapshot previo guardado en approvePaymentRequest/
+  // createPaymentRequest; si ya cambió por otra aprobación posterior, solo marca esta como
+  // cancelada sin tocar la empresa, para no pisar un cambio más reciente.
+  async cancelPaymentRequest(actorUserId: string, id: string, note?: string, ip?: string, userAgent?: string) {
+    const request = await this.prisma.paymentRequest.findUnique({ where: { id } });
+    if (!request) throw new NotFoundException('Solicitud no encontrada');
+    if (request.status !== 'APPROVED') throw new BadRequestException('Solo se puede cancelar una solicitud aprobada');
+
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: request.companyId }, select: { planId: true, planStartedAt: true } });
+    const companyUnchangedSinceApproval = company.planId === request.planId
+      && request.activatedAt != null
+      && company.planStartedAt?.getTime() === request.activatedAt.getTime();
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.paymentRequest.update({
+        where: { id },
+        data: { status: 'CANCELLED', reviewNote: note?.trim() || request.reviewNote, reviewedByUserId: actorUserId, reviewedAt: new Date() },
+      }),
+      ...(companyUnchangedSinceApproval
+        ? [this.prisma.company.update({
+            where: { id: request.companyId },
+            data: { planId: request.previousPlanId, planStartedAt: request.previousPlanStartedAt, licenseRenewsAt: request.previousLicenseRenewsAt },
+          })]
+        : []),
+    ]);
+
+    await this.logAction({
+      companyId: request.companyId,
+      userId: actorUserId,
+      action: 'PAYMENT_REQUEST_CANCELLED',
+      entity: 'PaymentRequest',
+      entityId: id,
+      ip,
+      userAgent,
+      metadata: { planId: request.planId, companyReverted: companyUnchangedSinceApproval },
+    });
+    return { ...updated, companyReverted: companyUnchangedSinceApproval };
   }
 
   listSuggestions() {

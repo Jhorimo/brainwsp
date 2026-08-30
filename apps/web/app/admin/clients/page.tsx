@@ -68,6 +68,22 @@ export default function AdminClientsPage() {
     }
   };
 
+  const deleteCompany = async (company: Company) => {
+    if (!(await confirm(
+      `¿Eliminar "${company.name}" definitivamente? Se borran también sus usuarios, instancias de WhatsApp, conversaciones y mensajes. Esta acción no se puede deshacer.`,
+      { title: 'Eliminar empresa', confirmText: 'Eliminar' },
+    ))) return;
+    setBusyId(company.id);
+    try {
+      await apiFetch(`/admin/companies/${company.id}`, { method: 'DELETE' });
+      setCompanies((current) => current.filter((item) => item.id !== company.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar la empresa');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const viewPanel = async (company: Company) => {
     if (!(await confirm(`Vas a entrar como el panel de "${company.name}". Podrás volver a tu cuenta de administrador con el botón "Volver a admin".`, { title: 'Entrar como cliente', confirmText: 'Entrar', danger: false }))) return;
     setBusyId(company.id);
@@ -147,7 +163,8 @@ export default function AdminClientsPage() {
                   <td>{new Date(company.createdAt).toLocaleDateString('es-PE')}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button className="button small info" disabled={busyId === company.id} onClick={() => void viewPanel(company)}>{busyId === company.id ? '...' : 'Ver panel'}</button>{' '}
-                    <button className={`button small ${company.active ? 'danger' : 'primary'}`} onClick={() => void toggleActive(company)}>{company.active ? 'Suspender' : 'Activar'}</button>
+                    <button className={`button small ${company.active ? 'danger' : 'primary'}`} onClick={() => void toggleActive(company)}>{company.active ? 'Suspender' : 'Activar'}</button>{' '}
+                    <button className="button small danger" disabled={busyId === company.id} onClick={() => void deleteCompany(company)}>Eliminar</button>
                   </td>
                 </tr>
               );

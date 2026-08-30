@@ -20,12 +20,22 @@ export class ModuleAccessGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{ user?: JwtUser }>();
     const user = request.user;
     if (!user) return false;
-    // Module restrictions only ever apply to the Agent role — Owner/Admin/Supervisor
-    // always see every module, same as they aren't restricted by department.
-    if (user.role !== UserRole.AGENT) return true;
 
-    const { allowedModules } = await this.agentAccess.getAgentAccess(user.sub);
-    // Empty list = no restriction configured (legacy/default) — keep today's behavior.
+    const { allowedModules, planModules, licenseExpired } = await this.agentAccess.getAgentAccess(user.sub);
+
+    // Licencia vencida corta todo (salvo SUPERADMIN, que opera la plataforma y no debería
+    // quedar bloqueado por el estado de facturación de la empresa a la que pertenece su cuenta)
+    // — el usuario sigue pudiendo entrar y ver "Mi Plan" para pagar, pero nada gateado por
+    // módulo. Se revisa antes que planModules porque es una condición más fuerte.
+    if (licenseExpired && user.role !== UserRole.SUPERADMIN) return false;
+
+    // El plan de la empresa es el techo real para todos los roles — si no lo incluye, ni el
+    // Owner lo ve hasta subir de plan. [] = plan sin restricción configurada (todos los módulos).
+    if (planModules.length > 0 && !planModules.includes(required)) return false;
+
+    // Por debajo del techo del plan, allowedModules es una restricción adicional que solo
+    // aplica al rol AGENT — Owner/Admin/Supervisor no se limitan por departamento/módulo propio.
+    if (user.role !== UserRole.AGENT) return true;
     if (allowedModules.length === 0) return true;
     return allowedModules.includes(required);
   }

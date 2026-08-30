@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import type { JwtUser } from '../common/types/jwt-user';
 import { generateApiCredential, hashApiSecret, encryptApiSecret } from '../common/utils/secret';
 import { slugify } from '../common/utils/slug';
+import { sortPlansByPrice } from '../common/utils/plan-price';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAuthService } from './google-auth.service';
 
@@ -23,12 +24,20 @@ export class AuthService {
   // reflects the latest permissions an admin set, without requiring the agent to re-login.
   async getProfile(user: JwtUser) {
     const [dbUser, memberships] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: user.sub }, select: { allowedModules: true } }),
+      this.prisma.user.findUnique({
+        where: { id: user.sub },
+        select: { allowedModules: true, company: { select: { licenseRenewsAt: true, plan: { select: { moduleKeys: true } } } } },
+      }),
       this.prisma.departmentUser.findMany({ where: { userId: user.sub }, select: { department: { select: { id: true, name: true } } } }),
     ]);
     return {
       ...user,
       allowedModules: dbUser?.allowedModules ?? [],
+      // Módulos que incluye el plan de la empresa — [] = sin restricción (todos los módulos).
+      planModules: dbUser?.company?.plan?.moduleKeys ?? [],
+      // true si la licencia ya venció — el frontend usa esto para bloquear todo el menú
+      // (salvo "Mi Plan") hasta que la empresa renueve.
+      licenseExpired: !!dbUser?.company?.licenseRenewsAt && dbUser.company.licenseRenewsAt < new Date(),
       departments: memberships.map((m) => m.department),
     };
   }
@@ -120,8 +129,9 @@ export class AuthService {
 
   // Planes activos, visibles sin sesión — los usa el selector de plan de /register antes de
   // que exista un JWT. Mismos campos que BillingService#listPlans (ver ese comentario).
-  listPublicPlans() {
-    return this.prisma.plan.findMany({ where: { active: true }, orderBy: { price: 'asc' } });
+  async listPublicPlans() {
+    const plans = await this.prisma.plan.findMany({ where: { active: true } });
+    return sortPlansByPrice(plans);
   }
 
   // Shared by email/password registration and by the "sign up with Google" completion

@@ -75,6 +75,12 @@ export class CreatePlanDto {
   @IsArray()
   @IsString({ each: true })
   features?: string[];
+
+  @ApiPropertyOptional({ description: 'Claves de módulo incluidas en este plan (ver MODULE_KEYS). Vacío = sin restricción, todos los módulos disponibles.', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  moduleKeys?: string[];
 }
 
 export class UpdatePlanDto {
@@ -140,6 +146,12 @@ export class UpdatePlanDto {
   @IsArray()
   @IsString({ each: true })
   features?: string[];
+
+  @ApiPropertyOptional({ description: 'Claves de módulo incluidas en este plan (ver MODULE_KEYS). Vacío = sin restricción, todos los módulos disponibles.', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  moduleKeys?: string[];
 }
 
 export class CreatePaymentMethodDto {
@@ -214,4 +226,31 @@ export class RejectPaymentRequestDto {
   @IsOptional()
   @IsString()
   note?: string;
+}
+
+export class CancelPaymentRequestDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class CreatePaymentRequestDto {
+  @ApiProperty()
+  @IsUUID()
+  companyId!: string;
+
+  @ApiProperty()
+  @IsUUID()
+  planId!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  paymentMethodId?: string;
+
+  @ApiPropertyOptional({ enum: ['PENDING', 'APPROVED'], default: 'APPROVED', description: 'APPROVED activa el plan de inmediato; PENDING la deja para revisar luego.' })
+  @IsOptional()
+  @IsString()
+  status?: 'PENDING' | 'APPROVED';
 }

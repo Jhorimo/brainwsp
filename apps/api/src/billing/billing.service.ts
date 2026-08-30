@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { extname } from 'path';
+import { sortPlansByPrice } from '../common/utils/plan-price';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 
@@ -10,8 +11,9 @@ export class BillingService {
     private readonly storage: StorageService,
   ) {}
 
-  listPlans() {
-    return this.prisma.plan.findMany({ where: { active: true }, orderBy: { price: 'asc' } });
+  async listPlans() {
+    const plans = await this.prisma.plan.findMany({ where: { active: true } });
+    return sortPlansByPrice(plans);
   }
 
   listPaymentMethods() {
