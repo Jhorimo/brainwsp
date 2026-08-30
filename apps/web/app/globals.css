@@ -47,6 +47,10 @@ a { color: inherit; text-decoration: none; }
 .app-frame.collapsed .brand { justify-content: center; padding-left: 0; padding-right: 0; }
 .app-frame.collapsed .brand > div:last-child, .app-frame.collapsed .nav-item span, .app-frame.collapsed .nav-caption { display: none; }
 .app-frame.collapsed .nav-item { justify-content: center; padding: 0; }
+/* En el riel de íconos no hay lugar para el badge "Live" ni el candado junto al ícono
+   principal — sin esto, quedan los dos íconos apretados uno al lado del otro sin la
+   etiqueta que les da sentido. */
+.app-frame.collapsed .nav-badge, .app-frame.collapsed .nav-lock { display: none; }
 /* El pie de la barra (cuenta + cerrar sesión) se queda visible en modo ícono — antes
    desaparecía por completo al contraer el menú y "Cerrar sesión" quedaba inalcanzable. */
 .app-frame.collapsed .account-copy, .app-frame.collapsed .logout-button span { display: none; }
@@ -395,7 +399,11 @@ tr:last-child td { border-bottom: 0; }
 .searchbox-row { display: flex; align-items: center; gap: 8px; }
 .searchbox-row .searchbox { max-width: none; }
 .filters-active { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-.chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+/* Sin overflow-x propio, 5+ píldoras (ej. los filtros de estado de pagos) no caben en un
+   celular angosto y empujan TODA la página a scrollear de lado — scrollea acá adentro en
+   vez de eso, mismo patrón que .kanban-board más abajo. */
+.chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.chat-quick-filters::-webkit-scrollbar { display: none; }
 .chat-quick-tab { flex-shrink: 0; height: 27px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--text); font-size: 10px; font-weight: 600; }
 .chat-quick-tab:hover { background: var(--surface-2); }
 .chat-quick-tab.active { background: #e3f1ff; border-color: #bcdcff; color: var(--brand); }
@@ -768,6 +776,7 @@ tr:last-child td { border-bottom: 0; }
   .brand { justify-content: center; padding-left: 0; padding-right: 0; }
   .brand > div:last-child, .nav-item span, .nav-caption { display: none; }
   .nav-item { justify-content: center; padding: 0; }
+  .nav-badge, .nav-lock { display: none; }
   .account-copy, .logout-button span { display: none; }
   .account-button svg:last-child { display: none; }
   .account-button, .logout-button { justify-content: center; padding: 10px 0; }
@@ -944,7 +953,10 @@ tr:last-child td { border-bottom: 0; }
 .calendar-legend-row input:checked + .calendar-legend-check { opacity: 1; }
 .calendar-legend-row input:checked + .calendar-legend-check::after { content: ''; width: 4px; height: 7px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
 
-.calendar-week { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,42,80,.04); }
+/* overflow-x:auto (no "hidden") a propósito — 7 columnas de día nunca caben en un celular
+   sin importar cuánto se compriman en el breakpoint de abajo; con "hidden" ese resto de la
+   semana quedaba recortado y no había forma de llegar a verlo, ahora se puede deslizar. */
+.calendar-week { border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; overflow-y: hidden; box-shadow: 0 1px 3px rgba(20,42,80,.04); }
 .calendar-week-header, .calendar-week-body { display: grid; grid-template-columns: 56px repeat(7, minmax(128px, 1fr)); }
 .calendar-week-header { border-bottom: 1px solid var(--line); background: #f9fbfd; }
 .calendar-time-col-header { border-right: 1px solid var(--line); }
