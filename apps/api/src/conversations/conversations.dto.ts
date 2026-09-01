@@ -111,6 +111,12 @@ export class SendStickerDto {
   stickerId!: string;
 }
 
+export class SendContactDto {
+  @ApiProperty({ description: 'Id de un contacto de esta empresa a compartir como tarjeta de WhatsApp.' })
+  @IsUUID()
+  contactId!: string;
+}
+
 export class SendReactionDto {
   // Empty string removes the agent's own reaction from this message.
   @ApiProperty({ example: '👍' })

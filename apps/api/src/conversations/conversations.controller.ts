@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateContactNameDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
+import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendContactDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateContactNameDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
@@ -58,6 +58,11 @@ export class ConversationsController {
   ) {
     if (!file) throw new BadRequestException('Archivo requerido');
     return this.service.sendMedia(user, id, file, caption, ptt === 'true', user.sub, quotedMessageId);
+  }
+
+  @Post(':id/messages/contact')
+  sendContact(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendContactDto) {
+    return this.service.sendContact(user, id, dto.contactId, user.sub);
   }
 
   @Post(':id/messages/:messageId/reaction')

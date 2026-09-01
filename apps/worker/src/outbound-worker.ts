@@ -172,6 +172,12 @@ export class OutboundWorker {
       const rawContent = response?.message
         ? JSON.stringify(response.message, BufferJSON.replacer)
         : undefined;
+      // `metadata` can already carry display data set at creation (e.g. the shared
+      // contact's vcard, a voice note's `ptt` flag) — merge `rawContent` in rather than
+      // clobbering it, or that data is lost the moment the message finishes sending.
+      const existingMetadata = message.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata)
+        ? (message.metadata as Record<string, unknown>)
+        : {};
 
       const updated = await this.prisma.message.update({
         where: { id: message.id },
@@ -180,7 +186,7 @@ export class OutboundWorker {
           waMessageId: response?.key?.id || message.waMessageId,
           sentAt: new Date(),
           error: null,
-          ...(rawContent ? { metadata: { rawContent } } : {}),
+          ...(rawContent ? { metadata: { ...existingMetadata, rawContent } } : {}),
         },
       });
       await this.realtime.publish(message.companyId, 'message.updated', updated);

@@ -44,6 +44,11 @@ const quotedMessageSelect = {
   author: { select: { id: true, name: true, pushName: true } },
 } as const;
 
+function buildVcard(name: string, phone: string) {
+  const digits = phone.replace(/[^\d]/g, '');
+  return ['BEGIN:VCARD', 'VERSION:3.0', `FN:${name}`, `TEL;type=CELL;type=VOICE;waid=${digits}:${phone}`, 'END:VCARD'].join('\n');
+}
+
 function messageTypeFromMimetype(mimetype: string): MessageType | null {
   if (mimetype === 'image/webp') return MessageType.STICKER;
   if (mimetype.startsWith('image/')) return MessageType.IMAGE;
@@ -340,6 +345,47 @@ export class ConversationsService {
     return message;
   }
 
+  async sendContact(user: JwtUser, conversationId: string, contactId: string, sentByUserId?: string) {
+    const companyId = user.companyId;
+    const conversation = await this.getOwned(user, conversationId);
+    const shared = await this.prisma.contact.findFirst({ where: { id: contactId, companyId } });
+    if (!shared) throw new NotFoundException('Contacto no encontrado');
+    if (!shared.phone) throw new BadRequestException('Este contacto no tiene un número de teléfono para compartir');
+
+    const displayName = shared.name || shared.pushName || shared.phone;
+    const vcard = buildVcard(displayName, shared.phone);
+
+    const message = await this.prisma.message.create({
+      data: {
+        companyId,
+        conversationId,
+        instanceId: conversation.instanceId,
+        contactId: conversation.contactId,
+        direction: MessageDirection.OUTBOUND,
+        type: MessageType.CONTACT,
+        status: MessageStatus.QUEUED,
+        metadata: { contacts: [{ displayName, vcard }] },
+        sentByUserId,
+      },
+    });
+    const wasAiEnabled = conversation.aiEnabled;
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), ...(wasAiEnabled ? { aiEnabled: false } : {}) } });
+    await this.queues.outbound.add('send-media', { messageId: message.id }, {
+      jobId: message.id,
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 1500 },
+      removeOnComplete: 5000,
+      removeOnFail: 5000,
+    });
+
+    const hydrated = await this.getHydrated(companyId, conversationId);
+    if (hydrated) {
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId);
+      if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
+    }
+    return message;
+  }
+
   // No Message row to create here — a reaction rides on an existing one. The actual send
   // (and persisting/broadcasting the result) happens in the worker, mirroring how an incoming
   // reaction is handled; this just validates ownership and hands off the job.
@@ -419,6 +465,7 @@ export class ConversationsService {
         fileName: source.fileName,
         mimeType: source.mimeType,
         mediaUrl: source.mediaUrl,
+        metadata: (source.metadata as Prisma.InputJsonValue | null) ?? undefined,
         sentByUserId,
       },
     });

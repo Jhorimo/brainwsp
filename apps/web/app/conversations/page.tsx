@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
@@ -329,6 +329,8 @@ export default function ConversationsPage() {
   const [forwardMessageId, setForwardMessageId] = useState<string | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   const [bulkForwardOpen, setBulkForwardOpen] = useState(false);
+  const [shareContactOpen, setShareContactOpen] = useState(false);
+  const [shareContactSearch, setShareContactSearch] = useState('');
 
   // "Responder" (reply/quote a message), WhatsApp Web style.
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
@@ -648,6 +650,7 @@ export default function ConversationsPage() {
       if (showStickerTray) { setShowStickerTray(false); return; }
       if (showQuickReplyTray) { setShowQuickReplyTray(false); return; }
       if (forwardMessageId || bulkForwardOpen) { setForwardMessageId(null); setBulkForwardOpen(false); return; }
+      if (shareContactOpen) { setShareContactOpen(false); return; }
       if (lightboxUrl) { setLightboxUrl(null); return; }
       if (incidentModal) { setIncidentModal(false); return; }
       if (appointmentModal) { setAppointmentModal(false); return; }
@@ -658,7 +661,7 @@ export default function ConversationsPage() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showComposerMenu, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
+  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showComposerMenu, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, shareContactOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
@@ -1155,6 +1158,14 @@ export default function ConversationsPage() {
     try {
       await apiFetch(`/conversations/${selectedId}/messages/sticker`, { method: 'POST', body: JSON.stringify({ stickerId }) });
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo enviar el sticker'); }
+  };
+
+  const sendContactCard = async (contactId: string) => {
+    if (!selectedId) return;
+    setShareContactOpen(false);
+    try {
+      await apiFetch(`/conversations/${selectedId}/messages/contact`, { method: 'POST', body: JSON.stringify({ contactId }) });
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo compartir el contacto'); }
   };
 
   const uploadSticker = async (file: File) => {
@@ -1688,18 +1699,22 @@ export default function ConversationsPage() {
             {contacts.map((c, i) => {
               const parsed = parseVCard(c.vcard);
               const name = c.displayName || parsed.name || 'Contacto compartido';
+              const phoneDigits = parsed.phones[0]?.replace(/[^0-9]/g, '');
+              // Same avatar the shared contact already has in our own inbox, if we happen
+              // to know them too — otherwise WhatsApp's own generic silhouette placeholder.
+              const matched = phoneDigits ? conversations.find((item) => item.contact.phone === phoneDigits)?.contact : undefined;
               return (
                 <div className="doc-card" key={i}>
                   <div className="doc-card-main">
-                    <div className="doc-card-icon"><Phone size={20} /></div>
+                    <div className="chat-avatar contact-card-avatar">{matched ? avatarContent(matched) : <User size={18} />}</div>
                     <div className="doc-card-info">
                       <div className="doc-card-name">{name}</div>
                       {parsed.phones.length > 0 && <div className="doc-card-meta">{parsed.phones.join(' · ')}</div>}
                     </div>
                   </div>
-                  {parsed.phones[0] && (
+                  {phoneDigits && (
                     <div className="doc-card-actions">
-                      <a href={`tel:${parsed.phones[0].replace(/[^0-9+]/g, '')}`}>Llamar</a>
+                      <a href="#" onClick={(e) => { e.preventDefault(); openNewChatWithPhone(phoneDigits); }}>Mensaje</a>
                     </div>
                   )}
                 </div>
@@ -2030,6 +2045,26 @@ export default function ConversationsPage() {
         </div>
       )}
 
+      {shareContactOpen && (
+        <div className="lightbox-overlay" onClick={() => setShareContactOpen(false)}>
+          <div className="forward-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Compartir contacto...</h3>
+            <div className="searchbox"><Search size={16} /><input autoFocus value={shareContactSearch} onChange={(e) => setShareContactSearch(e.target.value)} placeholder="Buscar contacto..." /></div>
+            <div className="forward-list">
+              {conversations
+                .filter((c) => !isGroupContact(c.contact) && c.contact.phone)
+                .filter((c) => displayName(c.contact).toLowerCase().includes(shareContactSearch.toLowerCase()))
+                .map((c) => (
+                  <button key={c.id} className="forward-row" onClick={() => void sendContactCard(c.contact.id)}>
+                    <div className="chat-avatar">{avatarContent(c.contact)}</div>
+                    <span>{displayName(c.contact)}</span>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {newChatModal && (
         <div className="modal-backdrop" onClick={closeNewChatModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -2206,6 +2241,7 @@ export default function ConversationsPage() {
         <button onClick={() => { setShowComposerMenu(false); pickFile(); }}><Paperclip size={14} />Adjuntar archivo</button>
         <button onClick={() => { setShowComposerMenu(false); setShowEmoji(true); }}><Smile size={14} />Emojis</button>
         <button onClick={() => { setShowComposerMenu(false); setShowStickerTray(true); }}><StickerIcon size={14} />Stickers</button>
+        <button onClick={() => { setShowComposerMenu(false); setShareContactSearch(''); setShareContactOpen(true); }}><Phone size={14} />Compartir contacto</button>
         <button onClick={() => { setShowComposerMenu(false); setShowQuickReplyTray(true); }}><Zap size={14} />Respuestas rápidas</button>
       </div>,
       document.body,
