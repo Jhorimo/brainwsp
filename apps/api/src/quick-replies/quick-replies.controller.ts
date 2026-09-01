@@ -11,6 +11,7 @@ import { StorageService } from '../storage/storage.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { CreateQuickReplyDto, UpdateQuickReplyDto } from './quick-replies.dto';
 import { QuickRepliesService } from './quick-replies.service';
+import { pipeToResponse } from '../common/pipe-stream';
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
@@ -68,7 +69,6 @@ export class QuickRepliesController {
     res.setHeader('Content-Type', item.mimeType || 'application/octet-stream');
     if (item.fileName) res.setHeader('Content-Disposition', `inline; filename="${item.fileName}"`);
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 }

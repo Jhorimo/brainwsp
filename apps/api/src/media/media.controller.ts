@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { pipeToResponse } from '../common/pipe-stream';
 
 @ApiTags('Media')
 @UseGuards(JwtAuthGuard)
@@ -58,13 +59,11 @@ export class MediaController {
       res.setHeader('Content-Length', String(length));
 
       const stream = await this.storage.getPartialObjectStream(objectName, start, length);
-      stream.on('error', () => res.destroy());
-      stream.pipe(res);
+      pipeToResponse(stream, res);
       return;
     }
 
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 }

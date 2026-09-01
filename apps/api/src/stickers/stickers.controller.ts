@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { StorageService } from '../storage/storage.service';
 import { StickersService } from './stickers.service';
+import { pipeToResponse } from '../common/pipe-stream';
 
 class AddFromMessageDto {
   @ApiProperty()
@@ -58,7 +59,6 @@ export class StickersController {
     const objectName = sticker.mediaUrl.split('/').pop() as string;
     res.setHeader('Content-Type', 'image/webp');
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 }

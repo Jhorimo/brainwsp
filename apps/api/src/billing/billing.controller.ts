@@ -10,6 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { StorageService } from '../storage/storage.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { BillingService } from './billing.service';
+import { pipeToResponse } from '../common/pipe-stream';
 
 const MAX_PROOF_BYTES = 16 * 1024 * 1024;
 
@@ -42,8 +43,7 @@ export class BillingController {
   async paymentMethodQr(@Param('id') id: string, @Res() res: Response) {
     const objectName = await this.service.getPaymentMethodQrObjectName(id);
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 
   @Get('payment-requests')

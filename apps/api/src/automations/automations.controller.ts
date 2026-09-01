@@ -10,6 +10,7 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { StorageService } from '../storage/storage.service';
 import { AutomationsService } from './automations.service';
 import { CreateFlowDto, CreateFlowFolderDto, SimulateFlowDto, UpdateFlowDto } from './automations.dto';
+import { pipeToResponse } from '../common/pipe-stream';
 
 const MANAGE_ROLES = [UserRole.OWNER, UserRole.ADMIN, UserRole.SUPERVISOR];
 
@@ -36,8 +37,7 @@ export class AutomationsController {
     res.setHeader('Accept-Ranges', 'bytes');
     if (fileName) res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 
   @Get('stats')

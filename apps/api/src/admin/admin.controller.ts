@@ -12,6 +12,7 @@ import { StorageService } from '../storage/storage.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { AdminService } from './admin.service';
 import { CancelPaymentRequestDto, CreatePaymentMethodDto, CreatePaymentRequestDto, CreatePlanDto, RejectPaymentRequestDto, UpdateCompanyAdminDto, UpdatePaymentMethodDto, UpdatePlanDto } from './admin.dto';
+import { pipeToResponse } from '../common/pipe-stream';
 
 const MAX_PROOF_BYTES = 16 * 1024 * 1024;
 
@@ -106,8 +107,7 @@ export class AdminController {
   async paymentMethodQr(@Param('id') id: string, @Res() res: Response) {
     const objectName = await this.service.getPaymentMethodQrObjectName(id);
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 
   // Sube el QR del método de pago — mismo patrón que QuickRepliesController#uploadMedia:
@@ -142,8 +142,7 @@ export class AdminController {
     const objectName = request.proofUrl.split('/').pop() as string;
     res.setHeader('Content-Type', request.proofMimeType || 'application/octet-stream');
     const stream = await this.storage.getObjectStream(objectName);
-    stream.on('error', () => res.destroy());
-    stream.pipe(res);
+    pipeToResponse(stream, res);
   }
 
   @Post('payment-requests/:id/approve')
