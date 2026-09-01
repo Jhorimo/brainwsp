@@ -486,6 +486,14 @@ export default function ConversationsPage() {
         return { ...item, reactions: event.emoji && event.reaction ? [...withoutReactor, event.reaction] : withoutReactor };
       }));
     });
+    // Keeps `conversationLead` (and the "Convertir en trato" button it gates) in sync the
+    // moment a department gets assigned — without this, the lead only refreshes on a
+    // full page reload, since nothing else in this effect re-fetches `/crm/leads`.
+    const upsertLead = (lead: Lead) => setLeads((current) => current.some((item) => item.id === lead.id)
+      ? current.map((item) => item.id === lead.id ? lead : item)
+      : [lead, ...current]);
+    socket.on('lead.created', upsertLead);
+    socket.on('lead.updated', upsertLead);
     return () => { socket.disconnect(); };
   }, [loadMessages, loadConversations]);
 
