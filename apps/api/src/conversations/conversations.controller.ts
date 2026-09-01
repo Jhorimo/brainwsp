@@ -21,8 +21,14 @@ export class ConversationsController {
   constructor(private readonly service: ConversationsService) {}
 
   @Get()
-  list(@CurrentUser() user: JwtUser, @Query('status') status?: ConversationStatus) {
-    return this.service.list(user, status);
+  list(
+    @CurrentUser() user: JwtUser,
+    @Query('status') status?: ConversationStatus,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.service.list(user, status, from, to, q);
   }
 
   @Get(':id/messages')

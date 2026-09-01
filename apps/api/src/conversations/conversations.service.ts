@@ -79,13 +79,37 @@ export class ConversationsService {
     return departmentIds;
   }
 
-  async list(user: JwtUser, status?: ConversationStatus) {
+  async list(user: JwtUser, status?: ConversationStatus, from?: string, to?: string, q?: string) {
     const restriction = await this.resolveDepartmentRestriction(user);
+    // Without a date range this stays the same "100 most recently active" list as before —
+    // a range narrows that same cap to a window instead, so older conversations that would
+    // otherwise be crowded out by the top-100 cutoff become reachable. Covered by the existing
+    // @@index([companyId, status, lastMessageAt]), so this stays cheap even for wide ranges.
+    const lastMessageAt = from && to ? { gte: new Date(from), lt: new Date(to) } : undefined;
+    const search = q?.trim();
+    // Matches WhatsApp Web's own chat search: the contact's name/phone, OR any message in the
+    // conversation (not just the last one shown in the sidebar preview) mentioning the term.
+    // Combined with the department restriction via `AND` (not a second top-level `OR`, which
+    // would silently overwrite the restriction's `OR` and leak conversations outside it).
     const conversations = await this.prisma.conversation.findMany({
       where: {
         companyId: user.companyId,
         ...(status ? { status } : {}),
-        ...(restriction ? { OR: [{ departmentId: null }, { departmentId: { in: restriction } }] } : {}),
+        ...(lastMessageAt ? { lastMessageAt } : {}),
+        AND: [
+          ...(restriction ? [{ OR: [{ departmentId: null }, { departmentId: { in: restriction } }] }] : []),
+          ...(search ? [{
+            OR: [
+              { contact: { name: { contains: search, mode: Prisma.QueryMode.insensitive } } },
+              { contact: { pushName: { contains: search, mode: Prisma.QueryMode.insensitive } } },
+              { contact: { phone: { contains: search, mode: Prisma.QueryMode.insensitive } } },
+              { messages: { some: { OR: [
+                { body: { contains: search, mode: Prisma.QueryMode.insensitive } },
+                { caption: { contains: search, mode: Prisma.QueryMode.insensitive } },
+              ] } } },
+            ],
+          }] : []),
+        ],
       },
       include: {
         contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },

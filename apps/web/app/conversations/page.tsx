@@ -72,6 +72,36 @@ type Lead = {
   convertedDealId?: string | null;
 };
 
+// Same preset set as the Dashboard's range bar (apps/web/app/dashboard/page.tsx), minus
+// "Personalizado" — here it just narrows which conversations the 100-most-recent cap lets
+// through, not a chart range, so a plain "Todos" (no date filter) covers the custom case.
+type DatePreset = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month';
+const datePresetLabels: Record<DatePreset, string> = { all: 'Todos', today: 'Hoy', yesterday: 'Ayer', '7d': 'Últimos 7 días', '30d': 'Últimos 30 días', month: 'Este mes' };
+// Combines the date-range pills with the free-text search box into the query string
+// `loadConversations` sends the server — the server now owns text matching (contact
+// name/phone AND message content, WhatsApp-Web-style), so there's no local re-filtering
+// of the result on top of this.
+function conversationsQuery(preset: DatePreset, q: string) {
+  const params = new URLSearchParams();
+  if (preset !== 'all') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    const end = new Date(today);
+    if (preset === 'yesterday') { start.setDate(start.getDate() - 1); end.setDate(end.getDate() - 1); }
+    else if (preset === '7d') start.setDate(start.getDate() - 6);
+    else if (preset === '30d') start.setDate(start.getDate() - 29);
+    else if (preset === 'month') start.setDate(1);
+    // `to` is an EXCLUSIVE upper bound (start of the next day) so "Hoy" still covers all of today.
+    end.setDate(end.getDate() + 1);
+    params.set('from', start.toISOString());
+    params.set('to', end.toISOString());
+  }
+  if (q) params.set('q', q);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: typeof Lightbulb }> = [
   { id: 'BUG', label: 'Error', icon: AlertTriangle },
   { id: 'SUGGESTION', label: 'Sugerencia', icon: Lightbulb },
@@ -246,6 +276,7 @@ export default function ConversationsPage() {
   const [filterDept, setFilterDept] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [filterStage, setFilterStage] = useState('');
+  const [dateFilter, setDateFilter] = useState<DatePreset>('all');
   const [quickFilter, setQuickFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
@@ -397,8 +428,15 @@ export default function ConversationsPage() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const data = await apiFetch<Conversation[]>('/conversations');
-      setConversations(sortConversations(data));
+      const data = await apiFetch<Conversation[]>(`/conversations${listQueryRef.current}`);
+      setConversations((current) => {
+        // A date filter can legitimately exclude the conversation the agent has open right
+        // now — keep it in the list instead of yanking the open chat panel out from under them.
+        const keepOpen = selectedIdRef.current && !data.some((item) => item.id === selectedIdRef.current)
+          ? current.find((item) => item.id === selectedIdRef.current)
+          : undefined;
+        return sortConversations(keepOpen ? [...data, keepOpen] : data);
+      });
       setSelectedId((current) => {
         if (current) return current;
         // Enlace directo desde otra página (ej. "Ver conversación" en Pipelines) — abre esa
@@ -420,7 +458,6 @@ export default function ConversationsPage() {
   }, []);
 
   useEffect(() => {
-    void loadConversations();
     void Promise.all([apiFetch<TeamUser[]>('/team/users'), apiFetch<Department[]>('/team/departments'), apiFetch<Project[]>('/team/projects'), apiFetch<Incident[]>('/incidents'), apiFetch<Tag[]>('/team/tags'), apiFetch<QuickReply[]>('/quick-replies'), apiFetch<Appointment[]>('/calendar/appointments')])
       .then(([users, deps, projs, incs, tags, replies, appts]) => { setTeamUsers(users.filter((user) => user.active)); setDepartments(deps.filter((dep) => dep.active)); setProjects(projs.filter((p) => p.active)); setIncidents(incs); setCompanyTags(tags); setQuickReplies(replies); setAppointments(appts); })
       .catch(() => undefined);
@@ -428,7 +465,7 @@ export default function ConversationsPage() {
     // agente (403), y eso no debe tumbar la carga del resto del panel — solo el botón de
     // "Convertir a trato" se queda sin mostrar.
     apiFetch<Lead[]>('/crm/leads').then(setLeads).catch(() => undefined);
-  }, [loadConversations]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -451,6 +488,22 @@ export default function ConversationsPage() {
   // disconnect/reconnect on each click, and any event arriving during that gap was lost.
   const selectedIdRef = useRef<string | null>(null);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+
+  // Debounced so the search box doesn't fire a request on every keystroke — the server now
+  // does the actual matching (contact name/phone AND message content), unlike the instant
+  // in-memory filters below.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // `loadConversations` reads this via ref (not a hook dependency) so a socket reconnect
+  // can call it without needing to know about the date/search filters — it always fetches
+  // whatever's currently selected.
+  const listQueryRef = useRef('');
+  useEffect(() => { listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch); }, [dateFilter, debouncedSearch]);
+  useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, loadConversations]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
@@ -686,13 +739,16 @@ export default function ConversationsPage() {
     }
   }, [departments, stagesByDept]);
 
+  // Text matching (contact name/phone/message content) already happened server-side in
+  // `loadConversations` — `conversations` only holds what matched `debouncedSearch`, so no
+  // local re-filtering by `search` here (that would wrongly drop results that matched on an
+  // older message instead of the name/phone/last-message-preview visible client-side).
   const baseFiltered = useMemo(() => conversations.filter((item) =>
-    `${displayName(item.contact)} ${item.contact.phone || ''} ${lastText(item)}`.toLowerCase().includes(search.toLowerCase())
-    && (!filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent))
+    (!filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent))
     && (!filterDept || item.department?.id === filterDept)
     && (!filterProject || item.project?.id === filterProject)
     && (!filterStage || item.stage?.id === filterStage)
-  ), [conversations, search, filterAgent, filterDept, filterProject, filterStage]);
+  ), [conversations, filterAgent, filterDept, filterProject, filterStage]);
   // Total across every conversation, not just the currently filtered/visible ones — same as
   // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
   // or filter is open.
@@ -709,7 +765,7 @@ export default function ConversationsPage() {
     if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
     return true;
   }), [baseFiltered, quickFilter]);
-  const hasActiveFilters = !!(filterAgent || filterDept || filterProject || filterStage);
+  const hasActiveFilters = !!(filterAgent || filterDept || filterProject || filterStage || dateFilter !== 'all');
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
   const canDeleteTags = isAdmin || identity.role === 'SUPERVISOR';
@@ -1748,7 +1804,11 @@ export default function ConversationsPage() {
               <button className="button small" onClick={() => void openNewChatModal()} title="Iniciar una conversación con un número nuevo"><Plus size={14} />Nuevo chat</button>
             </div>
             <div className="searchbox-row">
-              <div className="searchbox"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente..." /></div>
+              <div className="searchbox clearable">
+                <Search size={16} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente o palabra en la conversación..." />
+                {search && <button className="searchbox-clear" onClick={() => setSearch('')} title="Limpiar búsqueda"><X size={14} /></button>}
+              </div>
               <button className={`icon-button ${hasActiveFilters ? 'filters-active' : ''}`} onClick={() => setFiltersOpen((v) => !v)} title="Filtrar por agente, departamento o proyecto"><SlidersHorizontal size={16} /></button>
             </div>
             <div className="chat-quick-filters">
@@ -1773,6 +1833,11 @@ export default function ConversationsPage() {
             </div>
             {filtersOpen && (
             <div className="chat-filters">
+              <div className="chat-date-presets">
+                {(['all', 'today', 'yesterday', '7d', '30d', 'month'] as DatePreset[]).map((preset) => (
+                  <button key={preset} className={`chat-quick-tab ${dateFilter === preset ? 'active' : ''}`} onClick={() => setDateFilter(preset)}>{datePresetLabels[preset]}</button>
+                ))}
+              </div>
               <select value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)}>
                 <option value="">Todos los agentes</option>
                 <option value="unassigned">Sin asignar</option>
@@ -1798,7 +1863,7 @@ export default function ConversationsPage() {
                   );
                 })}
               </select>
-              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); setFilterStage(''); }}>Limpiar filtros</button>}
+              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); setFilterStage(''); setDateFilter('all'); }}>Limpiar filtros</button>}
             </div>
             )}
           </div>
