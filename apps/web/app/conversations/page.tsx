@@ -96,8 +96,14 @@ function initials(contact: Contact) {
   return name.split(' ').slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 }
 function avatarContent(contact: Contact, iconSize = 16) {
-  if (contact.avatarUrl) return <img src={contact.avatarUrl} alt="" className="chat-avatar-img" />;
-  return isGroupContact(contact) ? <Users size={iconSize} /> : initials(contact);
+  const fallback = isGroupContact(contact) ? <Users size={iconSize} /> : initials(contact);
+  if (!contact.avatarUrl) return fallback;
+  // WhatsApp's avatar URL is a signed, time-limited link cached in the DB; once it expires the
+  // browser's direct request 404s, so fall back to initials/icon instead of a broken-image glyph.
+  return <>
+    <img src={contact.avatarUrl} alt="" className="chat-avatar-img" onError={handleMediaError} />
+    <span className="chat-avatar-fallback" style={{ display: 'none' }}>{fallback}</span>
+  </>;
 }
 function lastText(conversation: Conversation) {
   const message = conversation.messages[0];
