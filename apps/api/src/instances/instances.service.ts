@@ -103,6 +103,14 @@ export class InstancesService {
     return { success: true, status: 'LOGGING_OUT', instanceId: id };
   }
 
+  // One-off resync for contacts whose cached avatar went stale before the contacts.update
+  // listener existed to keep it current — see SessionManager.forceRefreshAvatars.
+  async refreshAvatars(companyId: string, id: string) {
+    await this.getOwned(companyId, id);
+    await this.queues.commands.add('refresh-avatars', { instanceId: id }, { removeOnComplete: 1000, removeOnFail: 1000 });
+    return { success: true, instanceId: id };
+  }
+
   async update(companyId: string, id: string, data: { name?: string; slug?: string }) {
     await this.getOwned(companyId, id);
     if (data.slug !== undefined) {

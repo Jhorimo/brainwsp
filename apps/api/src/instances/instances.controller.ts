@@ -49,6 +49,12 @@ export class InstancesController {
     return this.service.logout(user.companyId, id);
   }
 
+  @Post(':id/refresh-avatars')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  refreshAvatars(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.refreshAvatars(user.companyId, id);
+  }
+
   @Patch(':id')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   update(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateInstanceDto) {

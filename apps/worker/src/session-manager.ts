@@ -248,6 +248,15 @@ export class SessionManager {
         }
       }
     });
+
+    socket.ev.on('contacts.update', async (updates) => {
+      for (const update of updates) {
+        if (!update.id) continue;
+        await this.handleContactAvatarChange(instanceId, socket, update.id, update.imgUrl).catch((error) => {
+          childLogger.warn({ err: error, waId: update.id }, 'failed to handle contact avatar change');
+        });
+      }
+    });
   }
 
   async disconnect(instanceId: string) {
@@ -366,7 +375,7 @@ export class SessionManager {
         ? { companyId: instance.companyId, waId: identityJid, name: groupSubject || null, pushName: groupSubject || null, lastSeenAt: new Date() }
         : { companyId: instance.companyId, waId: identityJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
     });
-    this.refreshAvatar(socket, contact.id, remoteJid, contact.avatarUrl);
+    this.refreshAvatar(instance.companyId, socket, contact.id, remoteJid, contact.avatarUrl);
 
     // In a group, `key.participant` is the actual sender — track them as their own
     // Contact so the UI can show who wrote each message, distinct from the group itself.
@@ -380,7 +389,7 @@ export class SessionManager {
         create: { companyId: instance.companyId, waId: participantJid, phone: participantPhone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
       });
       authorContactId = author.id;
-      this.refreshAvatar(socket, author.id, participantJid, author.avatarUrl);
+      this.refreshAvatar(instance.companyId, socket, author.id, participantJid, author.avatarUrl);
     }
 
     // `upsert` can't tell us whether this was a brand-new conversation — and only a truly
@@ -658,12 +667,26 @@ export class SessionManager {
   // Fire-and-forget: WhatsApp profile pictures are fetched lazily so they never
   // delay message persistence, and only for contacts that don't have one cached yet
   // (Baileys throws for contacts with no photo or privacy-restricted ones — that's fine, the
-  // UI falls back to initials).
-  private refreshAvatar(socket: WASocket, contactId: string, waId: string, hasAvatar: string | null) {
+  // UI falls back to initials). A contact that already has one is left alone here — it's kept
+  // fresh instead by the `contacts.update` listener below, which is what fires when WhatsApp
+  // tells us the photo actually changed.
+  private refreshAvatar(companyId: string, socket: WASocket, contactId: string, waId: string, hasAvatar: string | null) {
     if (hasAvatar) return;
     socket.profilePictureUrl(waId, 'image')
-      .then((url) => { if (url) return this.prisma.contact.update({ where: { id: contactId }, data: { avatarUrl: url } }); })
+      .then((url) => { if (url) return this.setContactAvatar(companyId, contactId, url); })
       .catch(() => {});
+  }
+
+  private async refreshAvatarsFor(companyId: string, socket: WASocket, contacts: { id: string; waId: string }[]) {
+    for (const contact of contacts) {
+      try {
+        const url = await socket.profilePictureUrl(contact.waId, 'image');
+        if (url) await this.setContactAvatar(companyId, contact.id, url);
+      } catch {
+        // no photo or privacy-restricted
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 
   // One pass per (re)connect over contacts still missing a photo, so existing chats
@@ -676,14 +699,66 @@ export class SessionManager {
       select: { id: true, waId: true },
       take: 200,
     });
-    for (const contact of contacts) {
-      try {
-        const url = await socket.profilePictureUrl(contact.waId, 'image');
-        if (url) await this.prisma.contact.update({ where: { id: contact.id }, data: { avatarUrl: url } });
-      } catch {
-        // no photo or privacy-restricted
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    await this.refreshAvatarsFor(instance.companyId, socket, contacts);
+  }
+
+  // Manual, one-off resync triggered from the API (see InstancesService.refreshAvatars): re-fetches
+  // EVERY contact's photo for this instance's company, including ones that already have a cached
+  // avatarUrl — unlike backfillAvatars above, which only fills gaps on every reconnect and would
+  // never touch a contact whose cached link went stale/broken before the contacts.update listener
+  // existed to keep it current.
+  async forceRefreshAvatars(instanceId: string) {
+    const socket = await this.ensureConnected(instanceId);
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId }, select: { companyId: true } });
+    if (!instance) return;
+    const contacts = await this.prisma.contact.findMany({
+      where: { companyId: instance.companyId },
+      select: { id: true, waId: true },
+    });
+    await this.refreshAvatarsFor(instance.companyId, socket, contacts);
+  }
+
+  // WhatsApp pushes an explicit notice through `contacts.update` whenever a contact's photo
+  // changes (or is removed) — `imgUrl` shows up as a key on the update at all only when the
+  // picture changed, `null` meaning "removed" and any other value meaning "fetch it again to
+  // get the real URL" (Baileys never puts the actual CDN link in the event itself). This is the
+  // one path that keeps an *existing* avatar current — see refreshAvatar above for why that one
+  // deliberately skips contacts that already have a cached photo.
+  private async handleContactAvatarChange(instanceId: string, socket: WASocket, waId: string, imgUrl: string | null | undefined) {
+    if (typeof imgUrl === 'undefined') return;
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId }, select: { companyId: true } });
+    if (!instance) return;
+    const contact = await this.prisma.contact.findUnique({
+      where: { companyId_waId: { companyId: instance.companyId, waId } },
+      select: { id: true },
+    });
+    if (!contact) return;
+    // `imgUrl === null` is WhatsApp's explicit "photo removed" signal — clear it. Any other
+    // value just means "changed, go fetch the real one"; if that refetch fails (network blip,
+    // or the contact only just made it private), leave the last-known-good URL alone rather
+    // than blanking a perfectly working avatar over a transient error.
+    if (imgUrl === null) {
+      await this.setContactAvatar(instance.companyId, contact.id, null);
+      return;
+    }
+    const newUrl = await socket.profilePictureUrl(waId, 'image').catch(() => null);
+    if (newUrl) await this.setContactAvatar(instance.companyId, contact.id, newUrl);
+  }
+
+  // Persists the new avatar and pushes it to every open conversation for that contact so the
+  // inbox picture updates live, instead of only on the next full reload.
+  private async setContactAvatar(companyId: string, contactId: string, avatarUrl: string | null) {
+    await this.prisma.contact.update({ where: { id: contactId }, data: { avatarUrl } });
+    const conversations = await this.prisma.conversation.findMany({
+      where: { contactId },
+      select: {
+        id: true,
+        departmentId: true,
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },
+      },
+    });
+    for (const conversation of conversations) {
+      await this.realtime.publish(companyId, 'conversation.updated', conversation, conversation.departmentId);
     }
   }
 

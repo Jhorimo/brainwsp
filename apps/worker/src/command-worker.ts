@@ -20,6 +20,7 @@ export class CommandWorker {
     if (job.name === 'connect') return this.sessions.connect(job.data.instanceId);
     if (job.name === 'disconnect') return this.sessions.disconnect(job.data.instanceId);
     if (job.name === 'logout') return this.sessions.logout(job.data.instanceId);
+    if (job.name === 'refresh-avatars') return this.sessions.forceRefreshAvatars(job.data.instanceId);
     throw new Error(`Unknown command: ${job.name}`);
   }
 
