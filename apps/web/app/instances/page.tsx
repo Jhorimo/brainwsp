@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Cable, Pencil, Plus, Power, QrCode, Search, Smartphone, Trash2, Unplug } from 'lucide-react';
+import { Cable, Pencil, Plus, Power, QrCode, RefreshCw, Search, Smartphone, Trash2, Unplug } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
@@ -53,6 +53,17 @@ export default function InstancesPage() {
   const action = async (id: string, name: 'connect' | 'disconnect' | 'logout') => {
     setBusy(id + name); setError('');
     try { await apiFetch(`/instances/${id}/${name}`, { method: 'POST' }); await load(); } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } finally { setBusy(null); }
+  };
+
+  // Encola un resync completo de fotos (contactos y grupos) en el worker — ver
+  // SessionManager.forceRefreshAvatars. Corre en segundo plano; los avatares van
+  // llegando por socket a medida que el worker los va obteniendo, así que no hace
+  // falta esperar ni recargar la lista de instancias.
+  const refreshAvatars = async (id: string) => {
+    setBusy(id + 'refresh-avatars'); setError('');
+    try { await apiFetch(`/instances/${id}/refresh-avatars`, { method: 'POST' }); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setBusy(null); }
   };
 
   const create = async () => {
@@ -117,6 +128,7 @@ export default function InstancesPage() {
               {instance.qr && <button className="button small" onClick={() => setQrInstance(instance)}><QrCode size={14} />Ver QR</button>}
               {instance.status === 'CONNECTED' && <button className="button small" disabled={busy === instance.id + 'disconnect'} onClick={() => void action(instance.id, 'disconnect')}><Unplug size={14} />Desconectar</button>}
               {instance.status !== 'DISCONNECTED' && instance.status !== 'LOGGED_OUT' && <button className="button small" disabled={busy === instance.id + 'logout'} onClick={() => void action(instance.id, 'logout')}><Power size={14} />Cerrar sesión</button>}
+              {instance.status === 'CONNECTED' && <button className="button small" disabled={busy === instance.id + 'refresh-avatars'} onClick={() => void refreshAvatars(instance.id)} title="Vuelve a descargar la foto de perfil de todos los contactos y grupos"><RefreshCw size={14} />Actualizar fotos</button>}
               <button className="button small" onClick={() => openEdit(instance)}><Pencil size={14} />Editar</button>
               <button className="button small danger" disabled={busy === instance.id + 'delete'} onClick={() => { setDeleteInstance(instance); setDeleteError(''); }}><Trash2 size={14} />Eliminar</button>
             </div>

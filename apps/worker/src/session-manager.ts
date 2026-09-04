@@ -257,6 +257,20 @@ export class SessionManager {
         });
       }
     });
+
+    // WhatsApp never routes a group's photo change through `contacts.update` — groups get
+    // their own `groups.update` event instead, and unlike contacts.update it doesn't say
+    // which field changed (subject, description, settings or photo), so just re-fetch the
+    // photo unconditionally. Without this listener a group's avatar can only ever be set
+    // once (on its first message or the reconnect backfill) and never refreshes again.
+    socket.ev.on('groups.update', async (updates) => {
+      for (const update of updates) {
+        if (!update.id) continue;
+        await this.handleGroupAvatarChange(instanceId, socket, update.id).catch((error) => {
+          childLogger.warn({ err: error, waId: update.id }, 'failed to handle group avatar change');
+        });
+      }
+    });
   }
 
   async disconnect(instanceId: string) {
@@ -697,9 +711,16 @@ export class SessionManager {
     const contacts = await this.prisma.contact.findMany({
       where: { companyId: instance.companyId, avatarUrl: null },
       select: { id: true, waId: true },
-      take: 200,
+      take: 2000,
     });
-    await this.refreshAvatarsFor(instance.companyId, socket, contacts);
+    // Without shuffling, a company with more than 200 avatar-less contacts always retries
+    // the same physical-order slice on every reconnect — a contact whose photo fetch keeps
+    // throwing (privacy-restricted) never falls out of that slice, permanently starving
+    // whoever comes after it (often groups, created later than most 1:1 contacts). A stable
+    // production connection reconnects rarely, so that starvation can persist indefinitely.
+    // Shuffling gives every contact/group a fair shot across successive reconnects.
+    const sample = contacts.sort(() => Math.random() - 0.5).slice(0, 200);
+    await this.refreshAvatarsFor(instance.companyId, socket, sample);
   }
 
   // Manual, one-off resync triggered from the API (see InstancesService.refreshAvatars): re-fetches
@@ -741,6 +762,20 @@ export class SessionManager {
       await this.setContactAvatar(instance.companyId, contact.id, null);
       return;
     }
+    const newUrl = await socket.profilePictureUrl(waId, 'image').catch(() => null);
+    if (newUrl) await this.setContactAvatar(instance.companyId, contact.id, newUrl);
+  }
+
+  // Counterpart to handleContactAvatarChange for groups.update — see the listener above for
+  // why this always re-fetches instead of reading a hint off the event.
+  private async handleGroupAvatarChange(instanceId: string, socket: WASocket, waId: string) {
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId }, select: { companyId: true } });
+    if (!instance) return;
+    const contact = await this.prisma.contact.findUnique({
+      where: { companyId_waId: { companyId: instance.companyId, waId } },
+      select: { id: true },
+    });
+    if (!contact) return;
     const newUrl = await socket.profilePictureUrl(waId, 'image').catch(() => null);
     if (newUrl) await this.setContactAvatar(instance.companyId, contact.id, newUrl);
   }
