@@ -4,9 +4,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 export interface AgentAccess {
   departmentIds: string[];
   allowedModules: string[];
-  // Módulos que incluye el plan de la empresa — [] significa sin restricción (mismo plan no
-  // configurado, o plan sin asignar). Es el techo que aplica a todos los roles; allowedModules
-  // es una restricción adicional que solo se usa para el rol AGENT.
+  // Módulos que ve la empresa: el override de Company.moduleOverrides si tiene alguno, si no el
+  // plan de la empresa — [] significa sin restricción (plan no configurado, o sin asignar). Es
+  // el techo que aplica a todos los roles; allowedModules es una restricción adicional que solo
+  // se usa para el rol AGENT.
   planModules: string[];
   // true si la licencia de la empresa ya venció (licenseRenewsAt en el pasado). No se mezcla
   // con planModules ([] ahí ya significa "sin restricción") — es una bandera aparte que, cuando
@@ -26,14 +27,20 @@ export class AgentAccessService {
     const [user, memberships] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
-        select: { allowedModules: true, company: { select: { licenseRenewsAt: true, plan: { select: { moduleKeys: true } } } } },
+        select: {
+          allowedModules: true,
+          company: { select: { licenseRenewsAt: true, moduleOverrides: true, plan: { select: { moduleKeys: true } } } },
+        },
       }),
       this.prisma.departmentUser.findMany({ where: { userId }, select: { departmentId: true } }),
     ]);
+    // Company.moduleOverrides (editado desde /admin/clients → "Módulos") reemplaza por completo
+    // el techo del plan cuando tiene algún elemento — ver el comentario en el schema de Company.
+    const planModules = user?.company?.moduleOverrides?.length ? user.company.moduleOverrides : (user?.company?.plan?.moduleKeys ?? []);
     return {
       departmentIds: memberships.map((m) => m.departmentId),
       allowedModules: user?.allowedModules ?? [],
-      planModules: user?.company?.plan?.moduleKeys ?? [],
+      planModules,
       licenseExpired: !!user?.company?.licenseRenewsAt && user.company.licenseRenewsAt < new Date(),
     };
   }

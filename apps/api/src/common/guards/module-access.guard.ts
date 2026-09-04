@@ -14,8 +14,10 @@ export class ModuleAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const required = this.reflector.getAllAndOverride<ModuleKey | undefined>(REQUIRE_MODULE_KEY, [context.getHandler(), context.getClass()]);
+    const required = this.reflector.getAllAndOverride<ModuleKey | ModuleKey[] | undefined>(REQUIRE_MODULE_KEY, [context.getHandler(), context.getClass()]);
     if (!required) return true;
+    // Un array en @RequireModule es "cualquiera de estos" — ver el comentario en el decorador.
+    const requiredKeys = Array.isArray(required) ? required : [required];
 
     const request = context.switchToHttp().getRequest<{ user?: JwtUser }>();
     const user = request.user;
@@ -31,12 +33,12 @@ export class ModuleAccessGuard implements CanActivate {
 
     // El plan de la empresa es el techo real para todos los roles — si no lo incluye, ni el
     // Owner lo ve hasta subir de plan. [] = plan sin restricción configurada (todos los módulos).
-    if (planModules.length > 0 && !planModules.includes(required)) return false;
+    if (planModules.length > 0 && !requiredKeys.some((key) => planModules.includes(key))) return false;
 
     // Por debajo del techo del plan, allowedModules es una restricción adicional que solo
     // aplica al rol AGENT — Owner/Admin/Supervisor no se limitan por departamento/módulo propio.
     if (user.role !== UserRole.AGENT) return true;
     if (allowedModules.length === 0) return true;
-    return allowedModules.includes(required);
+    return requiredKeys.some((key) => allowedModules.includes(key));
   }
 }

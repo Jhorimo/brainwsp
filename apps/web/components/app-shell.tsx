@@ -19,12 +19,14 @@ import {
   Kanban,
   KeyRound,
   LayoutDashboard,
+  LayoutGrid,
   LayoutTemplate,
   Lightbulb,
   Lock,
   LogOut,
   Menu,
   MessageSquareText,
+  Minus,
   Settings,
   ShieldCheck,
   User,
@@ -35,7 +37,7 @@ import {
 } from 'lucide-react';
 import { Protected } from './protected';
 import { API_URL, apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
-import { ALL_MODULE_KEYS } from '@/lib/modules';
+import { ALL_MODULE_KEYS, MODULE_TREE } from '@/lib/modules';
 
 type MasterCredential = {
   id: string;
@@ -66,8 +68,8 @@ const navigation = [
   // no algo de uso ocasional como el resto de items de esta lista.
   { href: '/conversations', label: 'Conversaciones', icon: MessageSquareText, module: 'conversations' },
   { href: '/instances', label: 'WhatsApp', icon: Wifi, module: 'instances' },
-  { href: '/automations', label: 'Automatizaciones', icon: Zap, module: 'automations' },
-  { href: '/automations/templates', label: 'Galería de Plantillas', icon: LayoutTemplate, module: 'automations' },
+  { href: '/automations', label: 'Automatizaciones', icon: Zap, module: 'automations-flows' },
+  { href: '/automations/templates', label: 'Galería de Plantillas', icon: LayoutTemplate, module: 'automations-templates' },
   { href: '/team', label: 'Equipo y agentes', icon: Users, module: 'team' },
   { href: '/incidents', label: 'Incidencias', icon: AlertTriangle, module: 'incidents' },
   { href: '/api-settings', label: 'API e integraciones', icon: KeyRound, module: 'api-settings' },
@@ -76,9 +78,9 @@ const navigation = [
 
 const crmNavigation = [
   { href: '/calendar', label: 'Calendario', icon: CalendarDays, module: 'calendar' },
-  { href: '/crm/leads', label: 'Prospectos', icon: UserPlus, module: 'crm' },
-  { href: '/crm/deals', label: 'Tratos', icon: Handshake, module: 'crm' },
-  { href: '/crm/pipelines', label: 'Pipelines', icon: Kanban, module: 'crm' },
+  { href: '/crm/leads', label: 'Prospectos', icon: UserPlus, module: 'crm-leads' },
+  { href: '/crm/deals', label: 'Tratos', icon: Handshake, module: 'crm-deals' },
+  { href: '/crm/pipelines', label: 'Pipelines', icon: Kanban, module: 'crm-pipelines' },
 ];
 
 export function AppShell({ title, subtitle, children, actions }: { title: string; subtitle?: string; children: React.ReactNode; actions?: React.ReactNode }) {
@@ -345,6 +347,11 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const isLocked = (moduleKey: string) => !effectiveModules.includes(moduleKey);
   const lockedHref = (moduleKey: string) => `/my-plan?locked=${moduleKey}`;
 
+  // Los bloqueados igual quedan visibles (son el gancho hacia "Mi Plan"), pero intercalados con
+  // los que sí puede usar la sección se ve saturada de candados — se ordenan al final de su
+  // propia sección en vez de ocultarse o de reordenar contra el resto del menú.
+  const sortByLocked = <T extends { module: string }>(items: T[]) => [...items].sort((a, b) => Number(isLocked(a.module)) - Number(isLocked(b.module)));
+
   // Si el usuario navega directo (URL escrita a mano) a una ruta que su plan/permisos ya no
   // incluyen, lo saca de ahí hacia "Mi Plan" en vez de dejarlo viendo una página que el backend
   // igual le va a rechazar.
@@ -384,29 +391,29 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
 
           <nav className="nav-list">
             <div className="nav-caption">OPERACIÓN</div>
-            {navigation.map((item) => {
+            {sortByLocked(navigation).map((item) => {
               const Icon = item.icon;
               const locked = isLocked(item.module);
               const active = !locked && (pathname === item.href || pathname.startsWith(`${item.href}/`));
               return (
-                <Link className={`nav-item ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} href={locked ? lockedHref(item.module) : item.href} key={item.href}>
+                <Link className={`nav-item ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} href={locked ? lockedHref(item.module) : item.href} key={item.href} title={locked ? 'Disponible en un plan superior' : undefined}>
                   <Icon size={19} />
                   <span>{item.label}</span>
                   {item.href === '/conversations' && !locked && <span className="nav-badge">Live</span>}
-                  {locked && <Lock size={13} className="nav-lock" />}
+                  {locked && <Lock size={11} className="nav-lock" />}
                 </Link>
               );
             })}
             <div className="nav-caption nav-gap">CRM</div>
-            {crmNavigation.map((item) => {
+            {sortByLocked(crmNavigation).map((item) => {
               const Icon = item.icon;
               const locked = isLocked(item.module);
               const active = !locked && (pathname === item.href || pathname.startsWith(`${item.href}/`));
               return (
-                <Link className={`nav-item ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} href={locked ? lockedHref(item.module) : item.href} key={item.href}>
+                <Link className={`nav-item ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} href={locked ? lockedHref(item.module) : item.href} key={item.href} title={locked ? 'Disponible en un plan superior' : undefined}>
                   <Icon size={19} />
                   <span>{item.label}</span>
-                  {locked && <Lock size={13} className="nav-lock" />}
+                  {locked && <Lock size={11} className="nav-lock" />}
                 </Link>
               );
             })}
@@ -529,6 +536,44 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                     </div>
                     {isAccountManager && <span className="row-sub">Así nuestro equipo puede contactarte para coordinar tu plan o soporte.</span>}
                   </div>
+
+                  {isAccountManager && (
+                    <div className="profile-section">
+                      <div className="profile-section-title"><LayoutGrid size={14} />Módulos</div>
+                      <p className="row-sub" style={{ marginTop: -6, marginBottom: 10 }}>Lo que incluye tu plan actual. Lo bloqueado se activa subiendo de plan desde &quot;Mi Plan&quot;.</p>
+                      <div className="module-tree" style={{ maxHeight: 'none' }}>
+                        {MODULE_TREE.map((node) => {
+                          const keys = (node.children ?? [node]).map((child) => child.key);
+                          const activeCount = keys.filter((key) => effectiveModules.includes(key)).length;
+                          const StatusIcon = activeCount === keys.length ? Check : activeCount === 0 ? Lock : Minus;
+                          const statusColor = activeCount === keys.length ? '#16a34a' : activeCount === 0 ? '#94a3b8' : '#d97706';
+                          return (
+                            <div key={node.key} className="module-group">
+                              <div className="module-row">
+                                <div className="member-option" style={{ border: 0, padding: '4px 0', cursor: 'default' }}>
+                                  <StatusIcon size={14} color={statusColor} />
+                                  <div><strong>{node.label}</strong></div>
+                                </div>
+                              </div>
+                              {node.children && (
+                                <div className="module-children">
+                                  {node.children.map((child) => {
+                                    const active = effectiveModules.includes(child.key);
+                                    return (
+                                      <div className="member-option" key={child.key} style={{ border: 0, padding: '4px 0', cursor: 'default' }}>
+                                        {active ? <Check size={13} color="#16a34a" /> : <Lock size={12} color="#94a3b8" />}
+                                        <div><strong style={{ opacity: active ? 1 : .55 }}>{child.label}</strong></div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {isAccountManager && (
                     <div className="profile-section">

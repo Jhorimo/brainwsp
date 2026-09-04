@@ -12,7 +12,7 @@ import { LeadsService } from './leads.service';
 @ApiTags('CRM — Prospectos')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, ModuleAccessGuard)
-@RequireModule('crm')
+@RequireModule('crm-leads')
 @Controller('crm/leads')
 export class LeadsController {
   constructor(private readonly service: LeadsService) {}

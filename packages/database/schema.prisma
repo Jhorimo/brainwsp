@@ -121,6 +121,13 @@ model Company {
   // /admin/clients o "Licencias", o aprobar una solicitud de pago. Ver admin.service.ts.
   planStartedAt  DateTime?
   licenseRenewsAt DateTime?
+  // Excepción por cliente a los módulos de su plan (ver Plan.moduleKeys) — Prisma no soporta
+  // listas nullable, así que sigue la misma convención que Plan.moduleKeys: [] (default) es
+  // "sin excepción, hereda el techo del plan tal cual"; cualquier elemento presente REEMPLAZA
+  // por completo ese techo para esta empresa (ver AgentAccessService.getAgentAccess). No hay
+  // forma de usar esto para dejar a un cliente sin NINGÚN módulo — para eso está "Suspender".
+  // Se edita desde /admin/clients → "Módulos".
+  moduleOverrides String[]           @default([])
   aiSystemPrompt String?            @db.Text
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt

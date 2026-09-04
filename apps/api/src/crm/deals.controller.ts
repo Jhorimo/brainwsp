@@ -11,7 +11,7 @@ import { DealsService } from './deals.service';
 @ApiTags('CRM — Tratos')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, ModuleAccessGuard)
-@RequireModule('crm')
+@RequireModule('crm-deals')
 @Controller('crm/deals')
 export class DealsController {
   constructor(private readonly service: DealsService) {}

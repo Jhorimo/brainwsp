@@ -12,7 +12,7 @@ import { PipelinesService } from './pipelines.service';
 @ApiTags('CRM — Pipelines')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, ModuleAccessGuard)
-@RequireModule('crm')
+@RequireModule('crm-pipelines')
 @Controller('crm/pipelines')
 export class PipelinesController {
   constructor(private readonly service: PipelinesService) {}

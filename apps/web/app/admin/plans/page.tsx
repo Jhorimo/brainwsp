@@ -1,11 +1,63 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CreditCard, Pencil, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, CreditCard, Pencil, Plus } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch } from '@/lib/api';
-import { ALL_MODULE_KEYS, MODULE_OPTIONS } from '@/lib/modules';
+import { ALL_MODULE_KEYS, MODULE_TREE } from '@/lib/modules';
+
+// Mismo árbol expandible con checkbox padre indeterminado que /admin/clients → "Módulos": un
+// grupo como "CRM" no es un permiso real (ver ModuleNode en lib/modules), solo agrupa y
+// prende/apaga sus hijos de un tiro.
+function ModuleTreePicker({ selection, onChange }: { selection: string[]; onChange: (next: string[]) => void }) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  return (
+    <div className="module-tree">
+      {MODULE_TREE.map((node) => {
+        const keys = (node.children ?? [node]).map((child) => child.key);
+        const selectedCount = keys.filter((key) => selection.includes(key)).length;
+        const checked = selectedCount === keys.length;
+        const indeterminate = selectedCount > 0 && selectedCount < keys.length;
+        const isCollapsed = collapsed[node.key];
+        return (
+          <div key={node.key} className="module-group">
+            <div className="module-row">
+              {node.children && (
+                <button type="button" className="module-toggle" onClick={() => setCollapsed((current) => ({ ...current, [node.key]: !current[node.key] }))}>
+                  {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                </button>
+              )}
+              <label className="member-option" style={{ border: 0, padding: '4px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  ref={(el) => { if (el) el.indeterminate = indeterminate; }}
+                  onChange={(e) => onChange(e.target.checked ? Array.from(new Set([...selection, ...keys])) : selection.filter((key) => !keys.includes(key)))}
+                />
+                <div><strong>{node.label}</strong></div>
+              </label>
+            </div>
+            {node.children && !isCollapsed && (
+              <div className="module-children">
+                {node.children.map((child) => (
+                  <label className="member-option" key={child.key} style={{ border: 0, padding: '4px 0' }}>
+                    <input
+                      type="checkbox"
+                      checked={selection.includes(child.key)}
+                      onChange={(e) => onChange(e.target.checked ? [...selection, child.key] : selection.filter((key) => key !== child.key))}
+                    />
+                    <div><strong>{child.label}</strong></div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 type Plan = {
   id: string; name: string; billingCycle: string; price: number; priceUsd: number;
@@ -183,18 +235,7 @@ export default function AdminPlansPage() {
                 <div className="field field-full">
                   <label>Módulos incluidos</label>
                   <span className="row-sub">Lo que no incluye queda oculto para toda la empresa (dueño, agentes, todos) hasta que suban de plan.</span>
-                  <div className="plan-modules-grid">
-                    {MODULE_OPTIONS.map((module) => (
-                      <label className="member-option" key={module.key}>
-                        <input
-                          type="checkbox"
-                          checked={form.moduleKeys.includes(module.key)}
-                          onChange={(e) => setForm({ ...form, moduleKeys: e.target.checked ? [...form.moduleKeys, module.key] : form.moduleKeys.filter((key) => key !== module.key) })}
-                        />
-                        <div><strong>{module.label}</strong></div>
-                      </label>
-                    ))}
-                  </div>
+                  <ModuleTreePicker selection={form.moduleKeys} onChange={(moduleKeys) => setForm({ ...form, moduleKeys })} />
                 </div>
                 <div className="field field-full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input type="checkbox" checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} style={{ width: 16, height: 16 }} />
@@ -238,18 +279,7 @@ export default function AdminPlansPage() {
                 <div className="field field-full">
                   <label>Módulos incluidos</label>
                   <span className="row-sub">Lo que no incluye queda oculto para toda la empresa (dueño, agentes, todos) hasta que suban de plan.</span>
-                  <div className="plan-modules-grid">
-                    {MODULE_OPTIONS.map((module) => (
-                      <label className="member-option" key={module.key}>
-                        <input
-                          type="checkbox"
-                          checked={editForm.moduleKeys.includes(module.key)}
-                          onChange={(e) => setEditForm({ ...editForm, moduleKeys: e.target.checked ? [...editForm.moduleKeys, module.key] : editForm.moduleKeys.filter((key) => key !== module.key) })}
-                        />
-                        <div><strong>{module.label}</strong></div>
-                      </label>
-                    ))}
-                  </div>
+                  <ModuleTreePicker selection={editForm.moduleKeys} onChange={(moduleKeys) => setEditForm({ ...editForm, moduleKeys })} />
                 </div>
                 <div className="field field-full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input type="checkbox" checked={editForm.isDefault} onChange={(e) => setEditForm({ ...editForm, isDefault: e.target.checked })} style={{ width: 16, height: 16 }} />

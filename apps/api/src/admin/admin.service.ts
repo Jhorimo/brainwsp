@@ -42,8 +42,10 @@ export class AdminService {
 
   listCompanies() {
     return this.prisma.company.findMany({
-      include: {
-        plan: { select: { id: true, name: true } },
+      select: {
+        id: true, name: true, active: true, phone: true, planId: true, planStartedAt: true,
+        licenseRenewsAt: true, moduleOverrides: true, createdAt: true,
+        plan: { select: { id: true, name: true, moduleKeys: true } },
         users: { where: { role: 'OWNER' }, select: { id: true, name: true, email: true }, take: 1 },
         _count: { select: { instances: true, conversations: true, users: true } },
       },
@@ -72,7 +74,7 @@ export class AdminService {
     return { success: true };
   }
 
-  async updateCompany(actorUserId: string, companyId: string, data: { active?: boolean; planId?: string | null; licenseRenewsAt?: string | null }, ip?: string, userAgent?: string) {
+  async updateCompany(actorUserId: string, companyId: string, data: { active?: boolean; planId?: string | null; licenseRenewsAt?: string | null; moduleOverrides?: string[] }, ip?: string, userAgent?: string) {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) throw new NotFoundException('Empresa no encontrada');
 
@@ -91,8 +93,9 @@ export class AdminService {
         ...(data.planId !== undefined ? { planId: data.planId } : {}),
         ...(data.licenseRenewsAt !== undefined ? { licenseRenewsAt: data.licenseRenewsAt ? new Date(data.licenseRenewsAt) : null } : {}),
         ...(touchesLicense ? { planStartedAt: new Date() } : {}),
+        ...(data.moduleOverrides !== undefined ? { moduleOverrides: data.moduleOverrides } : {}),
       },
-      include: { plan: { select: { id: true, name: true } } },
+      include: { plan: { select: { id: true, name: true, moduleKeys: true } } },
     });
 
     if (data.active !== undefined && data.active !== company.active) {

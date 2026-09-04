@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'class-validator';
+import { MODULE_KEYS } from '../common/constants/modules';
 
 export class UpdateCompanyAdminDto {
   @ApiPropertyOptional({ description: 'Activa o suspende el acceso de todos los usuarios de la empresa.' })
@@ -16,6 +17,12 @@ export class UpdateCompanyAdminDto {
   @IsOptional()
   @IsDateString()
   licenseRenewsAt?: string | null;
+
+  @ApiPropertyOptional({ description: 'Módulos habilitados específicamente para este cliente, sin importar su plan. [] = sin excepción, hereda del plan.' })
+  @IsOptional()
+  @IsArray()
+  @IsIn(MODULE_KEYS, { each: true })
+  moduleOverrides?: string[];
 }
 
 export class CreatePlanDto {

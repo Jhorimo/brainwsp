@@ -3,8 +3,10 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequireModule } from '../common/decorators/require-module.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { StorageService } from '../storage/storage.service';
@@ -16,7 +18,8 @@ const MANAGE_ROLES = [UserRole.OWNER, UserRole.ADMIN, UserRole.SUPERVISOR];
 
 @ApiTags('Automatizaciones')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(['automations-flows', 'automations-templates'])
 @Controller('automations')
 export class AutomationsController {
   constructor(

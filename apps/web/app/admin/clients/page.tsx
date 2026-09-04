@@ -2,19 +2,27 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Building2, MessagesSquare, Radio, Users } from 'lucide-react';
+import { Building2, ChevronDown, ChevronRight, LayoutGrid, MessagesSquare, Radio, Sparkles, Users } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch, startImpersonation } from '@/lib/api';
+import { ALL_MODULE_KEYS, MODULE_TREE, type ModuleNode } from '@/lib/modules';
 
 type Owner = { id: string; name: string; email: string };
-type Plan = { id: string; name: string };
+type Plan = { id: string; name: string; moduleKeys?: string[] };
 type Company = {
   id: string; name: string; active: boolean; phone?: string | null;
   planId?: string | null; plan?: Plan | null; planStartedAt?: string | null; licenseRenewsAt?: string | null; createdAt: string;
+  moduleOverrides: string[];
   users: Owner[];
   _count: { instances: number; conversations: number; users: number };
 };
+
+// [] en el plan significa "sin restricción" (todos los módulos) — ver AgentAccessService.
+function planEffectiveKeys(company: Company): string[] {
+  const keys = company.plan?.moduleKeys ?? [];
+  return keys.length ? keys : ALL_MODULE_KEYS;
+}
 
 function daysUntil(dateIso?: string | null) {
   if (!dateIso) return null;
@@ -32,6 +40,11 @@ export default function AdminClientsPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [modulesCompany, setModulesCompany] = useState<Company | null>(null);
+  const [moduleSelection, setModuleSelection] = useState<string[]>([]);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [moduleSaving, setModuleSaving] = useState(false);
+  const [moduleError, setModuleError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -100,6 +113,48 @@ export default function AdminClientsPage() {
 
   const activeCount = companies.filter((c) => c.active).length;
 
+  const openModules = (company: Company) => {
+    setModulesCompany(company);
+    setModuleSelection(company.moduleOverrides.length ? company.moduleOverrides : planEffectiveKeys(company));
+    setModuleError('');
+  };
+
+  const toggleModuleKey = (key: string, checked: boolean) => {
+    setModuleSelection((current) => checked ? [...current, key] : current.filter((k) => k !== key));
+  };
+
+  const toggleModuleGroup = (node: ModuleNode, checked: boolean) => {
+    const keys = (node.children ?? [node]).map((child) => child.key);
+    setModuleSelection((current) => checked
+      ? Array.from(new Set([...current, ...keys]))
+      : current.filter((k) => !keys.includes(k)));
+  };
+
+  const saveModules = async () => {
+    if (!modulesCompany) return;
+    setModuleSaving(true); setModuleError('');
+    try {
+      const updated = await apiFetch<Company>(`/admin/companies/${modulesCompany.id}`, { method: 'PATCH', body: JSON.stringify({ moduleOverrides: moduleSelection }) });
+      setCompanies((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setModulesCompany(null);
+    } catch (err) { setModuleError(err instanceof Error ? err.message : 'No se pudo guardar'); }
+    finally { setModuleSaving(false); }
+  };
+
+  // Borra la excepción del cliente para que vuelva a heredar exactamente lo que diga su plan
+  // — no cierra el modal, así se ve de inmediato qué quedó habilitado.
+  const resetModulesToPlan = async () => {
+    if (!modulesCompany) return;
+    setModuleSaving(true); setModuleError('');
+    try {
+      const updated = await apiFetch<Company>(`/admin/companies/${modulesCompany.id}`, { method: 'PATCH', body: JSON.stringify({ moduleOverrides: [] }) });
+      setCompanies((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setModulesCompany(updated);
+      setModuleSelection(planEffectiveKeys(updated));
+    } catch (err) { setModuleError(err instanceof Error ? err.message : 'No se pudo restablecer'); }
+    finally { setModuleSaving(false); }
+  };
+
   return (
     <AdminShell title="Usuarios" subtitle={`Todos los clientes registrados en la plataforma. ${companies.length} en total.`}>
       {error && <div className="error-box">{error}</div>}
@@ -162,6 +217,7 @@ export default function AdminClientsPage() {
                   <td><Radio size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.instances} inst. · <MessagesSquare size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.conversations} conv.</td>
                   <td>{new Date(company.createdAt).toLocaleDateString('es-PE')}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="button small" onClick={() => openModules(company)}><LayoutGrid size={13} />Módulos{company.moduleOverrides.length > 0 && <Sparkles size={11} color="#d97706" style={{ marginLeft: 4 }} />}</button>{' '}
                     <button className="button small info" disabled={busyId === company.id} onClick={() => void viewPanel(company)}>{busyId === company.id ? '...' : 'Ver panel'}</button>{' '}
                     <button className={`button small ${company.active ? 'danger' : 'primary'}`} onClick={() => void toggleActive(company)}>{company.active ? 'Suspender' : 'Activar'}</button>{' '}
                     <button className="button small danger" disabled={busyId === company.id} onClick={() => void deleteCompany(company)}>Eliminar</button>
@@ -173,6 +229,74 @@ export default function AdminClientsPage() {
         </table>
         {!companies.length && <div className="empty-state"><div><strong>Aún no hay clientes registrados</strong></div></div>}
       </section>
+
+      {modulesCompany && (
+        <div className="modal-backdrop" onClick={() => setModulesCompany(null)}>
+          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Módulos de {modulesCompany.name}</h2>
+              <p>
+                {modulesCompany.plan
+                  ? <>Por defecto hereda del plan <strong>{modulesCompany.plan.name}</strong>. Desmarca o marca para crear una excepción específica para este cliente, sin tocar el plan.</>
+                  : 'Este cliente no tiene plan asignado. Lo marcado aquí aplica igual como excepción propia del cliente.'}
+              </p>
+            </div>
+            <div className="modal-body">
+              {moduleError && <div className="error-box">{moduleError}</div>}
+              <div className="module-tree">
+                {MODULE_TREE.map((node) => {
+                  const keys = (node.children ?? [node]).map((child) => child.key);
+                  const selectedCount = keys.filter((key) => moduleSelection.includes(key)).length;
+                  const checked = selectedCount === keys.length;
+                  const indeterminate = selectedCount > 0 && selectedCount < keys.length;
+                  const collapsed = collapsedGroups[node.key];
+                  return (
+                    <div key={node.key} className="module-group">
+                      <div className="module-row">
+                        {node.children && (
+                          <button type="button" className="module-toggle" onClick={() => setCollapsedGroups((current) => ({ ...current, [node.key]: !current[node.key] }))}>
+                            {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                          </button>
+                        )}
+                        <label className="member-option" style={{ border: 0, padding: '4px 0' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            ref={(el) => { if (el) el.indeterminate = indeterminate; }}
+                            onChange={(e) => toggleModuleGroup(node, e.target.checked)}
+                          />
+                          <div><strong>{node.label}</strong></div>
+                        </label>
+                      </div>
+                      {node.children && !collapsed && (
+                        <div className="module-children">
+                          {node.children.map((child) => (
+                            <label className="member-option" key={child.key} style={{ border: 0, padding: '4px 0' }}>
+                              <input
+                                type="checkbox"
+                                checked={moduleSelection.includes(child.key)}
+                                onChange={(e) => toggleModuleKey(child.key, e.target.checked)}
+                              />
+                              <div><strong>{child.label}</strong></div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-actions">
+              {modulesCompany.moduleOverrides.length > 0 && (
+                <button className="button" disabled={moduleSaving} onClick={() => void resetModulesToPlan()} style={{ marginRight: 'auto' }}>Restablecer al plan</button>
+              )}
+              <button className="button" onClick={() => setModulesCompany(null)}>Cancelar</button>
+              <button className="button primary" disabled={moduleSaving} onClick={() => void saveModules()}>{moduleSaving ? 'Guardando...' : 'Guardar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminShell>
   );
 }
