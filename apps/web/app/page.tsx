@@ -54,6 +54,21 @@ type PublicPlan = {
 };
 
 const cycleLabels: Record<string, string> = { FREE: 'Gratis', MONTHLY: 'Mensual', ANNUAL: 'Anual' };
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+// SoftwareApplication en vez de Organization: es lo que Google espera para mostrar un rich
+// result de "app/producto" (con rating, precio, etc.) — Organization es para la identidad de
+// la empresa en sí, que no es lo que alguien busca cuando llega a esta landing.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'BrainWSP',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
+  url: SITE_URL,
+  description: 'Plataforma para centralizar WhatsApp: bandeja compartida en tiempo real, automatizaciones sin código, CRM y conexión directa con tu ERP.',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'PEN' },
+  brand: { '@type': 'Organization', name: 'Brain Tech' },
+};
 
 function formatPrice(plan: PublicPlan) {
   if (!plan.price && !plan.priceUsd) return { amount: 'Gratis', period: '' };
@@ -106,17 +121,22 @@ const faqs = [
 
 export default function LandingPage() {
   const router = useRouter();
-  const [checkingSession, setCheckingSession] = useState(true);
   const [plans, setPlans] = useState<PublicPlan[]>([]);
   const [navScrolled, setNavScrolled] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
+  // A propósito NO bloquea el render con un spinner mientras esto resuelve: la landing es la
+  // página pública que necesita salir en buscadores y en la vista previa de WhatsApp/redes
+  // cuando se comparte el link — un gate "if (checkingSession) return <spinner>" deja el HTML
+  // inicial vacío para cualquier crawler que no ejecute JS (o lo haga tarde). El costo es que
+  // un usuario YA logueado ve un parpadeo de la landing antes de que esto lo mande a
+  // /dashboard — cambio aceptable frente a esconder todo el contenido de SEO tras un loader.
   useEffect(() => {
     const token = getToken();
-    if (!token) { setCheckingSession(false); return; }
+    if (!token) return;
     apiFetch<{ role: string }>('/auth/me')
       .then((me) => router.replace(me.role === 'SUPERADMIN' ? '/admin/clients' : '/dashboard'))
-      .catch(() => setCheckingSession(false));
+      .catch(() => {});
   }, [router]);
 
   useEffect(() => {
@@ -132,10 +152,122 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (checkingSession) return <div className="center-screen"><div className="spinner" /></div>;
+  // Red de partículas del hero: canvas con física real (deriva + rebote en los bordes) en vez
+  // del SVG anterior con posiciones fijas — así se conecta con quien esté cerca en cada
+  // instante, en vez de con las mismas 6 líneas dibujadas a mano. Todo vive en refs/variables
+  // locales al efecto, no en useState: a 60fps eso metería un re-render de React por frame.
+  const heroRef = useRef<HTMLElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const hero = heroRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!hero || !canvas || !ctx) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (window.matchMedia('(max-width: 900px)').matches) return; // mismo corte que antes: se ve recargado en pantallas chicas y cuesta batería
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let width = 0;
+    let height = 0;
+    let particles: { x: number; y: number; vx: number; vy: number }[] = [];
+    const mouse = { x: -9999, y: -9999 };
+
+    const LINK_DIST = 130;
+    const MOUSE_DIST = 170;
+
+    const resize = () => {
+      const rect = hero.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Densidad ligada al área, no un conteo fijo — así se ve igual de lleno en una laptop
+      // chica que en un monitor ancho, con un techo para no sobrecargar pantallas grandes.
+      const count = Math.min(80, Math.round((width * height) / 15000));
+      particles = Array.from({ length: count }, () => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+      }));
+    };
+    resize();
+
+    const handleMove = (e: MouseEvent) => {
+      const rect = hero.getBoundingClientRect();
+      mouse.x = e.clientX - rect.left;
+      mouse.y = e.clientY - rect.top;
+    };
+    const handleLeave = () => { mouse.x = -9999; mouse.y = -9999; };
+
+    let frameId = 0;
+    const tick = () => {
+      ctx.clearRect(0, 0, width, height);
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > width) p.vx *= -1;
+        if (p.y < 0 || p.y > height) p.vy *= -1;
+      }
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const a = particles[i];
+          const b = particles[j];
+          const dist = Math.hypot(a.x - b.x, a.y - b.y);
+          if (dist < LINK_DIST) {
+            ctx.strokeStyle = `rgba(60,134,255,${(1 - dist / LINK_DIST) * 0.35})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+        const distm = Math.hypot(particles[i].x - mouse.x, particles[i].y - mouse.y);
+        if (distm < MOUSE_DIST) {
+          ctx.strokeStyle = `rgba(228,0,124,${(1 - distm / MOUSE_DIST) * 0.45})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(mouse.x, mouse.y);
+          ctx.stroke();
+        }
+      }
+      for (const p of particles) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(33,55,134,.55)';
+        ctx.fill();
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+    tick();
+
+    const handleVisibility = () => {
+      if (document.hidden) cancelAnimationFrame(frameId);
+      else tick();
+    };
+
+    window.addEventListener('resize', resize);
+    hero.addEventListener('mousemove', handleMove);
+    hero.addEventListener('mouseleave', handleLeave);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', resize);
+      hero.removeEventListener('mousemove', handleMove);
+      hero.removeEventListener('mouseleave', handleLeave);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
   return (
     <div className="landing">
+      {/* eslint-disable-next-line react/no-danger */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <header className={`landing-nav ${navScrolled ? 'scrolled' : ''}`}>
         <div className="landing-nav-inner">
           <button type="button" className="landing-brand landing-brand-link" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
@@ -156,39 +288,10 @@ export default function LandingPage() {
       </header>
 
       <main>
-        <section className="landing-hero">
-          <svg className="landing-hero-network" viewBox="0 0 1200 520" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-            <g className="landing-network-lines">
-              <line x1="70" y1="110" x2="170" y2="90" />
-              <line x1="170" y1="90" x2="205" y2="190" />
-              <line x1="205" y1="190" x2="110" y2="230" />
-              <line x1="110" y1="230" x2="70" y2="110" />
-              <line x1="110" y1="230" x2="55" y2="305" />
-              <line x1="55" y1="305" x2="150" y2="345" />
-              <line x1="205" y1="190" x2="150" y2="345" />
-              <line x1="1130" y1="110" x2="1030" y2="90" />
-              <line x1="1030" y1="90" x2="995" y2="190" />
-              <line x1="995" y1="190" x2="1090" y2="230" />
-              <line x1="1090" y1="230" x2="1130" y2="110" />
-              <line x1="1090" y1="230" x2="1145" y2="305" />
-              <line x1="1145" y1="305" x2="1050" y2="345" />
-              <line x1="995" y1="190" x2="1050" y2="345" />
-            </g>
-            <g className="landing-network-nodes">
-              <circle cx="70" cy="110" r="5" style={{ animationDelay: '0s' }} />
-              <circle cx="170" cy="90" r="4" style={{ animationDelay: '.4s' }} />
-              <circle cx="205" cy="190" r="6" style={{ animationDelay: '.8s' }} />
-              <circle cx="110" cy="230" r="4" style={{ animationDelay: '1.2s' }} />
-              <circle cx="55" cy="305" r="5" style={{ animationDelay: '.3s' }} />
-              <circle cx="150" cy="345" r="4" style={{ animationDelay: '.9s' }} />
-              <circle cx="1130" cy="110" r="5" style={{ animationDelay: '.2s' }} />
-              <circle cx="1030" cy="90" r="4" style={{ animationDelay: '.6s' }} />
-              <circle cx="995" cy="190" r="6" style={{ animationDelay: '1s' }} />
-              <circle cx="1090" cy="230" r="4" style={{ animationDelay: '1.4s' }} />
-              <circle cx="1145" cy="305" r="5" style={{ animationDelay: '.5s' }} />
-              <circle cx="1050" cy="345" r="4" style={{ animationDelay: '1.1s' }} />
-            </g>
-          </svg>
+        <section className="landing-hero" ref={heroRef}>
+          <div className="landing-hero-grid" aria-hidden="true" />
+          <div className="landing-hero-glow" aria-hidden="true" />
+          <canvas className="landing-hero-canvas" ref={canvasRef} aria-hidden="true" />
           <div className="landing-hero-inner">
             <h1>
               Centraliza <span className="landing-highlight">WhatsApp</span>, atiende en equipo y <span className="landing-highlight">vende más</span> desde un solo panel.

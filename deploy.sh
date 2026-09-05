@@ -130,6 +130,7 @@ if [ ! -f .env ]; then
     sed -i "s#^WEB_ORIGIN=.*#WEB_ORIGIN=https://$HOST#" .env
     sed -i "s#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=https://$API_HOST/api#" .env
     sed -i "s#^NEXT_PUBLIC_SOCKET_URL=.*#NEXT_PUBLIC_SOCKET_URL=https://$API_HOST#" .env
+    sed -i "s#^NEXT_PUBLIC_SITE_URL=.*#NEXT_PUBLIC_SITE_URL=https://$HOST#" .env
     sed -i "s#^SEED_COMPANY_NAME=.*#SEED_COMPANY_NAME=$company_name#" .env
     sed -i "s#^SEED_COMPANY_SLUG=.*#SEED_COMPANY_SLUG=$(echo "$company_name" | tr '[:upper:] ' '[:lower:]-')#" .env
     sed -i "s#^SEED_ADMIN_NAME=.*#SEED_ADMIN_NAME=Administrador#" .env
@@ -168,6 +169,10 @@ else
         echo "Agregando EXTRA_WEB_ORIGINS (variable nueva) a .env existente"
         echo "EXTRA_WEB_ORIGINS=" >> .env
     fi
+    if ! grep -q "^NEXT_PUBLIC_SITE_URL=" .env; then
+        echo "Agregando NEXT_PUBLIC_SITE_URL (variable nueva) a .env existente"
+        echo "NEXT_PUBLIC_SITE_URL=https://$HOST" >> .env
+    fi
 fi
 
 # ===== OVERRIDE DE PRODUCCIÓN (routing del proxy + credenciales reales) =====
@@ -200,9 +205,11 @@ services:
             args:
                 NEXT_PUBLIC_API_URL: https://${API_HOST}/api
                 NEXT_PUBLIC_SOCKET_URL: https://${API_HOST}
+                NEXT_PUBLIC_SITE_URL: https://${HOST}
         environment:
             NEXT_PUBLIC_API_URL: https://${API_HOST}/api
             NEXT_PUBLIC_SOCKET_URL: https://${API_HOST}
+            NEXT_PUBLIC_SITE_URL: https://${HOST}
             VIRTUAL_HOST: ${HOST}
             VIRTUAL_PORT: 3000
             CERT_NAME: ${HOST}

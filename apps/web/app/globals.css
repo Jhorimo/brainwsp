@@ -1331,23 +1331,44 @@ tr:last-child td { border-bottom: 0; }
 .reveal.is-visible { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
 
-.landing-hero {
-  position: relative; overflow: hidden; padding: 90px 24px 70px; text-align: center;
+/* El fondo del hero es plano (var(--bg), igual que el resto de la página) — la grilla y el
+   degradé viven en .landing-hero-grid aparte, con una máscara que los apaga antes de llegar
+   al borde inferior. Sin esa capa separada, el patrón de grilla terminaba en un corte duro
+   justo donde arranca la siguiente sección, en vez de desvanecerse. */
+.landing-hero { position: relative; overflow: hidden; padding: 90px 24px 70px; text-align: center; background: var(--bg); }
+.landing-hero-grid {
+  position: absolute; inset: 0; z-index: 0;
   background:
     linear-gradient(rgba(33,55,134,.055) 1px, transparent 1px) 0 0 / 44px 44px,
     linear-gradient(90deg, rgba(33,55,134,.055) 1px, transparent 1px) 0 0 / 44px 44px,
     radial-gradient(ellipse at top, var(--brand-soft), var(--bg) 62%);
+  mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
 }
-/* Red de nodos animada de fondo — hecha a propósito para evocar el constructor visual de
-   flujos (mismo lenguaje visual que Automatizaciones), no un adorno genérico. */
-.landing-hero-network { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
-.landing-network-lines line { stroke: var(--brand-light); stroke-width: 1.4; stroke-dasharray: 5 9; opacity: .4; animation: landing-flow 3s linear infinite; }
-.landing-network-nodes circle { fill: var(--brand); transform-box: fill-box; transform-origin: center; animation: landing-node-float 5s ease-in-out infinite; }
-.landing-network-nodes circle:nth-child(even) { fill: var(--brand-light); }
-@keyframes landing-flow { to { stroke-dashoffset: -28; } }
-@keyframes landing-node-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
-@media (prefers-reduced-motion: reduce) { .landing-network-lines line, .landing-network-nodes circle { animation: none; } }
-@media (max-width: 900px) { .landing-hero-network { display: none; } }
+/* Fondo respirando suave detrás de la red — hace que el hero no se sienta un lienzo plano
+   incluso donde no hay nodos. Puramente decorativo, por eso aria-hidden. */
+.landing-hero-glow {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(480px 320px at 20% 30%, rgba(60,134,255,.10), transparent 70%),
+    radial-gradient(420px 300px at 82% 70%, rgba(228,0,124,.07), transparent 70%);
+  animation: landing-glow-breathe 8s ease-in-out infinite;
+  mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+}
+@keyframes landing-glow-breathe { 0%, 100% { opacity: .8; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .landing-hero-glow { animation: none; } }
+
+/* Red de partículas del hero — canvas con física real (ver el efecto en page.tsx), no un SVG
+   con posiciones fijas: los puntos derivan solos y se conectan con quien tengan cerca en cada
+   instante, más una línea hacia el mouse cuando se acerca. Evoca el mismo constructor visual
+   de flujos que Automatizaciones, pero vivo en vez de una toma fija. */
+.landing-hero-canvas {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  mask-image: linear-gradient(to bottom, black 78%, transparent 96%);
+  -webkit-mask-image: linear-gradient(to bottom, black 78%, transparent 96%);
+}
+@media (max-width: 900px) { .landing-hero-canvas, .landing-hero-glow { display: none; } }
 .landing-hero-inner { position: relative; z-index: 1; max-width: 880px; margin: 0 auto; }
 @keyframes landing-fade-up { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
 .landing-hero-inner > * { animation: landing-fade-up .7s ease both; }
