@@ -342,19 +342,18 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
       .catch(() => setEffectiveModules(ALL_MODULE_KEYS));
   }, []);
 
-  // Un módulo que el plan no incluye sigue apareciendo en el menú (candado + texto atenuado)
-  // en vez de ocultarse — el clic lleva a "Mi Plan" a subir de plan, no a la página real.
+  // Un módulo que el plan no incluye se oculta del menú directamente — mostrarlo atenuado con
+  // candado (probado antes) se veía saturado en cuanto había 3-4 módulos bloqueados a la vez.
+  // El costo es que el cliente ya no descubre esos módulos desde el sidebar; sigue pudiendo
+  // verlos y subir de plan desde "Mi Plan" (ver la sección "Módulos" del perfil).
   const isLocked = (moduleKey: string) => !effectiveModules.includes(moduleKey);
   const lockedHref = (moduleKey: string) => `/my-plan?locked=${moduleKey}`;
+  const visibleNavigation = navigation.filter((item) => !isLocked(item.module));
+  const visibleCrmNavigation = crmNavigation.filter((item) => !isLocked(item.module));
 
-  // Los bloqueados igual quedan visibles (son el gancho hacia "Mi Plan"), pero intercalados con
-  // los que sí puede usar la sección se ve saturada de candados — se ordenan al final de su
-  // propia sección en vez de ocultarse o de reordenar contra el resto del menú.
-  const sortByLocked = <T extends { module: string }>(items: T[]) => [...items].sort((a, b) => Number(isLocked(a.module)) - Number(isLocked(b.module)));
-
-  // Si el usuario navega directo (URL escrita a mano) a una ruta que su plan/permisos ya no
-  // incluyen, lo saca de ahí hacia "Mi Plan" en vez de dejarlo viendo una página que el backend
-  // igual le va a rechazar.
+  // Si el usuario navega directo (URL escrita a mano, o un link viejo guardado) a una ruta que
+  // su plan/permisos ya no incluyen, lo saca de ahí hacia "Mi Plan" en vez de dejarlo viendo
+  // una página que el backend igual le va a rechazar.
   useEffect(() => {
     const current = [...navigation, ...crmNavigation].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
     if (current && isLocked(current.module)) {
@@ -390,30 +389,26 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
           </div>
 
           <nav className="nav-list">
-            <div className="nav-caption">OPERACIÓN</div>
-            {sortByLocked(navigation).map((item) => {
+            {visibleNavigation.length > 0 && <div className="nav-caption">OPERACIÓN</div>}
+            {visibleNavigation.map((item) => {
               const Icon = item.icon;
-              const locked = isLocked(item.module);
-              const active = !locked && (pathname === item.href || pathname.startsWith(`${item.href}/`));
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
-                <Link className={`nav-item ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} href={locked ? lockedHref(item.module) : item.href} key={item.href} title={locked ? 'Disponible en un plan superior' : undefined}>
+                <Link className={`nav-item ${active ? 'active' : ''}`} href={item.href} key={item.href}>
                   <Icon size={19} />
                   <span>{item.label}</span>
-                  {item.href === '/conversations' && !locked && <span className="nav-badge">Live</span>}
-                  {locked && <Lock size={11} className="nav-lock" />}
+                  {item.href === '/conversations' && <span className="nav-badge">Live</span>}
                 </Link>
               );
             })}
-            <div className="nav-caption nav-gap">CRM</div>
-            {sortByLocked(crmNavigation).map((item) => {
+            {visibleCrmNavigation.length > 0 && <div className="nav-caption nav-gap">CRM</div>}
+            {visibleCrmNavigation.map((item) => {
               const Icon = item.icon;
-              const locked = isLocked(item.module);
-              const active = !locked && (pathname === item.href || pathname.startsWith(`${item.href}/`));
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
-                <Link className={`nav-item ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} href={locked ? lockedHref(item.module) : item.href} key={item.href} title={locked ? 'Disponible en un plan superior' : undefined}>
+                <Link className={`nav-item ${active ? 'active' : ''}`} href={item.href} key={item.href}>
                   <Icon size={19} />
                   <span>{item.label}</span>
-                  {locked && <Lock size={11} className="nav-lock" />}
                 </Link>
               );
             })}
