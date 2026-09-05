@@ -437,9 +437,17 @@ export default function LandingPage() {
           <div className="landing-footer-links">
             <Link href="/login">Iniciar sesión</Link>
             <Link href="/register">Crear cuenta</Link>
-            <Link href="/privacidad">Privacidad</Link>
           </div>
           <span className="landing-footer-brand"><KeyRound size={12} />Un producto de Brain Tech</span>
+        </div>
+        <div className="landing-footer-bottom">
+          <nav className="landing-footer-nav">
+            <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Inicio</button>
+            <Link href="/privacidad">Privacidad</Link>
+            <Link href="/terminos">Términos de uso</Link>
+            <a href="mailto:braintech.2022@gmail.com">Soporte</a>
+          </nav>
+          <p className="landing-footer-copy">© {new Date().getFullYear()} BrainWSP — un producto de Brain Tech Perú. Todos los derechos reservados.</p>
         </div>
       </footer>
     </div>
