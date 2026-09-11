@@ -29,7 +29,10 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    # minio/minio en Docker Hub deja de estar disponible ("pull access denied") desde el
+    # 2026-09-11 — MinIO restringio su distribucion gratuita ahi. quay.io es su propio
+    # registro, sigue siendo publico y gratis.
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: brainwsp

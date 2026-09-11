@@ -77,7 +77,9 @@ type Lead = {
 // "Personalizado" — here it just narrows which conversations the 100-most-recent cap lets
 // through, not a chart range, so a plain "Todos" (no date filter) covers the custom case.
 type DatePreset = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month';
-const datePresetLabels: Record<DatePreset, string> = { all: 'Todos', today: 'Hoy', yesterday: 'Ayer', '7d': 'Últimos 7 días', '30d': 'Últimos 30 días', month: 'Este mes' };
+// "Todo el periodo" (no "Todos") para no repetir la pastilla "Todos" de .chat-quick-filters
+// (esa es un filtro de estado, esta es de fecha — mismo texto confundía a simple vista).
+const datePresetLabels: Record<DatePreset, string> = { all: 'Todo el periodo', today: 'Hoy', yesterday: 'Ayer', '7d': 'Últimos 7 días', '30d': 'Últimos 30 días', month: 'Este mes' };
 // Combines the date-range pills with the free-text search box into the query string
 // `loadConversations` sends the server — the server now owns text matching (contact
 // name/phone AND message content, WhatsApp-Web-style), so there's no local re-filtering
@@ -1854,6 +1856,7 @@ export default function ConversationsPage() {
             {filtersOpen && (
             <div className="chat-filters">
               <div className="chat-date-presets">
+                <span className="chat-filters-label">Periodo</span>
                 {(['all', 'today', 'yesterday', '7d', '30d', 'month'] as DatePreset[]).map((preset) => (
                   <button key={preset} className={`chat-quick-tab ${dateFilter === preset ? 'active' : ''}`} onClick={() => setDateFilter(preset)}>{datePresetLabels[preset]}</button>
                 ))}
@@ -1887,7 +1890,11 @@ export default function ConversationsPage() {
                 selected={filterTags}
                 onChange={setFilterTags}
               />
-              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept([]); setFilterProject([]); setFilterStage([]); setFilterTags([]); setDateFilter('all'); }}>Limpiar filtros</button>}
+              {hasActiveFilters && (
+                <div className="filter-clear-row">
+                  <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept([]); setFilterProject([]); setFilterStage([]); setFilterTags([]); setDateFilter('all'); }}><X size={12} />Limpiar filtros</button>
+                </div>
+              )}
             </div>
             )}
           </div>

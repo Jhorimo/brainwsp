@@ -441,25 +441,30 @@ tr:last-child td { border-bottom: 0; }
    debajo de esta barra — el estado cambiaba bien pero el menu quedaba invisible. */
 .chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 10px; overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .chat-quick-filters::-webkit-scrollbar { display: none; }
-.chat-quick-tab { flex-shrink: 0; height: 27px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--text); font-size: 10px; font-weight: 600; }
+/* Altura/tipografia unificadas con .chat-filters select y .multi-select-trigger de abajo —
+   antes esta pastilla usaba 27px/10px y esos otros 30px/9.5px, se notaba desalineado. */
+.chat-quick-tab { flex-shrink: 0; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--text); font-size: 11px; font-weight: 600; }
 .chat-quick-tab:hover { background: var(--surface-2); }
 .chat-quick-tab.active { background: #e3f1ff; border-color: #bcdcff; color: var(--brand); }
-.chat-quick-tab-icon { width: 27px; padding: 0; display: grid; place-items: center; }
+.chat-quick-tab-icon { width: 30px; padding: 0; display: grid; place-items: center; }
 .chat-quick-more { position: relative; }
-.chat-quick-menu { position: absolute; top: 32px; right: 0; z-index: 20; background: white; border-radius: 10px; box-shadow: 0 10px 30px rgba(31,47,76,.25); padding: 6px; min-width: 160px; display: flex; flex-direction: column; }
+.chat-quick-menu { position: absolute; top: 35px; right: 0; z-index: 20; background: white; border-radius: 10px; box-shadow: 0 10px 30px rgba(31,47,76,.25); padding: 6px; min-width: 160px; display: flex; flex-direction: column; }
 .chat-quick-menu button { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 0; background: none; text-align: left; border-radius: 7px; font-size: 11px; color: var(--text); white-space: nowrap; }
 .chat-quick-menu button:hover, .chat-quick-menu button.active { background: var(--surface-2); }
 .chat-quick-menu-count { margin-left: auto; color: var(--muted); font-size: 10px; }
 .chat-quick-menu-divider { height: 1px; background: #eef1f5; margin: 4px 2px; }
-.chat-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.chat-date-presets { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
-.chat-filters select { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; font-size: 9.5px; color: var(--text); background: white; }
+/* Fondo propio tipo "cajon" para que el panel de filtros se lea como una seccion aparte de
+   la barra de tabs de arriba, no como una fila mas pegada al buscador. */
+.chat-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+.chat-filters-label { flex-shrink: 0; display: flex; align-items: center; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); padding-right: 2px; }
+.chat-date-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; }
+.chat-filters select { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-size: 11px; font-weight: 600; color: var(--text); background: white; }
 
 /* Componente MultiSelectFilter (departamento/proyecto/etapa/etiquetas en /conversations):
    mismo boton-pastilla de .chat-filters select y mismo menu de .chat-quick-menu, con
    checkboxes en vez de opciones de radio unica. */
 .multi-select-filter { position: relative; flex: 1 1 auto; min-width: 0; }
-.multi-select-trigger { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-size: 9.5px; font-weight: 600; color: var(--text); background: white; display: flex; align-items: center; justify-content: space-between; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.multi-select-trigger { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-size: 11px; font-weight: 600; color: var(--text); background: white; display: flex; align-items: center; justify-content: space-between; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .multi-select-trigger:hover { background: var(--surface-2); }
 .multi-select-trigger.active { background: #e3f1ff; border-color: #bcdcff; color: var(--brand); }
 .multi-select-menu { position: absolute; top: 34px; left: 0; z-index: 20; background: white; border-radius: 10px; box-shadow: 0 10px 30px rgba(31,47,76,.25); padding: 6px; min-width: 200px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
@@ -470,8 +475,9 @@ tr:last-child td { border-bottom: 0; }
 .multi-select-clear { padding: 7px 9px; border: 0; background: none; text-align: left; border-radius: 7px; font-size: 10.5px; font-weight: 700; color: var(--accent); border-bottom: 1px solid #eef1f5; margin-bottom: 4px; }
 .multi-select-clear:hover { background: var(--danger-soft); }
 .chat-filters select:focus { border-color: #9dbbfb; outline: 0; }
-.filter-clear { flex-basis: 100%; text-align: left; padding: 2px 0 0; border: 0; background: none; color: var(--brand); font-size: 9.5px; font-weight: 700; }
-.filter-clear:hover { text-decoration: underline; }
+.filter-clear-row { flex-basis: 100%; display: flex; justify-content: flex-end; }
+.filter-clear { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px; border: 1px solid #f1c9cc; border-radius: 999px; background: #fff5f5; color: var(--danger); font-size: 10.5px; font-weight: 700; }
+.filter-clear:hover { background: #fdecec; border-color: #eab3b8; }
 .chat-list-head h2 { margin: 0; font-size: 13px; }
 .chat-list-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .chat-list-scroll { flex: 1; min-height: 0; overflow: auto; }
