@@ -14,9 +14,9 @@ const navigation = [
   { href: '/admin/payment-methods', label: 'Métodos de pago', icon: Wallet },
   { href: '/admin/payment-requests', label: 'Solicitudes de pago', icon: FileCheck },
   { href: '/admin/announcements', label: 'Anuncios', icon: Megaphone },
-  { href: '/admin/settings', label: 'Configuraciones', icon: Settings },
   { href: '/admin/suggestions', label: 'Sugerencias', icon: Lightbulb },
   { href: '/admin/security', label: 'Seguridad', icon: ShieldCheck },
+  { href: '/admin/settings', label: 'Configuraciones', icon: Settings },
 ];
 
 // Separate from <Protected> (used by the tenant panel) because this checks the role,

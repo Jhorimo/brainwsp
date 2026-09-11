@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Eye, Megaphone, X } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
 import { apiFetch } from '@/lib/api';
 
@@ -16,6 +17,9 @@ export default function AdminAnnouncementsPage() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  // Solo vista previa: a diferencia del popup real (AnnouncementsProvider), esto no
+  // fuerza nada — el superadmin no recibe anuncios, solo puede ver como se verian.
+  const [previewing, setPreviewing] = useState<Announcement | null>(null);
 
   const load = () => {
     apiFetch<(Announcement & { read: boolean })[]>('/announcements')
@@ -68,6 +72,7 @@ export default function AdminAnnouncementsPage() {
               <th>Mensaje</th>
               <th>Publicado por</th>
               <th>Fecha</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -76,14 +81,39 @@ export default function AdminAnnouncementsPage() {
                 <td style={{ whiteSpace: 'pre-wrap', maxWidth: 480 }}>{item.text}</td>
                 <td>{item.createdByUser?.name || '—'}</td>
                 <td>{new Date(item.createdAt).toLocaleString('es-PE')}</td>
+                <td>
+                  <button type="button" className="icon-button" onClick={() => setPreviewing(item)} aria-label="Ver anuncio" title="Ver cómo lo ven los usuarios">
+                    <Eye size={15} />
+                  </button>
+                </td>
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={3}>Todavía no se ha publicado ningún anuncio.</td></tr>
+              <tr><td colSpan={4}>Todavía no se ha publicado ningún anuncio.</td></tr>
             )}
           </tbody>
         </table>
       </section>
+
+      {previewing && (
+        <div className="modal-backdrop" onClick={() => setPreviewing(null)}>
+          <div className="modal announcement-modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setPreviewing(null)} aria-label="Cerrar">
+              <X size={15} />
+            </button>
+            <div className="announcement-modal-icon"><Megaphone size={18} /></div>
+            <div className="modal-header">
+              <h2>Anuncio</h2>
+            </div>
+            <div className="modal-body">
+              <div className="announcement-text">{previewing.text}</div>
+              <div className="announcement-meta">
+                {previewing.createdByUser?.name || 'Brain Tech'} · {new Date(previewing.createdAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminShell>
   );
 }

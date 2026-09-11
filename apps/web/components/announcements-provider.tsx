@@ -2,7 +2,7 @@
 
 import { Megaphone, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { apiFetch, getToken } from '@/lib/api';
+import { apiFetch, getStoredUser, getToken } from '@/lib/api';
 
 type Announcement = {
   id: string;
@@ -26,6 +26,11 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const check = () => {
       if (!getToken()) return;
+      // El popup obligatorio es para usuarios de una empresa, no para quien administra
+      // la plataforma — el superadmin publica anuncios, no los recibe (puede previsualizar
+      // el suyo desde el boton "Ver" en /admin/announcements, sin el candado de "Leido").
+      const { role } = getStoredUser<{ role?: string }>();
+      if (role === 'SUPERADMIN') return;
       apiFetch<Announcement[]>('/announcements')
         .then((data) => {
           if (cancelled) return;

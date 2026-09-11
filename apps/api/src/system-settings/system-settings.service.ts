@@ -41,8 +41,12 @@ export class SystemSettingsService {
   }
 
   async heaviestFiles() {
+    // fileSize null se excluye a proposito: Postgres ordena NULL primero en un
+    // "ORDER BY ... DESC" (no al final como uno esperaria), asi que sin este filtro los
+    // 10 primeros eran mensajes SIN peso registrado (bug de larga data: gran parte de los
+    // documentos/audios nunca guardo su fileSize al recibirse), no los realmente pesados.
     return this.prisma.message.findMany({
-      where: { mediaUrl: { not: null } },
+      where: { mediaUrl: { not: null }, fileSize: { not: null } },
       orderBy: { fileSize: 'desc' },
       take: 10,
       select: {
