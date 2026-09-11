@@ -1,7 +1,6 @@
 'use client';
 
-import { Megaphone, ChevronLeft, ChevronRight } from 'lucide-react';
-import { usePathname } from 'next/navigation';
+import { Megaphone, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch, getToken } from '@/lib/api';
 
@@ -14,37 +13,42 @@ type Announcement = {
 };
 
 export function AnnouncementsProvider({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
   const [list, setList] = useState<Announcement[]>([]);
   const [index, setIndex] = useState(0);
   const [open, setOpen] = useState(false);
 
-  // Se revisa en cada cambio de ruta, no solo al montar: entrar/recargar ya dispara un
-  // mount, pero "ver panel de un usuario" (impersonar, ver admin/clients/page.tsx) cambia
-  // de sesion via router.push, sin remount del layout raiz — sin esto, un anuncio sin leer
-  // no aparecia al entrar al panel de ese usuario por impersonacion.
+  // Se revisa al montar (recarga real o primera entrada) y cuando cambia la sesion activa
+  // (login, o SUPERADMIN entrando/saliendo del panel de un usuario por impersonacion — ver
+  // notifySessionChanged en lib/api.ts). A proposito NO se revisa en cada navegacion del
+  // menu: el sidebar usa <Link> de Next.js (sin recarga real), y mostrar el anuncio en
+  // cada clic entre paginas seria molesto, no lo que se pidio.
   useEffect(() => {
-    if (!getToken()) return;
     let cancelled = false;
-    apiFetch<Announcement[]>('/announcements')
-      .then((data) => {
-        if (cancelled) return;
-        setList(data);
-        const firstUnread = data.findIndex((a) => !a.read);
-        if (firstUnread !== -1) {
-          setIndex(firstUnread);
-          setOpen(true);
-        } else {
-          setOpen(false);
-        }
-      })
-      .catch(() => {
-        // Silencioso a proposito: un anuncio que no carga no debe romper el login/panel.
-      });
+    const check = () => {
+      if (!getToken()) return;
+      apiFetch<Announcement[]>('/announcements')
+        .then((data) => {
+          if (cancelled) return;
+          setList(data);
+          const firstUnread = data.findIndex((a) => !a.read);
+          if (firstUnread !== -1) {
+            setIndex(firstUnread);
+            setOpen(true);
+          } else {
+            setOpen(false);
+          }
+        })
+        .catch(() => {
+          // Silencioso a proposito: un anuncio que no carga no debe romper el login/panel.
+        });
+    };
+    check();
+    window.addEventListener('brainwsp:session-changed', check);
     return () => {
       cancelled = true;
+      window.removeEventListener('brainwsp:session-changed', check);
     };
-  }, [pathname]);
+  }, []);
 
   const current = list[index];
 
@@ -71,6 +75,11 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
       {open && current && (
         <div className="modal-backdrop">
           <div className="modal announcement-modal">
+            {/* Cierra sin marcar leido: reaparece en la proxima navegacion/recarga. No es
+                un "no volver a mostrar" — solo da un respiro si el usuario esta ocupado. */}
+            <button type="button" className="modal-close" onClick={() => setOpen(false)} aria-label="Cerrar por ahora">
+              <X size={15} />
+            </button>
             <div className="announcement-modal-icon"><Megaphone size={18} /></div>
             <div className="modal-header">
               <h2>Anuncio</h2>

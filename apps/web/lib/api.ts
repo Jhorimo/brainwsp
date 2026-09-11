@@ -29,10 +29,20 @@ export function getStoredCompany<T = Record<string, unknown>>(): T {
   try { return JSON.parse(readAuthItem('brainwsp_company') || '{}') as T; } catch { return {} as T; }
 }
 
+// Escuchado por AnnouncementsProvider: la sesion activa cambio (login, o SUPERADMIN
+// entrando/saliendo del panel de un usuario via impersonacion), asi que hay que revisar
+// anuncios sin leer para el usuario QUE AHORA esta activo. No se dispara en cada
+// navegacion del menu (router.push entre paginas del panel) — sino solo aca, en el unico
+// lugar donde el token realmente cambia de identidad.
+function notifySessionChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('brainwsp:session-changed'));
+}
+
 export function setAuthSession(data: { accessToken: string; user: unknown; company?: unknown }, persist: boolean) {
   writeAuthItem('brainwsp_token', data.accessToken, persist);
   writeAuthItem('brainwsp_user', JSON.stringify(data.user), persist);
   if (data.company !== undefined) writeAuthItem('brainwsp_company', JSON.stringify(data.company), persist);
+  notifySessionChanged();
 }
 
 // Patches the stored user/company object in place (same storage it was already in) so a
@@ -76,6 +86,7 @@ export function stopImpersonation() {
     sessionStorage.removeItem(key);
     localStorage.removeItem(backupKey);
   }
+  notifySessionChanged();
 }
 
 export function mediaUrl(messageId: string) {

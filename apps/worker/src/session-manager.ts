@@ -486,15 +486,34 @@ export class SessionManager {
     let mediaUrl: string | undefined;
     const downloadableTypes: MessageType[] = [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT, MessageType.STICKER];
     if (downloadableTypes.includes(content.type)) {
-      try {
-        const buffer = await downloadMediaMessage(message, 'buffer', {}, {
-          logger: this.logger as never,
-          reuploadRequest: socket.updateMediaMessage,
-        });
-        const uploaded = await uploadBuffer(buffer, content.mimeType || 'application/octet-stream', extensionFromMime(content.mimeType));
-        mediaUrl = uploaded.internalUrl;
-      } catch (error) {
-        this.logger.warn({ err: error, messageId: message.key.id }, 'failed to download inbound media');
+      // WhatsApp declara fileLength ANTES de descargar (ver message-utils.ts#extractMessage),
+      // asi que un archivo por encima del limite ni se descarga ni se sube a MinIO — es lo
+      // que evita que un .rar/.mp4 pesado enviado por un contacto vuelva a llenar el disco
+      // del servidor (ver la purga del 2026-09-11 y SystemSettingsService). El mensaje se
+      // guarda igual, sin mediaUrl: el panel ya maneja ese caso como "archivo no disponible"
+      // (mismo camino que un adjunto purgado por antiguedad).
+      const settings = await this.prisma.systemSettings.upsert({
+        where: { id: 1 },
+        update: {},
+        create: { id: 1 },
+        select: { maxMediaSizeBytes: true },
+      });
+      if (content.fileSize && content.fileSize > settings.maxMediaSizeBytes) {
+        this.logger.warn(
+          { messageId: message.key.id, fileSize: content.fileSize, maxAllowed: settings.maxMediaSizeBytes },
+          'inbound media excede el tamaño máximo configurado, no se descarga',
+        );
+      } else {
+        try {
+          const buffer = await downloadMediaMessage(message, 'buffer', {}, {
+            logger: this.logger as never,
+            reuploadRequest: socket.updateMediaMessage,
+          });
+          const uploaded = await uploadBuffer(buffer, content.mimeType || 'application/octet-stream', extensionFromMime(content.mimeType));
+          mediaUrl = uploaded.internalUrl;
+        } catch (error) {
+          this.logger.warn({ err: error, messageId: message.key.id }, 'failed to download inbound media');
+        }
       }
     }
 

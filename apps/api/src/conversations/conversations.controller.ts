@@ -10,7 +10,12 @@ import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
 import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendContactDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateContactNameDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
 
-const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
+// Techo tecnico fijo del interceptor de Multer (el multipart se rechaza antes de que el
+// handler llegue a correr, asi que tiene que ser generoso). El limite REAL, configurable
+// por el superadmin, se aplica dentro de sendMedia via SystemSettingsService — este valor
+// debe ser >= al maximo permitido por UpdateSystemSettingsDto.maxMediaSizeBytes (500MB)
+// para que la configuracion realmente gobierne, no este techo.
+const MAX_MEDIA_BYTES = 500 * 1024 * 1024;
 
 @ApiTags('Conversations')
 @ApiBearerAuth()

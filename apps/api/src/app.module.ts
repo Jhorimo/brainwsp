@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { join } from 'node:path';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
@@ -24,6 +25,7 @@ import { QuickRepliesModule } from './quick-replies/quick-replies.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { StickersModule } from './stickers/stickers.module';
 import { StorageModule } from './storage/storage.module';
+import { SystemSettingsModule } from './system-settings/system-settings.module';
 import { TeamModule } from './team/team.module';
 import { UserDeviceModule } from './user-device/user-device.module';
 
@@ -35,6 +37,9 @@ import { UserDeviceModule } from './user-device/user-device.module';
       // Docker injects env vars directly, so a missing file is harmless there.
       envFilePath: [join(__dirname, '../../../.env'), '.env'],
     }),
+    // Habilita @Cron(...) — usado por SystemSettingsService para la purga diaria de
+    // media vieja (ver system-settings.service.ts#purgeOldMedia).
+    ScheduleModule.forRoot(),
     PrismaModule,
     CommonModule,
     QueueModule,
@@ -59,6 +64,7 @@ import { UserDeviceModule } from './user-device/user-device.module';
     BillingModule,
     AdminModule,
     AnnouncementsModule,
+    SystemSettingsModule,
     HealthModule,
   ],
 })

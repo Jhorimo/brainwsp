@@ -311,6 +311,25 @@ model AnnouncementRead {
   @@unique([announcementId, userId])
 }
 
+// Configuracion global del sistema, una sola fila (id fijo en 1). Sin companyId a
+// proposito, igual que Announcement: son ajustes de plataforma, no de un tenant.
+//
+// mediaRetentionDays: cuantos dias se conserva en MinIO un archivo (no imagen) antes de
+// que la tarea programada lo borre. Ver AnnouncementsModule para el mismo patron de
+// "una fila global"; ver el cron en media-retention.service.ts.
+//
+// maxMediaSizeBytes: tamano maximo por archivo (foto/video/documento/audio), aplicado
+// TANTO a lo que un agente envia desde el panel (conversations.service.ts#sendMedia)
+// COMO a lo que el worker descarga de WhatsApp al recibir un mensaje
+// (apps/worker/src/session-manager.ts) — esto ultimo es lo que de verdad evita que un
+// archivo pesado enviado por un contacto vuelva a llenar el disco del servidor.
+model SystemSettings {
+  id                 Int      @id @default(1)
+  mediaRetentionDays Int      @default(7)
+  maxMediaSizeBytes  Int      @default(67108864)
+  updatedAt          DateTime @updatedAt
+}
+
 model ApiCredential {
   id         String           @id @default(uuid())
   companyId  String

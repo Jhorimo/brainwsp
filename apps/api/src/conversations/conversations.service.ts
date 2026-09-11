@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { StorageService } from '../storage/storage.service';
+import { SystemSettingsService } from '../system-settings/system-settings.service';
 
 // Forma exacta que ya devolvia `include: { messages: { take: 1 } }`, para que el
 // frontend no note el cambio de implementacion.
@@ -68,6 +69,7 @@ export class ConversationsService {
     private readonly agentAccess: AgentAccessService,
     private readonly deals: DealsService,
     private readonly leads: LeadsService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   // null = no restriction (sees every department, same as today). An array (possibly
@@ -282,6 +284,14 @@ export class ConversationsService {
     const companyId = user.companyId;
     const type = messageTypeFromMimetype(file.mimetype);
     if (!type) throw new BadRequestException('Tipo de archivo no soportado');
+
+    // El limite duro del FileInterceptor (ver conversations.controller.ts) es un techo
+    // tecnico fijo, alto a proposito; el limite real y configurable por el superadmin
+    // se aplica aca, sobre el tamano real del archivo ya recibido.
+    const maxBytes = await this.systemSettings.maxMediaSizeBytes();
+    if (file.buffer.length > maxBytes) {
+      throw new BadRequestException(`El archivo supera el tamaño máximo permitido (${Math.round(maxBytes / 1024 / 1024)} MB)`);
+    }
 
     const conversation = await this.getOwned(user, conversationId);
 

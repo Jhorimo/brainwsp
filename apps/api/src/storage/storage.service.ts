@@ -42,6 +42,17 @@ export class StorageService implements OnModuleInit {
     return this.client.statObject(this.bucket, objectName);
   }
 
+  async removeObject(objectName: string) {
+    await this.client.removeObject(this.bucket, objectName);
+  }
+
+  // MinIO no falla si algun nombre ya no existe (idempotente) — seguro para reintentar
+  // una purga a medias, como el resto de esta app ya asume en otros lados.
+  async removeObjects(objectNames: string[]) {
+    if (objectNames.length === 0) return;
+    await this.client.removeObjects(this.bucket, objectNames);
+  }
+
   private internalUrl(objectName: string) {
     const scheme = process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http';
     const endpoint = process.env.MINIO_ENDPOINT || 'localhost';
