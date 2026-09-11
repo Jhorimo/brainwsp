@@ -159,13 +159,14 @@ export default function AdminClientsPage() {
     <AdminShell title="Usuarios" subtitle={`Todos los clientes registrados en la plataforma. ${companies.length} en total.`}>
       {error && <div className="error-box">{error}</div>}
 
+      <div className="page-fit">
       <div className="grid-stats" style={{ marginBottom: 22 }}>
         <div className="stat-card"><div className="stat-icon"><Building2 size={19} /></div><div className="stat-label">Clientes</div><div className="stat-value">{companies.length}</div><div className="stat-meta">Empresas registradas</div></div>
         <div className="stat-card"><div className="stat-icon"><Radio size={19} /></div><div className="stat-label">Activos</div><div className="stat-value">{activeCount}</div><div className="stat-meta">{companies.length - activeCount} suspendido(s)</div></div>
         <div className="stat-card"><div className="stat-icon"><Users size={19} /></div><div className="stat-label">Sin plan</div><div className="stat-value">{companies.filter((c) => !c.planId).length}</div><div className="stat-meta">Clientes sin plan asignado</div></div>
       </div>
 
-      <section className="table-card">
+      <section className="table-card table-card-fit">
         <table>
           <thead>
             <tr>
@@ -229,6 +230,7 @@ export default function AdminClientsPage() {
         </table>
         {!companies.length && <div className="empty-state"><div><strong>Aún no hay clientes registrados</strong></div></div>}
       </section>
+      </div>
 
       {modulesCompany && (
         <div className="modal-backdrop" onClick={() => setModulesCompany(null)}>
