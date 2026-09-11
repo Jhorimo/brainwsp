@@ -435,7 +435,11 @@ tr:last-child td { border-bottom: 0; }
 /* Sin overflow-x propio, 5+ píldoras (ej. los filtros de estado de pagos) no caben en un
    celular angosto y empujan TODA la página a scrollear de lado — scrollea acá adentro en
    vez de eso, mismo patrón que .kanban-board más abajo. */
-.chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+/* overflow-y: visible explicito es necesario: sin el, el overflow-x: auto de abajo fuerza
+   overflow-y a auto tambien (regla de la spec CSS cuando solo se fija un eje), y eso
+   recortaba el menu "Mas filtros" (.chat-quick-menu, position: absolute) que se abre por
+   debajo de esta barra — el estado cambiaba bien pero el menu quedaba invisible. */
+.chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 10px; overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .chat-quick-filters::-webkit-scrollbar { display: none; }
 .chat-quick-tab { flex-shrink: 0; height: 27px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--text); font-size: 10px; font-weight: 600; }
 .chat-quick-tab:hover { background: var(--surface-2); }
@@ -450,6 +454,21 @@ tr:last-child td { border-bottom: 0; }
 .chat-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chat-date-presets { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
 .chat-filters select { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; font-size: 9.5px; color: var(--text); background: white; }
+
+/* Componente MultiSelectFilter (departamento/proyecto/etapa/etiquetas en /conversations):
+   mismo boton-pastilla de .chat-filters select y mismo menu de .chat-quick-menu, con
+   checkboxes en vez de opciones de radio unica. */
+.multi-select-filter { position: relative; flex: 1 1 auto; min-width: 0; }
+.multi-select-trigger { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-size: 9.5px; font-weight: 600; color: var(--text); background: white; display: flex; align-items: center; justify-content: space-between; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.multi-select-trigger:hover { background: var(--surface-2); }
+.multi-select-trigger.active { background: #e3f1ff; border-color: #bcdcff; color: var(--brand); }
+.multi-select-menu { position: absolute; top: 34px; left: 0; z-index: 20; background: white; border-radius: 10px; box-shadow: 0 10px 30px rgba(31,47,76,.25); padding: 6px; min-width: 200px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
+.multi-select-option { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 0; background: none; text-align: left; border-radius: 7px; font-size: 11px; color: var(--text); white-space: nowrap; }
+.multi-select-option:hover { background: var(--surface-2); }
+.multi-select-checkbox { width: 15px; height: 15px; border: 1.5px solid #c7cfdc; border-radius: 4px; display: grid; place-items: center; flex-shrink: 0; color: white; }
+.multi-select-option.active .multi-select-checkbox { background: var(--brand); border-color: var(--brand); }
+.multi-select-clear { padding: 7px 9px; border: 0; background: none; text-align: left; border-radius: 7px; font-size: 10.5px; font-weight: 700; color: var(--accent); border-bottom: 1px solid #eef1f5; margin-bottom: 4px; }
+.multi-select-clear:hover { background: var(--danger-soft); }
 .chat-filters select:focus { border-color: #9dbbfb; outline: 0; }
 .filter-clear { flex-basis: 100%; text-align: left; padding: 2px 0 0; border: 0; background: none; color: var(--brand); font-size: 9.5px; font-weight: 700; }
 .filter-clear:hover { text-decoration: underline; }

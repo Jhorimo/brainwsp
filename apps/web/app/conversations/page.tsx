@@ -9,6 +9,7 @@ import { io } from 'socket.io-client';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AppShell } from '@/components/app-shell';
 import { useConfirm } from '@/components/confirm-provider';
+import { MultiSelectFilter } from '@/components/multi-select-filter';
 import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -81,7 +82,17 @@ const datePresetLabels: Record<DatePreset, string> = { all: 'Todos', today: 'Hoy
 // `loadConversations` sends the server — the server now owns text matching (contact
 // name/phone AND message content, WhatsApp-Web-style), so there's no local re-filtering
 // of the result on top of this.
-function conversationsQuery(preset: DatePreset, q: string) {
+// departmentIds/projectIds/stageIds/tagIds van al servidor (ver conversations.service.ts):
+// a diferencia de filterAgent, que sigue siendo client-side sobre lo ya cargado, estos
+// cuatro filtran TODA la conversacion de la empresa, no solo los ultimos 100 chats.
+function conversationsQuery(
+  preset: DatePreset,
+  q: string,
+  departmentIds: string[],
+  projectIds: string[],
+  stageIds: string[],
+  tagIds: string[],
+) {
   const params = new URLSearchParams();
   if (preset !== 'all') {
     const today = new Date();
@@ -98,6 +109,10 @@ function conversationsQuery(preset: DatePreset, q: string) {
     params.set('to', end.toISOString());
   }
   if (q) params.set('q', q);
+  if (departmentIds.length) params.set('departmentIds', departmentIds.join(','));
+  if (projectIds.length) params.set('projectIds', projectIds.join(','));
+  if (stageIds.length) params.set('stageIds', stageIds.join(','));
+  if (tagIds.length) params.set('tagIds', tagIds.join(','));
   const qs = params.toString();
   return qs ? `?${qs}` : '';
 }
@@ -273,9 +288,12 @@ export default function ConversationsPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [search, setSearch] = useState('');
   const [filterAgent, setFilterAgent] = useState('');
-  const [filterDept, setFilterDept] = useState('');
-  const [filterProject, setFilterProject] = useState('');
-  const [filterStage, setFilterStage] = useState('');
+  // Multi-seleccion, resueltas en el servidor (ver conversationsQuery) — no solo sobre lo
+  // ya cargado en pantalla, a diferencia de filterAgent de arriba.
+  const [filterDept, setFilterDept] = useState<string[]>([]);
+  const [filterProject, setFilterProject] = useState<string[]>([]);
+  const [filterStage, setFilterStage] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<DatePreset>('all');
   const [quickFilter, setQuickFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -502,8 +520,10 @@ export default function ConversationsPage() {
   // can call it without needing to know about the date/search filters — it always fetches
   // whatever's currently selected.
   const listQueryRef = useRef('');
-  useEffect(() => { listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch); }, [dateFilter, debouncedSearch]);
-  useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, loadConversations]);
+  useEffect(() => {
+    listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags);
+  }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags]);
+  useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, loadConversations]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
@@ -743,12 +763,12 @@ export default function ConversationsPage() {
   // `loadConversations` — `conversations` only holds what matched `debouncedSearch`, so no
   // local re-filtering by `search` here (that would wrongly drop results that matched on an
   // older message instead of the name/phone/last-message-preview visible client-side).
+  // Departamento/proyecto/etapa/etiquetas ya vienen filtrados desde el servidor (ver
+  // conversationsQuery) — solo queda por aplicar aca filterAgent, que sigue siendo
+  // client-side sobre la lista ya cargada.
   const baseFiltered = useMemo(() => conversations.filter((item) =>
-    (!filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent))
-    && (!filterDept || item.department?.id === filterDept)
-    && (!filterProject || item.project?.id === filterProject)
-    && (!filterStage || item.stage?.id === filterStage)
-  ), [conversations, filterAgent, filterDept, filterProject, filterStage]);
+    !filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent)
+  ), [conversations, filterAgent]);
   // Total across every conversation, not just the currently filtered/visible ones — same as
   // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
   // or filter is open.
@@ -765,7 +785,7 @@ export default function ConversationsPage() {
     if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
     return true;
   }), [baseFiltered, quickFilter]);
-  const hasActiveFilters = !!(filterAgent || filterDept || filterProject || filterStage || dateFilter !== 'all');
+  const hasActiveFilters = !!(filterAgent || filterDept.length || filterProject.length || filterStage.length || filterTags.length || dateFilter !== 'all');
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
   const canDeleteTags = isAdmin || identity.role === 'SUPERVISOR';
@@ -1843,27 +1863,31 @@ export default function ConversationsPage() {
                 <option value="unassigned">Sin asignar</option>
                 {teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}
               </select>
-              <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
-                <option value="">Todos los departamentos</option>
-                {departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}
-              </select>
-              <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
-                <option value="">Todos los proyectos</option>
-                {projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
-              </select>
-              <select value={filterStage} onChange={(e) => setFilterStage(e.target.value)}>
-                <option value="">Todas las etapas</option>
-                {departments.map((department) => {
-                  const stages = stagesByDept[department.id] || [];
-                  if (!stages.length) return null;
-                  return (
-                    <optgroup label={department.name} key={department.id}>
-                      {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
-                    </optgroup>
-                  );
-                })}
-              </select>
-              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept(''); setFilterProject(''); setFilterStage(''); setDateFilter('all'); }}>Limpiar filtros</button>}
+              <MultiSelectFilter
+                label="Departamentos"
+                options={departments.map((department) => ({ id: department.id, label: department.name }))}
+                selected={filterDept}
+                onChange={setFilterDept}
+              />
+              <MultiSelectFilter
+                label="Proyectos"
+                options={projects.map((project) => ({ id: project.id, label: project.name }))}
+                selected={filterProject}
+                onChange={setFilterProject}
+              />
+              <MultiSelectFilter
+                label="Etapas"
+                options={Object.values(stagesByDept).flat().map((stage) => ({ id: stage.id, label: stage.name, color: stage.color }))}
+                selected={filterStage}
+                onChange={setFilterStage}
+              />
+              <MultiSelectFilter
+                label="Etiquetas"
+                options={companyTags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color }))}
+                selected={filterTags}
+                onChange={setFilterTags}
+              />
+              {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept([]); setFilterProject([]); setFilterStage([]); setFilterTags([]); setDateFilter('all'); }}>Limpiar filtros</button>}
             </div>
             )}
           </div>

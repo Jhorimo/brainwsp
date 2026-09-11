@@ -81,8 +81,25 @@ export class ConversationsService {
     return departmentIds;
   }
 
-  async list(user: JwtUser, status?: ConversationStatus, from?: string, to?: string, q?: string) {
+  async list(
+    user: JwtUser,
+    status?: ConversationStatus,
+    from?: string,
+    to?: string,
+    q?: string,
+    departmentIds?: string,
+    projectIds?: string,
+    stageIds?: string,
+    tagIds?: string,
+  ) {
     const restriction = await this.resolveDepartmentRestriction(user);
+    // Cada filtro llega como CSV (?departmentIds=a,b,c) y se traduce a "in" — vacio u
+    // omitido significa "todos", igual que el "" de los <select> que reemplaza esto.
+    const parseCsv = (value?: string) => (value ? value.split(',').filter(Boolean) : undefined);
+    const departmentIdList = parseCsv(departmentIds);
+    const projectIdList = parseCsv(projectIds);
+    const stageIdList = parseCsv(stageIds);
+    const tagIdList = parseCsv(tagIds);
     // Without a date range this stays the same "100 most recently active" list as before —
     // a range narrows that same cap to a window instead, so older conversations that would
     // otherwise be crowded out by the top-100 cutoff become reachable. Covered by the existing
@@ -111,6 +128,15 @@ export class ConversationsService {
               ] } } },
             ],
           }] : []),
+          // Multi-seleccion real: cada filtro filtra sobre TODA la conversacion de la
+          // empresa (no solo el "top 100" ya cargado en el panel, que era la limitacion
+          // de los filtros anteriores, resueltos 100% en el navegador).
+          ...(departmentIdList ? [{ departmentId: { in: departmentIdList } }] : []),
+          ...(projectIdList ? [{ projectId: { in: projectIdList } }] : []),
+          ...(stageIdList ? [{ stageId: { in: stageIdList } }] : []),
+          // Coincide si el contacto tiene AL MENOS UNA de las etiquetas elegidas (OR, no
+          // "debe tener todas") — es el sentido habitual de un filtro de etiquetas.
+          ...(tagIdList ? [{ contact: { tags: { some: { tagId: { in: tagIdList } } } } }] : []),
         ],
       },
       include: {
