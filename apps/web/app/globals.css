@@ -29,7 +29,10 @@ button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 
-.app-frame { min-height: 100vh; display: grid; grid-template-columns: 264px 1fr; transition: grid-template-columns .22s ease; }
+/* --banner-h la pisa .with-impersonation-banner de abajo — todo lo que necesite saber
+   cuanto mide la franja "viendo como" de arriba (sidebar, topbar, layouts a altura fija
+   como .chat-layout o .kanban-column) lee esta variable en vez de asumir 0. */
+.app-frame { min-height: 100vh; display: grid; grid-template-columns: 264px 1fr; transition: grid-template-columns .22s ease; --banner-h: 0px; }
 /* Hidden on desktop by default so it's not an unintended 3rd grid item (this div sits
    between .sidebar and .main-area in the DOM) — only shown as a fixed overlay inside the
    ≤640px mobile-drawer media query below. */
@@ -37,12 +40,13 @@ a { color: inherit; text-decoration: none; }
 /* `overflow-y: auto` keeps the nav list + footer inside the sidebar's own box on short
    viewports (laptop windows, embedded panels) — without it, once brand+nav+footer needed
    more than 100vh, the overflow rendered past the sidebar's blue background onto the page. */
-.sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; background: #213786; color: #fff; padding: 24px 18px 18px; display: flex; flex-direction: column; transition: padding .22s ease; }
-.impersonation-banner { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; height: 42px; padding: 0 16px; background: var(--warning-soft); color: var(--warning); border-bottom: 1px solid #ffe3ab; font-size: 12px; font-weight: 600; }
+.sidebar { position: sticky; top: var(--banner-h, 0px); height: calc(100vh - var(--banner-h, 0px)); overflow-y: auto; background: #213786; color: #fff; padding: 24px 18px 18px; display: flex; flex-direction: column; transition: padding .22s ease; }
+/* Sticky y por encima del topbar: antes quedaba en flujo normal y al scrollear la
+   pagina se iba junto con el resto del contenido, dando la impresion de que "se
+   escondía" — en realidad era el topbar (sticky top:0) el que le tapaba el lugar. */
+.impersonation-banner { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; height: 42px; padding: 0 16px; background: var(--warning-soft); color: var(--warning); border-bottom: 1px solid #ffe3ab; font-size: 12px; font-weight: 600; }
 .impersonation-banner button { border: 1px solid var(--warning); background: var(--warning); color: #fff; border-radius: 8px; padding: 5px 12px; font-size: 11px; font-weight: 700; }
-/* La barra ocupa 42px por fuera del grid de .app-frame, así que el sidebar sticky
-   (que asume ocupar el viewport completo) tiene que descontarlos para no desbordar. */
-.app-frame.with-impersonation-banner .sidebar { height: calc(100vh - 42px); top: 42px; }
+.app-frame.with-impersonation-banner { --banner-h: 42px; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 4px 10px 24px; border-bottom: 1px solid rgba(255,255,255,.09); }
 .app-frame.collapsed { grid-template-columns: 72px 1fr; }
 .app-frame.collapsed .sidebar { padding: 18px 10px; }
@@ -82,7 +86,7 @@ a { color: inherit; text-decoration: none; }
 .logout-button:hover { background: rgba(255,255,255,.05); color: white; }
 
 .main-area { min-width: 0; }
-.topbar { height: 86px; background: rgba(255,255,255,.88); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+.topbar { height: 86px; background: rgba(255,255,255,.88); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: var(--banner-h, 0px); z-index: 10; }
 .topbar h1 { font-size: 21px; margin: 0; letter-spacing: -.3px; }
 .topbar p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .topbar-left { display: flex; align-items: center; gap: 16px; }
@@ -426,7 +430,7 @@ tr:last-child td { border-bottom: 0; }
 .field input, .field select, .field textarea { width: 100%; border: 1px solid #dfe5ee; background: white; border-radius: 10px; min-height: 40px; padding: 9px 11px; outline: 0; color: var(--text); }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: #98b8f6; box-shadow: 0 0 0 3px rgba(8,85,196,.08); }
 
-.chat-layout { height: calc(100vh - 142px); min-height: 590px; display: grid; grid-template-columns: 310px minmax(460px, 1fr) 280px; background: white; border: 1px solid var(--line); border-radius: 17px; overflow: hidden; box-shadow: 0 5px 18px rgba(31,47,76,.04); }
+.chat-layout { height: calc(100vh - 142px - var(--banner-h, 0px)); min-height: 590px; display: grid; grid-template-columns: 310px minmax(460px, 1fr) 280px; background: white; border: 1px solid var(--line); border-radius: 17px; overflow: hidden; box-shadow: 0 5px 18px rgba(31,47,76,.04); }
 .chat-list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-list-head { padding: 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .searchbox-row { display: flex; align-items: center; gap: 8px; }
@@ -947,7 +951,7 @@ tr:last-child td { border-bottom: 0; }
 
 /* CRM — Kanban de Pipelines */
 .kanban-board { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 10px; align-items: start; }
-.kanban-column { flex: 0 0 280px; background: #f7f9fc; border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; max-height: calc(100vh - 260px); }
+.kanban-column { flex: 0 0 280px; background: #f7f9fc; border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; max-height: calc(100vh - 260px - var(--banner-h, 0px)); }
 .kanban-column-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 3px solid var(--line); font-size: 12px; font-weight: 700; }
 .kanban-column-header .kanban-count { background: white; border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 800; color: var(--muted); }
 .kanban-column-total { padding: 6px 14px 2px; font-size: 10px; color: var(--muted); font-weight: 700; }

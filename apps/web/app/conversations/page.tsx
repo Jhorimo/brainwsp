@@ -301,6 +301,8 @@ export default function ConversationsPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
+  const quickMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const [quickMenuPos, setQuickMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -699,10 +701,24 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [reactionMessageId]);
 
+  // El menu se pinta en un portal (position: fixed) en vez de absolute adentro de
+  // .chat-quick-filters porque esa barra tiene overflow-x: auto para el scroll horizontal de
+  // pastillas en celular — cualquier eje distinto de "visible" fuerza al otro tambien a
+  // "auto" (regla de la spec CSS), asi que el menu quedaba recortado ahi adentro, invisible
+  // salvo haciendo scroll dentro de esa caja. Mismo patron que showComposerMenu/emojiPos.
   useEffect(() => {
-    if (!quickMenuOpen) return;
+    if (!quickMenuOpen) { setQuickMenuPos(null); return; }
+    const button = quickMenuButtonRef.current;
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      const margin = 12;
+      const menuWidth = 190;
+      const left = Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - margin);
+      setQuickMenuPos({ top: rect.bottom + 6, left: Math.max(margin, left) });
+    }
     const onClickOutside = (e: MouseEvent) => {
-      if (quickMenuRef.current?.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      if (quickMenuRef.current?.contains(target) || quickMenuButtonRef.current?.contains(target)) return;
       setQuickMenuOpen(false);
     };
     document.addEventListener('mousedown', onClickOutside);
@@ -1837,20 +1853,8 @@ export default function ConversationsPage() {
               <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>
               <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
-              <div className="chat-quick-more" ref={quickMenuRef}>
-                <button className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
-                {quickMenuOpen && (
-                  <div className="chat-quick-menu">
-                    <button className={quickFilter === 'groups' ? 'active' : ''} onClick={() => { setQuickFilter('groups'); setQuickMenuOpen(false); }}><Users size={14} />Grupos{groupTabCount > 0 && <span className="chat-quick-menu-count">{groupTabCount}</span>}</button>
-                    <button className={quickFilter === 'ai' ? 'active' : ''} onClick={() => { setQuickFilter('ai'); setQuickMenuOpen(false); }}><Bot size={14} />Con IA activa{aiTabCount > 0 && <span className="chat-quick-menu-count">{aiTabCount}</span>}</button>
-                    {companyTags.length > 0 && <div className="chat-quick-menu-divider" />}
-                    {companyTags.map((tag) => (
-                      <button key={tag.id} className={quickFilter === `tag:${tag.id}` ? 'active' : ''} onClick={() => { setQuickFilter(`tag:${tag.id}`); setQuickMenuOpen(false); }}>
-                        <span className="tag-dot" style={{ background: tag.color }} />{tag.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="chat-quick-more">
+                <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
               </div>
             </div>
             {filtersOpen && (
@@ -2340,6 +2344,19 @@ export default function ConversationsPage() {
         </div>
       )}
     </AppShell>
+    {quickMenuOpen && quickMenuPos && typeof document !== 'undefined' && createPortal(
+      <div ref={quickMenuRef} className="chat-quick-menu" style={{ position: 'fixed', top: quickMenuPos.top, left: quickMenuPos.left, right: 'auto' }}>
+        <button className={quickFilter === 'groups' ? 'active' : ''} onClick={() => { setQuickFilter('groups'); setQuickMenuOpen(false); }}><Users size={14} />Grupos{groupTabCount > 0 && <span className="chat-quick-menu-count">{groupTabCount}</span>}</button>
+        <button className={quickFilter === 'ai' ? 'active' : ''} onClick={() => { setQuickFilter('ai'); setQuickMenuOpen(false); }}><Bot size={14} />Con IA activa{aiTabCount > 0 && <span className="chat-quick-menu-count">{aiTabCount}</span>}</button>
+        {companyTags.length > 0 && <div className="chat-quick-menu-divider" />}
+        {companyTags.map((tag) => (
+          <button key={tag.id} className={quickFilter === `tag:${tag.id}` ? 'active' : ''} onClick={() => { setQuickFilter(`tag:${tag.id}`); setQuickMenuOpen(false); }}>
+            <span className="tag-dot" style={{ background: tag.color }} />{tag.name}
+          </button>
+        ))}
+      </div>,
+      document.body,
+    )}
     {showComposerMenu && composerMenuPos && typeof document !== 'undefined' && createPortal(
       <div ref={composerMenuRef} className="chat-quick-menu" style={{ position: 'fixed', top: composerMenuPos.top, left: composerMenuPos.left, right: 'auto', transform: 'translateY(-100%) translateY(-10px)' }}>
         <button onClick={() => { setShowComposerMenu(false); pickFile(); }}><Paperclip size={14} />Adjuntar archivo</button>
