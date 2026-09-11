@@ -278,8 +278,37 @@ model User {
   createdCalendarEvents CalendarEvent[]
   createdFlows         Flow[]
   reviewedPaymentRequests PaymentRequest[]
+  announcementsCreated Announcement[]  @relation("AnnouncementAuthor")
+  announcementReads    AnnouncementRead[] @relation("AnnouncementReader")
 
   @@index([companyId])
+}
+
+// Anuncios del superadmin a TODOS los usuarios del sistema, sin importar la empresa —
+// unico modelo del esquema sin companyId, a proposito: es una funcion de comunicacion
+// global (mantenimientos, novedades), no algo scoped por tenant. Se muestran como modal
+// obligatorio al entrar/recargar la app hasta que cada usuario los marca leidos
+// (ver AnnouncementRead, un registro por usuario que ya lo vio).
+model Announcement {
+  id              String             @id @default(uuid())
+  text            String             @db.Text
+  createdAt       DateTime           @default(now())
+  createdByUserId String
+  createdByUser   User               @relation("AnnouncementAuthor", fields: [createdByUserId], references: [id])
+  reads           AnnouncementRead[]
+
+  @@index([createdAt])
+}
+
+model AnnouncementRead {
+  id             String       @id @default(uuid())
+  announcementId String
+  userId         String
+  readAt         DateTime     @default(now())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation("AnnouncementReader", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
 }
 
 model ApiCredential {

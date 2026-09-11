@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { join } from 'node:path';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
 import { ApiCredentialsModule } from './api-credentials/api-credentials.module';
 import { AutomationsModule } from './automations/automations.module';
 import { BillingModule } from './billing/billing.module';
@@ -57,6 +58,7 @@ import { UserDeviceModule } from './user-device/user-device.module';
     AutomationsModule,
     BillingModule,
     AdminModule,
+    AnnouncementsModule,
     HealthModule,
   ],
 })

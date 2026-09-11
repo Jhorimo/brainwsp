@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BrandIcon } from './brand-mark';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, Check, ChevronDown, CreditCard, FileCheck, KeyRound, Lightbulb, LogOut, Menu, ShieldCheck, Wallet } from 'lucide-react';
+import { Building2, Check, ChevronDown, CreditCard, FileCheck, KeyRound, Lightbulb, LogOut, Megaphone, Menu, ShieldCheck, Wallet } from 'lucide-react';
 import { apiFetch, clearAuthSession, getStoredUser, getToken, updateStoredUser } from '@/lib/api';
 
 const navigation = [
@@ -13,6 +13,7 @@ const navigation = [
   { href: '/admin/licenses', label: 'Licencias', icon: KeyRound },
   { href: '/admin/payment-methods', label: 'Métodos de pago', icon: Wallet },
   { href: '/admin/payment-requests', label: 'Solicitudes de pago', icon: FileCheck },
+  { href: '/admin/announcements', label: 'Anuncios', icon: Megaphone },
   { href: '/admin/suggestions', label: 'Sugerencias', icon: Lightbulb },
   { href: '/admin/security', label: 'Seguridad', icon: ShieldCheck },
 ];
