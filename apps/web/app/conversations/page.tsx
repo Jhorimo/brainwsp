@@ -384,6 +384,7 @@ export default function ConversationsPage() {
   const [bulkForwardOpen, setBulkForwardOpen] = useState(false);
   const [shareContactOpen, setShareContactOpen] = useState(false);
   const [shareContactSearch, setShareContactSearch] = useState('');
+  const [shareContactResults, setShareContactResults] = useState<Conversation[]>([]);
 
   // "Responder" (reply/quote a message), WhatsApp Web style.
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
@@ -528,6 +529,21 @@ export default function ConversationsPage() {
     listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags);
   }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags]);
   useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, loadConversations]);
+
+  // "Compartir contacto" busca su propia lista en el servidor con SOLO el texto tipeado, en
+  // vez de reusar `conversations` — ese array ya viene filtrado por lo que esté activo en la
+  // barra lateral (etiqueta, fecha, departamento...), y compartir contacto no debería heredar
+  // ese filtrado: uno quiere elegir de TODOS los contactos, no solo de los que calzan con el
+  // filtro que se dejó puesto por otra razón.
+  useEffect(() => {
+    if (!shareContactOpen) { setShareContactResults([]); return; }
+    const timer = setTimeout(() => {
+      apiFetch<Conversation[]>(`/conversations${conversationsQuery('all', shareContactSearch, [], [], [], [])}`)
+        .then(setShareContactResults)
+        .catch(() => setShareContactResults([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [shareContactOpen, shareContactSearch]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
@@ -2159,9 +2175,8 @@ export default function ConversationsPage() {
             <h3>Compartir contacto...</h3>
             <div className="searchbox"><Search size={16} /><input autoFocus value={shareContactSearch} onChange={(e) => setShareContactSearch(e.target.value)} placeholder="Buscar contacto..." /></div>
             <div className="forward-list">
-              {conversations
+              {shareContactResults
                 .filter((c) => !isGroupContact(c.contact) && c.contact.phone)
-                .filter((c) => displayName(c.contact).toLowerCase().includes(shareContactSearch.toLowerCase()))
                 .map((c) => (
                   <button key={c.id} className="forward-row" onClick={() => void sendContactCard(c.contact.id)}>
                     <div className="chat-avatar">{avatarContent(c.contact)}</div>

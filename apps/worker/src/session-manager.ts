@@ -370,11 +370,19 @@ export class SessionManager {
     // moment a contact who was only ever recorded under the other form messages
     // again — so look up whichever JID this contact already exists under and
     // keep using that; only a genuinely new contact defaults to the phone JID.
+    //
+    // A `@lid` JID can also carry a ":device" suffix (a message routed through a
+    // linked companion device) — same shape as phone JIDs, whose ":device" suffix
+    // jidToPhone already strips, but nothing stripped it for @lid. A message that
+    // came in via a secondary device forked a brand-new, empty ("189224129151210:22")
+    // contact instead of reusing the company's existing one — collapse both forms
+    // to the same identity before anything below looks it up or creates it.
+    const lidJid = !isGroup && remoteJid.endsWith('@lid') ? `${remoteJid.split('@')[0].split(':')[0]}@lid` : remoteJid;
     const altPhoneJid = !isGroup && message.key.remoteJidAlt && jidToPhone(message.key.remoteJidAlt) ? message.key.remoteJidAlt : null;
-    let identityJid = remoteJid;
-    if (!isGroup && remoteJid.endsWith('@lid') && altPhoneJid) {
+    let identityJid = lidJid;
+    if (!isGroup && lidJid.endsWith('@lid') && altPhoneJid) {
       const existing = await this.prisma.contact.findFirst({
-        where: { companyId: instance.companyId, waId: { in: [remoteJid, altPhoneJid] } },
+        where: { companyId: instance.companyId, waId: { in: [lidJid, altPhoneJid] } },
         select: { waId: true },
       });
       identityJid = existing?.waId || altPhoneJid;
