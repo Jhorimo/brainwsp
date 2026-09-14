@@ -539,6 +539,9 @@ tr:last-child td { border-bottom: 0; }
 .chat-header-meta .chat-header-phone::after { content: '·'; margin-left: 4px; color: var(--muted); }
 .chat-header-meta .chat-header-status { color: var(--success) !important; }
 .chat-header-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+/* Escondido en escritorio (ahi entran los 7 botones sin problema) — el breakpoint de abajo
+   lo muestra y esconde .chat-header-action-extra, que es donde vive el resto. */
+.chat-header-more-btn { display: none; }
 .chat-back-button { display: none; width: 32px; height: 32px; flex-shrink: 0; border: 0; background: none; color: var(--muted); align-items: center; justify-content: center; }
 .message-stream { flex: 1; min-height: 0; overflow: auto; padding: 22px 0; background-color: #efeae2; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cg fill='none' stroke='%23d9d0c0' stroke-width='1.4'%3E%3Ccircle cx='28' cy='34' r='6'/%3E%3Cpath d='M96 18q11 15 0 30q-11-15 0-30' fill='%23d9d0c0' stroke='none'/%3E%3Cpath d='M158 56l9 9m-9 0l9-9'/%3E%3Crect x='38' y='118' width='13' height='13' rx='3'/%3E%3Cpath d='M138 138q9-11 17 0q-9 11-17 0' fill='%23d9d0c0' stroke='none'/%3E%3Ccircle cx='178' cy='172' r='3.5' fill='%23d9d0c0' stroke='none'/%3E%3Cpath d='M18 172q7-9 13 0q-7 9-13 0' fill='%23d9d0c0' stroke='none'/%3E%3Cpath d='M100 96q0 12-9 12t-9-12 9-12 9 12' /%3E%3C/g%3E%3C/svg%3E"); background-size: 200px 200px; }
 .message-stream-inner { max-width: 900px; margin: 0 auto; padding: 0 26px; display: flex; flex-direction: column; gap: 9px; }
@@ -887,12 +890,26 @@ tr:last-child td { border-bottom: 0; }
   .chat-layout.mobile-chat-open .chat-main { display: flex; }
   .chat-back-button { display: flex; }
   .chat-header { height: auto; min-height: 65px; flex-wrap: wrap; row-gap: 8px; padding: 10px 14px; }
+  /* 7 botones de accion (Tomar/IA/Config IA/Incidencia/Cita/Llamar/Info/Mas) nunca se
+     achicaban (flex-shrink:0 en .chat-header-actions) y ya no entraban en un celular de
+     ~360-390px, empujando el nombre del contacto a casi 0px y desbordando el header hacia
+     los lados. Se agrupan en el boton "..." (ya existia sin funcion), dejando solo IA e
+     Info en linea. */
+  .chat-header-action-extra { display: none; }
+  .chat-header-more-btn { display: inline-grid; }
 }
 
 /* Phones: the icon-rail sidebar from the 850px breakpoint above still costs ~72px of a
    ~360-430px viewport permanently. Below this width it becomes a hidden off-canvas drawer
    instead, opened with the same topbar hamburger button (`mobileNavOpen` in app-shell.tsx). */
 @media (max-width: 640px) {
+  /* .app-frame.collapsed (arriba, sin media query) tiene mayor especificidad que el
+     ".app-frame { 1fr }" de acá abajo y le gana pase lo que pase, aunque estemos en
+     celular — si alguna vez se colapsó el menú (queda guardado en localStorage), el
+     panel se quedaba robando 72px de columna aunque el sidebar ya sea un drawer fijo
+     oculto, sin nada visualmente ahí. Repetir la misma especificidad acá adentro es lo
+     que hace ganar a esta, por ir después en el archivo. */
+  .app-frame.collapsed { grid-template-columns: 1fr; }
   .app-frame { grid-template-columns: 1fr; }
   .sidebar { position: fixed; inset: 0 auto 0 0; height: 100dvh; width: 264px; z-index: 300; padding: 24px 18px 18px; transform: translateX(-100%); transition: transform .25s ease; box-shadow: 12px 0 40px rgba(0,0,0,.3); }
   .app-frame.mobile-nav-open .sidebar { transform: translateX(0); }

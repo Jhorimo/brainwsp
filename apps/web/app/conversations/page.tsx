@@ -303,6 +303,8 @@ export default function ConversationsPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
+  const [chatHeaderMenuOpen, setChatHeaderMenuOpen] = useState(false);
+  const chatHeaderMenuRef = useRef<HTMLDivElement>(null);
   const quickMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [quickMenuPos, setQuickMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [text, setText] = useState('');
@@ -746,6 +748,30 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [quickMenuOpen]);
 
+  // Portal + position:fixed por el mismo motivo que quickMenuPos arriba: .chat-layout tiene
+  // overflow:hidden (para las esquinas redondeadas) y recortaria un menu absolute que cuelgue
+  // del boton "..." del header del chat.
+  const [chatHeaderMenuPos, setChatHeaderMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const chatHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!chatHeaderMenuOpen) { setChatHeaderMenuPos(null); return; }
+    const button = chatHeaderMenuButtonRef.current;
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      const margin = 12;
+      const menuWidth = 220;
+      const left = Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - margin);
+      setChatHeaderMenuPos({ top: rect.bottom + 6, left: Math.max(margin, left) });
+    }
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (chatHeaderMenuRef.current?.contains(target) || chatHeaderMenuButtonRef.current?.contains(target)) return;
+      setChatHeaderMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [chatHeaderMenuOpen]);
+
   useEffect(() => {
     if (!tagMenuOpen) return;
     const onClickOutside = (e: MouseEvent) => {
@@ -762,6 +788,7 @@ export default function ConversationsPage() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (quickMenuOpen) { setQuickMenuOpen(false); return; }
+      if (chatHeaderMenuOpen) { setChatHeaderMenuOpen(false); return; }
       if (tagMenuOpen) { setTagMenuOpen(false); return; }
       if (openMessageMenuId) { setOpenMessageMenuId(null); return; }
       if (reactionMessageId) { setReactionMessageId(null); return; }
@@ -781,7 +808,7 @@ export default function ConversationsPage() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [quickMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showComposerMenu, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, shareContactOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
+  }, [quickMenuOpen, chatHeaderMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showComposerMenu, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, shareContactOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
 
   // Revoke the local object URL used for the attach preview once it's no longer shown.
   useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
@@ -1989,14 +2016,17 @@ export default function ConversationsPage() {
                 </div>
               </div>
               <div className="chat-header-actions">
-                {!selected.assignedUser && <button className="button small" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}
+                {!selected.assignedUser && <button className="button small chat-header-action-extra" onClick={() => void take()}><UserRoundCheck size={14} />Tomar conversación</button>}
                 <button className={`icon-button ${selected.aiEnabled ? 'ai-toggle-on' : ''}`} onClick={() => void toggleAi()} title={selected.aiEnabled ? 'El agente IA está respondiendo automáticamente aquí. Click para desactivarlo.' : 'Activar respuesta automática con IA en esta conversación'}><Bot size={17} /></button>
-                {isAdmin && <button className="icon-button" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}
-                <button className="icon-button" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
-                <button className="icon-button" onClick={openAppointmentModal} title="Agendar una cita con este cliente"><CalendarDays size={16} /></button>
-                {selected.contact.phone ? <a className="icon-button" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
+                {isAdmin && <button className="icon-button chat-header-action-extra" onClick={() => void openAiPromptModal()} title="Configurar instrucciones del agente IA"><Settings size={16} /></button>}
+                <button className="icon-button chat-header-action-extra" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
+                <button className="icon-button chat-header-action-extra" onClick={openAppointmentModal} title="Agendar una cita con este cliente"><CalendarDays size={16} /></button>
+                {selected.contact.phone ? <a className="icon-button chat-header-action-extra" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button chat-header-action-extra" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
                 <button className="icon-button contact-panel-toggle" onClick={() => setContactPanelOpen(true)} title="Ver etiquetas, notas e incidencias"><Info size={16} /></button>
-                <button className="icon-button"><MoreHorizontal size={17} /></button>
+                {/* En celular no caben los 7 botones de arriba — .chat-header-action-extra se
+                    esconde por CSS a partir de 850px y sus acciones se agrupan acá, ya que este
+                    boton "..." existia sin funcion. */}
+                <button ref={chatHeaderMenuButtonRef} className="icon-button chat-header-more-btn" onClick={() => setChatHeaderMenuOpen((v) => !v)} title="Más opciones"><MoreHorizontal size={17} /></button>
               </div>
             </header>
             <div className="message-stream" ref={messageStreamRef}>
@@ -2379,6 +2409,18 @@ export default function ConversationsPage() {
             <span className="tag-dot" style={{ background: tag.color }} />{tag.name}
           </button>
         ))}
+      </div>,
+      document.body,
+    )}
+    {chatHeaderMenuOpen && chatHeaderMenuPos && selected && typeof document !== 'undefined' && createPortal(
+      <div ref={chatHeaderMenuRef} className="chat-quick-menu" style={{ position: 'fixed', top: chatHeaderMenuPos.top, left: chatHeaderMenuPos.left, right: 'auto' }}>
+        {!selected.assignedUser && <button onClick={() => { setChatHeaderMenuOpen(false); void take(); }}><UserRoundCheck size={14} />Tomar conversación</button>}
+        {isAdmin && <button onClick={() => { setChatHeaderMenuOpen(false); void openAiPromptModal(); }}><Settings size={14} />Configurar IA</button>}
+        <button onClick={() => { setChatHeaderMenuOpen(false); openIncidentModal(); }}><AlertTriangle size={14} />Reportar incidencia</button>
+        <button onClick={() => { setChatHeaderMenuOpen(false); openAppointmentModal(); }}><CalendarDays size={14} />Agendar cita</button>
+        {selected.contact.phone
+          ? <a href={`tel:${selected.contact.phone}`} onClick={() => setChatHeaderMenuOpen(false)}><Phone size={14} />Llamar</a>
+          : <button disabled><Phone size={14} />Sin número para llamar</button>}
       </div>,
       document.body,
     )}
