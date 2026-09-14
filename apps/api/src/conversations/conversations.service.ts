@@ -91,6 +91,7 @@ export class ConversationsService {
     projectIds?: string,
     stageIds?: string,
     tagIds?: string,
+    contactsOnly?: string,
   ) {
     const restriction = await this.resolveDepartmentRestriction(user);
     // Cada filtro llega como CSV (?departmentIds=a,b,c) y se traduce a "in" — vacio u
@@ -106,6 +107,12 @@ export class ConversationsService {
     // @@index([companyId, status, lastMessageAt]), so this stays cheap even for wide ranges.
     const lastMessageAt = from && to ? { gte: new Date(from), lt: new Date(to) } : undefined;
     const search = q?.trim();
+    // "Compartir contacto" reusa este mismo endpoint pero busca una PERSONA, no una
+    // conversacion — con onlyContacts=1 el texto solo compara contra nombre/apodo/telefono
+    // (nunca contenido de mensajes, que daba resultados que no tenian "clara" en ningun lado
+    // mas que en medio de otra palabra de un chat) y el orden es alfabetico en vez de
+    // anclados-primero-por-actividad (que no tiene sentido para elegir a quien compartir).
+    const onlyContacts = contactsOnly === '1' || contactsOnly === 'true';
     // Matches WhatsApp Web's own chat search: the contact's name/phone, OR any message in the
     // conversation (not just the last one shown in the sidebar preview) mentioning the term.
     // Combined with the department restriction via `AND` (not a second top-level `OR`, which
@@ -122,10 +129,10 @@ export class ConversationsService {
               { contact: { name: { contains: search, mode: Prisma.QueryMode.insensitive } } },
               { contact: { pushName: { contains: search, mode: Prisma.QueryMode.insensitive } } },
               { contact: { phone: { contains: search, mode: Prisma.QueryMode.insensitive } } },
-              { messages: { some: { OR: [
+              ...(onlyContacts ? [] : [{ messages: { some: { OR: [
                 { body: { contains: search, mode: Prisma.QueryMode.insensitive } },
                 { caption: { contains: search, mode: Prisma.QueryMode.insensitive } },
-              ] } } },
+              ] } } }]),
             ],
           }] : []),
           // Multi-seleccion real: cada filtro filtra sobre TODA la conversacion de la
@@ -147,7 +154,7 @@ export class ConversationsService {
         stage: { select: { id: true, name: true, color: true } },
         instance: { select: { id: true, name: true, slug: true, status: true } },
       },
-      orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
+      orderBy: onlyContacts ? [{ contact: { name: 'asc' } }] : [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
       take: 100,
     });
 

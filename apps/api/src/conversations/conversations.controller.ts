@@ -36,8 +36,9 @@ export class ConversationsController {
     @Query('projectIds') projectIds?: string,
     @Query('stageIds') stageIds?: string,
     @Query('tagIds') tagIds?: string,
+    @Query('contactsOnly') contactsOnly?: string,
   ) {
-    return this.service.list(user, status, from, to, q, departmentIds, projectIds, stageIds, tagIds);
+    return this.service.list(user, status, from, to, q, departmentIds, projectIds, stageIds, tagIds, contactsOnly);
   }
 
   @Get(':id/messages')

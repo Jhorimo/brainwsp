@@ -94,8 +94,10 @@ function conversationsQuery(
   projectIds: string[],
   stageIds: string[],
   tagIds: string[],
+  contactsOnly?: boolean,
 ) {
   const params = new URLSearchParams();
+  if (contactsOnly) params.set('contactsOnly', '1');
   if (preset !== 'all') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -385,6 +387,7 @@ export default function ConversationsPage() {
   const [shareContactOpen, setShareContactOpen] = useState(false);
   const [shareContactSearch, setShareContactSearch] = useState('');
   const [shareContactResults, setShareContactResults] = useState<Conversation[]>([]);
+  const [shareContactLoading, setShareContactLoading] = useState(false);
 
   // "Responder" (reply/quote a message), WhatsApp Web style.
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
@@ -536,11 +539,13 @@ export default function ConversationsPage() {
   // ese filtrado: uno quiere elegir de TODOS los contactos, no solo de los que calzan con el
   // filtro que se dejó puesto por otra razón.
   useEffect(() => {
-    if (!shareContactOpen) { setShareContactResults([]); return; }
+    if (!shareContactOpen) { setShareContactResults([]); setShareContactLoading(false); return; }
+    setShareContactLoading(true);
     const timer = setTimeout(() => {
-      apiFetch<Conversation[]>(`/conversations${conversationsQuery('all', shareContactSearch, [], [], [], [])}`)
+      apiFetch<Conversation[]>(`/conversations${conversationsQuery('all', shareContactSearch, [], [], [], [], true)}`)
         .then(setShareContactResults)
-        .catch(() => setShareContactResults([]));
+        .catch(() => setShareContactResults([]))
+        .finally(() => setShareContactLoading(false));
     }, 300);
     return () => clearTimeout(timer);
   }, [shareContactOpen, shareContactSearch]);
@@ -2175,14 +2180,19 @@ export default function ConversationsPage() {
             <h3>Compartir contacto...</h3>
             <div className="searchbox"><Search size={16} /><input autoFocus value={shareContactSearch} onChange={(e) => setShareContactSearch(e.target.value)} placeholder="Buscar contacto..." /></div>
             <div className="forward-list">
-              {shareContactResults
-                .filter((c) => !isGroupContact(c.contact) && c.contact.phone)
-                .map((c) => (
-                  <button key={c.id} className="forward-row" onClick={() => void sendContactCard(c.contact.id)}>
-                    <div className="chat-avatar">{avatarContent(c.contact)}</div>
-                    <span>{displayName(c.contact)}</span>
-                  </button>
-                ))}
+              {shareContactLoading ? (
+                <div className="forward-list-state"><div className="spinner" /></div>
+              ) : (() => {
+                const shareContactMatches = shareContactResults.filter((c) => !isGroupContact(c.contact) && c.contact.phone);
+                return shareContactMatches.length === 0
+                  ? <p className="forward-list-state contact-empty-hint">No se encontraron contactos.</p>
+                  : shareContactMatches.map((c) => (
+                    <button key={c.id} className="forward-row" onClick={() => void sendContactCard(c.contact.id)}>
+                      <div className="chat-avatar">{avatarContent(c.contact)}</div>
+                      <span>{displayName(c.contact)}</span>
+                    </button>
+                  ));
+              })()}
             </div>
           </div>
         </div>
