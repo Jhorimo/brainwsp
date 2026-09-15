@@ -588,6 +588,9 @@ tr:last-child td { border-bottom: 0; }
 .forward-list-state { display: grid; place-items: center; padding: 30px 0; }
 .forward-row { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border: 0; background: none; border-radius: 8px; text-align: left; font-size: 12px; }
 .forward-row:hover { background: var(--surface-2); }
+.forward-row:disabled { opacity: .5; cursor: not-allowed; }
+.forward-row:disabled:hover { background: none; }
+.forward-row-hint { font-style: normal; color: var(--muted); font-size: 10px; }
 .notes-textarea { width: 100%; min-height: 90px; resize: vertical; border: 1px solid #dfe5ee; border-radius: 10px; padding: 10px; font-size: 11px; font-family: inherit; outline: 0; }
 .notes-textarea:focus { border-color: #9dbbfb; }
 .message-bubble.out { align-self: flex-end; background: #e8f2ff; border-color: #d5e6fb; }

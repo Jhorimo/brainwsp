@@ -2213,13 +2213,17 @@ export default function ConversationsPage() {
               {shareContactLoading ? (
                 <div className="forward-list-state"><div className="spinner" /></div>
               ) : (() => {
-                const shareContactMatches = shareContactResults.filter((c) => !isGroupContact(c.contact) && c.contact.phone);
+                const shareContactMatches = shareContactResults.filter((c) => !isGroupContact(c.contact));
                 return shareContactMatches.length === 0
                   ? <p className="forward-list-state contact-empty-hint">No se encontraron contactos.</p>
                   : shareContactMatches.map((c) => (
-                    <button key={c.id} className="forward-row" onClick={() => void sendContactCard(c.contact.id)}>
+                    // Sin telefono no se puede armar la tarjeta de contacto (el backend
+                    // tambien lo exige) — antes esto se sacaba de la lista en silencio,
+                    // dando la sensacion de que la busqueda no encontraba al contacto
+                    // cuando en realidad si lo encontraba, solo que no se podia compartir.
+                    <button key={c.id} className="forward-row" disabled={!c.contact.phone} title={c.contact.phone ? undefined : 'Este contacto no tiene un número de teléfono guardado'} onClick={() => c.contact.phone && void sendContactCard(c.contact.id)}>
                       <div className="chat-avatar">{avatarContent(c.contact)}</div>
-                      <span>{displayName(c.contact)}</span>
+                      <span>{displayName(c.contact)}{!c.contact.phone && <em className="forward-row-hint"> · sin teléfono</em>}</span>
                     </button>
                   ));
               })()}

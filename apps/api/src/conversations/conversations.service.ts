@@ -154,9 +154,23 @@ export class ConversationsService {
         stage: { select: { id: true, name: true, color: true } },
         instance: { select: { id: true, name: true, slug: true, status: true } },
       },
-      orderBy: onlyContacts ? [{ contact: { name: 'asc' } }] : [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
-      take: 100,
+      // Postgres ordena texto por valor de caracter (mayusculas antes que minusculas,
+      // simbolos/emoji antes que letras) — con nombres de WhatsApp mezclando "JUAN",
+      // "juan" y "Juan Perez" eso se ve como orden aleatorio. Se re-ordena abajo en JS
+      // con localeCompare (insensible a mayusculas y acentos) en vez de confiar en el
+      // ORDER BY de la base para este caso.
+      orderBy: onlyContacts ? undefined : [{ pinned: 'desc' }, { lastMessageAt: 'desc' }],
+      // Sin texto de busqueda, "Compartir contacto" no necesita volcar 100 contactos de
+      // una — nadie los recorre, siempre se termina escribiendo para filtrar. Con texto sí
+      // se sube a 100 porque ahi los resultados ya vienen acotados por el filtro.
+      take: onlyContacts && !search ? 20 : 100,
     });
+
+    if (onlyContacts) {
+      const nombreOrdenable = (c: (typeof conversations)[number]) =>
+        (c.contact.name || c.contact.pushName || c.contact.phone || '').toLowerCase();
+      conversations.sort((a, b) => nombreOrdenable(a).localeCompare(nombreOrdenable(b), 'es', { sensitivity: 'base' }));
+    }
 
     // El ultimo mensaje de cada conversacion va en una consulta aparte, NO como
     // `include: { messages: { take: 1 } }`. Prisma traduce ese take anidado a
