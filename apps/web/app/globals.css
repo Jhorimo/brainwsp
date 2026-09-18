@@ -23,11 +23,40 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html, body {
+  margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
+
+/* Scrollbars finos y en tono marca en vez del scrollbar gris por defecto del navegador —
+   se nota en .chat-list-scroll, .message-stream, los paneles y menús flotantes, que son
+   los que más scrollean en el día a día. Solo estética: no cambia ancho de contenido en
+   Firefox (`thin`) y en WebKit el scrollbar es overlay, así que no roba layout. */
+* { scrollbar-width: thin; scrollbar-color: #c2cbdb transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c2cbdb; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #a7b2c8; background-clip: content-box; }
+
+/* Foco visible consistente en todo lo interactivo cuando se navega con teclado — antes
+   dependía del outline nativo del navegador (grueso, azul, sin relación con la marca) o
+   directamente no se notaba sobre fondos oscuros como el sidebar. `:focus-visible` deja
+   intacto el click con mouse (no dispara ahí), así que no agrega ruido visual al usar la
+   app normalmente. */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--brand-light);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 
 /* --banner-h la pisa .with-impersonation-banner de abajo — todo lo que necesite saber
    cuanto mide la franja "viendo como" de arriba (sidebar, topbar, layouts a altura fija

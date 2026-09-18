@@ -1,7 +1,20 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import { AnnouncementsProvider } from '@/components/announcements-provider';
 import { ConfirmProvider } from '@/components/confirm-provider';
 import './globals.css';
+
+// Self-hosted at build time (no runtime request to Google) — globals.css was already
+// declaring `font-family: Inter, ...` everywhere, but nothing ever actually loaded Inter,
+// so every browser silently fell back to its OS default (Segoe UI / San Francisco /
+// Roboto) instead. `variable` exposes it as --font-sans so globals.css picks it up without
+// needing a class on every element.
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-sans',
+  display: 'swap',
+});
 
 // Sin NEXT_PUBLIC_SITE_URL configurado (ver .env.example), todo — canonical, Open Graph,
 // sitemap, robots — cae a localhost en vez de romperse silenciosamente en producción.
@@ -38,7 +51,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es">
+    <html lang="es" className={inter.variable}>
       <body><ConfirmProvider><AnnouncementsProvider>{children}</AnnouncementsProvider></ConfirmProvider></body>
     </html>
   );
