@@ -31,6 +31,11 @@ import { uploadBuffer } from './storage.js';
 
 const LEASE_TTL_MS = 30_000;
 const LEASE_RENEW_MS = 10_000;
+// WhatsApp's profile-picture links are signed and expire; contacts.update only fires when the
+// photo itself changes, not when the cached link merely goes stale. A long-lived production
+// connection can go weeks without reconnecting, so backfillAvatars (reconnect-only, gaps-only)
+// never revisits an avatar it already has — see refreshStaleAvatars below.
+const AVATAR_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export class SessionManager {
   private readonly sockets = new Map<string, WASocket>();
@@ -39,13 +44,23 @@ export class SessionManager {
   private readonly manualStops = new Set<string>();
   private readonly leaseLost = new Set<string>();
   private readonly redis = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
+  private readonly avatarRefreshTimer: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaClient,
     private readonly realtime: RealtimePublisher,
     private readonly logger: Logger,
     private readonly outboundQueue: Queue,
-  ) {}
+  ) {
+    this.avatarRefreshTimer = setInterval(() => {
+      for (const [instanceId, socket] of this.sockets) {
+        this.refreshStaleAvatars(instanceId, socket).catch((error) => {
+          this.logger.warn({ err: error, instanceId }, 'periodic avatar refresh failed');
+        });
+      }
+    }, AVATAR_REFRESH_INTERVAL_MS);
+    this.avatarRefreshTimer.unref();
+  }
 
   async bootstrap() {
     const instances = await this.prisma.whatsAppInstance.findMany({
@@ -314,6 +329,7 @@ export class SessionManager {
     }
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer);
     for (const timer of this.leaseTimers.values()) clearInterval(timer);
+    clearInterval(this.avatarRefreshTimer);
     this.reconnectTimers.clear();
     this.leaseTimers.clear();
     await this.redis.quit();
@@ -746,6 +762,23 @@ export class SessionManager {
     // whoever comes after it (often groups, created later than most 1:1 contacts). A stable
     // production connection reconnects rarely, so that starvation can persist indefinitely.
     // Shuffling gives every contact/group a fair shot across successive reconnects.
+    const sample = contacts.sort(() => Math.random() - 0.5).slice(0, 200);
+    await this.refreshAvatarsFor(instance.companyId, socket, sample);
+  }
+
+  // Runs every AVATAR_REFRESH_INTERVAL_MS for each currently connected instance, independent of
+  // reconnects. Unlike backfillAvatars, it doesn't filter by avatarUrl: null — the whole point is
+  // to revalidate photos that are already cached before their signed link expires and starts
+  // 404ing in the browser. Same random-sample approach as backfillAvatars so every contact/group
+  // gets a fair shot across ticks instead of always re-checking the same slice.
+  private async refreshStaleAvatars(instanceId: string, socket: WASocket) {
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId }, select: { companyId: true } });
+    if (!instance) return;
+    const contacts = await this.prisma.contact.findMany({
+      where: { companyId: instance.companyId },
+      select: { id: true, waId: true },
+      take: 2000,
+    });
     const sample = contacts.sort(() => Math.random() - 0.5).slice(0, 200);
     await this.refreshAvatarsFor(instance.companyId, socket, sample);
   }
