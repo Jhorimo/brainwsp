@@ -343,6 +343,29 @@ export class SessionManager {
     // chat content, so without this guard they fell through `extractMessage` to
     // MessageType.UNKNOWN and showed up as an empty "UNKNOWN" bubble in the chat.
     if (message.message.reactionMessage || message.message.protocolMessage) return;
+
+    // De lista negra a lista blanca. WhatsApp estrena sobres de protocolo cada pocos meses
+    // -- senderKeyDistributionMessage (reparto de claves de un grupo), messageContextInfo
+    // suelto (sincronizacion de dispositivos), secretEncryptedMessage (payload cifrado que
+    // apunta a otro mensaje) -- y cada uno se colaba como una burbuja vacia "UNKNOWN".
+    // Enumerarlos uno a uno es una carrera perdida, asi que se descarta todo lo que
+    // extractMessage no sepa renderizar: por definicion no hay nada que mostrar.
+    //
+    // Va ANTES de cualquier escritura a proposito. Hasta ahora extractMessage no se
+    // llamaba hasta despues de crear el contacto, la conversacion y el lead, y de sumar
+    // al contador de no leidos, asi que estos sobres dejaban rastro aunque su burbuja
+    // estuviera vacia.
+    //
+    // Se registra el sobre para poder anadir soporte si algun dia resulta que si traia
+    // contenido de verdad.
+    const content = extractMessage(message);
+    if (content.type === MessageType.UNKNOWN) {
+      this.logger.warn(
+        { instanceId, waMessageId: message.key.id, sobre: Object.keys(message.message) },
+        'mensaje sin contenido renderizable, descartado',
+      );
+      return;
+    }
     const remoteJid = message.key.remoteJid;
     if (remoteJid === 'status@broadcast') return;
 
@@ -516,8 +539,6 @@ export class SessionManager {
       });
       await this.realtime.publish(instance.companyId, 'lead.created', lead);
     }
-
-    const content = extractMessage(message);
 
     // The contact replied to one of our messages from their phone — resolve WhatsApp's
     // `stanzaId` back to our own Message row so the panel shows the same quote WhatsApp does.
