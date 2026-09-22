@@ -1440,20 +1440,6 @@ export default function ConversationsPage() {
     }
   };
 
-  const insertQuickReplyContent = (content: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) { setText((current) => current + content); return; }
-    const start = textarea.selectionStart ?? text.length;
-    const end = textarea.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + content + text.slice(end);
-    setText(next);
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const caret = start + content.length;
-      textarea.setSelectionRange(caret, caret);
-    });
-  };
-
   const applyQuickReplyAutocomplete = (qr: QuickReply) => {
     const textarea = textareaRef.current;
     const caret = textarea?.selectionStart ?? text.length;
@@ -1462,10 +1448,27 @@ export default function ConversationsPage() {
     setQrAutocompleteOpen(false);
 
     if (qr.mediaUrl) {
-      setText(text.slice(0, start) + text.slice(caret));
+      // El texto sin el "/token", calculado UNA vez aquí. Antes esta rama borraba el
+      // token con setText y luego, al resolver la descarga, llamaba a
+      // `insertQuickReplyContent`, que vuelve a leer `text` del closure — congelado en
+      // el valor CON el token, porque setText es asincrono — y lo reinsertaba. Con el
+      // cursor ya en 0 el resultado era "contenido/330": el comando quedaba al final y
+      // habia que borrarlo a mano antes de enviar.
+      const sinToken = text.slice(0, start) + text.slice(caret);
+      setText(sinToken);
       setQrSendingId(qr.id);
       fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream')
-        .then((file) => { attachFile(file); if (qr.content) insertQuickReplyContent(qr.content); })
+        .then((file) => {
+          attachFile(file);
+          if (!qr.content) return;
+          const conContenido = sinToken.slice(0, start) + qr.content + sinToken.slice(start);
+          setText(conContenido);
+          requestAnimationFrame(() => {
+            textarea?.focus();
+            const pos = start + qr.content!.length;
+            textarea?.setSelectionRange(pos, pos);
+          });
+        })
         .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida'))
         .finally(() => setQrSendingId(null));
       return;
