@@ -72,6 +72,22 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
         },
       };
     }
+    // Ubicacion "en vivo" (se va actualizando mientras la persona se mueve). Llegaba
+    // a UNKNOWN porque no tenia case propio -- a diferencia de locationMessage, no trae
+    // nombre ni direccion, solo coordenadas, y WhatsApp manda varias actualizaciones
+    // sucesivas con el mismo mensaje logico; cada una se guarda como su propio Message,
+    // igual que hace el cliente de WhatsApp en el chat.
+    case 'liveLocationMessage': {
+      const location = content.liveLocationMessage;
+      return {
+        type: MessageType.LOCATION,
+        metadata: {
+          latitude: location?.degreesLatitude ?? undefined,
+          longitude: location?.degreesLongitude ?? undefined,
+          live: true,
+        },
+      };
+    }
     case 'contactMessage':
       return {
         type: MessageType.CONTACT,

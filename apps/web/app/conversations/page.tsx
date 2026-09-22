@@ -34,7 +34,7 @@ type Conversation = {
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; contacts?: Array<{ displayName?: string; vcard?: string }> };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; contacts?: Array<{ displayName?: string; vcard?: string }> };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
