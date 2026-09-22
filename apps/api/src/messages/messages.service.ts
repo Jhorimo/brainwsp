@@ -153,7 +153,17 @@ export class MessagesService {
 
     const phone = rawTo.replace(/[^0-9]/g, '');
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
-    const waId = `${phone}@s.whatsapp.net`;
+    // WhatsApp may have this contact on file under an opaque `@lid` waId instead of
+    // the phone JID (see session-manager). Building the phone JID unconditionally
+    // created a second row for someone already known, so reuse whatever waId the
+    // company already has for this number — @broadcast rows excluded, since a
+    // broadcast list legitimately carries the same phone.
+    const existing = await this.prisma.contact.findFirst({
+      where: { companyId: client.companyId, phone, waId: { not: { endsWith: '@broadcast' } } },
+      orderBy: { createdAt: 'asc' },
+      select: { waId: true },
+    });
+    const waId = existing?.waId ?? `${phone}@s.whatsapp.net`;
 
     const contact = await this.prisma.contact.upsert({
       where: { companyId_waId: { companyId: client.companyId, waId } },

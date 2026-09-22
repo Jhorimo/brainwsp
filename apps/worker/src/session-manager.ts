@@ -393,15 +393,41 @@ export class SessionManager {
     // came in via a secondary device forked a brand-new, empty ("189224129151210:22")
     // contact instead of reusing the company's existing one — collapse both forms
     // to the same identity before anything below looks it up or creates it.
-    const lidJid = !isGroup && remoteJid.endsWith('@lid') ? `${remoteJid.split('@')[0].split(':')[0]}@lid` : remoteJid;
-    const altPhoneJid = !isGroup && message.key.remoteJidAlt && jidToPhone(message.key.remoteJidAlt) ? message.key.remoteJidAlt : null;
+    // The suffix has to come off BOTH forms, not just @lid: the phone JID carries it
+    // too, and `remoteJidAlt` is used raw in the lookup below — a stored
+    // "51923096887@s.whatsapp.net" never matches an incoming
+    // "51923096887:22@s.whatsapp.net", so the lookup missed and forked a duplicate
+    // while `phone` still came out right, because jidToPhone does strip it.
+    const stripDevice = (jid: string) => {
+      const [user, server] = jid.split('@');
+      return server ? `${user.split(':')[0]}@${server}` : jid;
+    };
+    const lidJid = !isGroup ? stripDevice(remoteJid) : remoteJid;
+    const altPhoneJid =
+      !isGroup && message.key.remoteJidAlt && jidToPhone(message.key.remoteJidAlt)
+        ? stripDevice(message.key.remoteJidAlt)
+        : null;
     let identityJid = lidJid;
-    if (!isGroup && lidJid.endsWith('@lid') && altPhoneJid) {
+    if (!isGroup) {
+      // Reconcile in BOTH directions. The previous version only looked when the
+      // message arrived as @lid, so a contact recorded under @lid who then messaged
+      // from the phone JID forked a second row. The phone fallback catches the case
+      // where neither JID matches but the same real number is already on file —
+      // excluding @broadcast rows, which legitimately share a phone with a contact.
+      const phoneHint = jidToPhone(lidJid) || (altPhoneJid ? jidToPhone(altPhoneJid) : null);
       const existing = await this.prisma.contact.findFirst({
-        where: { companyId: instance.companyId, waId: { in: [lidJid, altPhoneJid] } },
+        where: {
+          companyId: instance.companyId,
+          OR: [
+            { waId: { in: altPhoneJid ? [lidJid, altPhoneJid] : [lidJid] } },
+            ...(phoneHint ? [{ phone: phoneHint, waId: { not: { endsWith: '@broadcast' } } }] : []),
+          ],
+        },
+        // Oldest wins: that's the row carrying the conversation history.
+        orderBy: { createdAt: 'asc' },
         select: { waId: true },
       });
-      identityJid = existing?.waId || altPhoneJid;
+      identityJid = existing?.waId || altPhoneJid || lidJid;
     }
     const phone = jidToPhone(identityJid) || (altPhoneJid ? jidToPhone(altPhoneJid) : null);
     const contact = await this.prisma.contact.upsert({

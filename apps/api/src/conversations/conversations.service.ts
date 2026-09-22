@@ -255,7 +255,14 @@ export class ConversationsService {
 
     const phone = rawPhone.replace(/[^0-9]/g, '');
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
-    const waId = `${phone}@s.whatsapp.net`;
+    // Same reason as in messages.service: the number may already be on file under an
+    // opaque `@lid` waId, and assuming the phone JID forks a duplicate contact.
+    const existingContact = await this.prisma.contact.findFirst({
+      where: { companyId, phone, waId: { not: { endsWith: '@broadcast' } } },
+      orderBy: { createdAt: 'asc' },
+      select: { waId: true },
+    });
+    const waId = existingContact?.waId ?? `${phone}@s.whatsapp.net`;
     const trimmedName = name?.trim() || undefined;
 
     const contact = await this.prisma.contact.upsert({
