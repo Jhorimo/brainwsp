@@ -337,7 +337,20 @@ export class SessionManager {
 
   private async persistIncoming(instanceId: string, message: WAMessage, socket: WASocket) {
     if (message.key.fromMe || !message.key.remoteJid || !message.key.id || !message.message) return;
-    // Reactions and protocol envelopes (revokes, edits, app-state sync notices) ride the
+
+    // Edicion de un mensaje ya enviado. WhatsApp la entrega envuelta como
+    // editedMessage.message.protocolMessage con type MESSAGE_EDIT, y trae DOS cosas: la
+    // key del mensaje original (a que se edito) y editedMessage con el proto.IMessage
+    // completo del texto nuevo. Tiene que resolverse ANTES del guard de abajo, porque a
+    // este nivel es un protocolMessage normal y corriente y se descartaria en silencio
+    // -- lo que hoy hace: el agente sigue viendo el texto viejo sin saber que cambio.
+    const edit = message.message.editedMessage?.message?.protocolMessage;
+    if (edit?.type === proto.Message.ProtocolMessage.Type.MESSAGE_EDIT && edit.key?.id && edit.editedMessage) {
+      await this.persistEdit(instanceId, edit.key.id, edit.editedMessage);
+      return;
+    }
+
+    // Reactions and protocol envelopes (revokes, app-state sync notices) ride the
     // same `messages.upsert` stream as real messages. Reactions are already handled by the
     // dedicated `messages.reaction` event above (see persistReaction); neither carries real
     // chat content, so without this guard they fell through `extractMessage` to
@@ -657,6 +670,42 @@ export class SessionManager {
           this.logger.warn({ err: error, conversationId: conversation.id }, 'Automation/AI auto-reply failed');
         });
     }
+  }
+
+  // Persiste la edicion de un mensaje ya guardado. `waMessageId` es el id del mensaje
+  // ORIGINAL (viene en protocolMessage.key.id); `editedContent` es el proto.IMessage
+  // completo con el texto nuevo, se procesa con extractMessage igual que un mensaje
+  // normal para no duplicar la logica de cada tipo de contenido.
+  //
+  // No se muestra el texto viejo en el chat -- igual que WhatsApp -- pero se guarda una
+  // vez en metadata.originalBody por si hace falta auditar; solo la primera vez, para que
+  // una segunda edicion no pise el original con el texto de la edicion anterior.
+  private async persistEdit(instanceId: string, waMessageId: string, editedContent: proto.IMessage) {
+    const original = await this.prisma.message.findUnique({
+      where: { instanceId_waMessageId: { instanceId, waMessageId } },
+    });
+    // El mensaje original nunca llego (historial fuera de rango, o el worker se perdio el
+    // evento) -- no hay nada que editar, se ignora en vez de crear un mensaje huerfano.
+    if (!original) {
+      this.logger.warn({ instanceId, waMessageId }, 'edicion de un mensaje que no esta en la base, ignorada');
+      return;
+    }
+
+    const nuevo = extractMessage({ key: original as unknown as proto.IMessageKey, message: editedContent } as WAMessage);
+    const existingMetadata = (original.metadata as Record<string, unknown> | null) || {};
+    const updated = await this.prisma.message.update({
+      where: { id: original.id },
+      data: {
+        body: nuevo.body ?? original.body,
+        caption: nuevo.caption ?? original.caption,
+        metadata: {
+          ...existingMetadata,
+          edited: true,
+          originalBody: (existingMetadata.originalBody as string | undefined) ?? original.body ?? original.caption ?? null,
+        },
+      },
+    });
+    await this.realtime.publish(updated.companyId, 'message.updated', updated);
   }
 
   // `targetKey` identifies the message being reacted to; `reaction.key` is the reactor's own

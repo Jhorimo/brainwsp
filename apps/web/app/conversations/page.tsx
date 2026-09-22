@@ -34,7 +34,7 @@ type Conversation = {
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; contacts?: Array<{ displayName?: string; vcard?: string }> };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }> };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
@@ -2149,6 +2149,14 @@ export default function ConversationsPage() {
                     <div className="message-time">
                       {message.pinned && <Pin size={10} className="message-badge-pin" />}
                       {message.starred && <Star size={10} className="message-badge-star" />}
+                      {/* No se muestra el texto original, igual que hace WhatsApp: solo un
+                          aviso de que este mensaje ya no es el que se envio primero. El
+                          texto viejo se guarda en metadata.originalBody solo para auditoria. */}
+                      {message.metadata?.edited && (
+                        <span className="message-edited" title="Mensaje editado">
+                          <Pencil size={10} /> editado
+                        </span>
+                      )}
                       {new Date(message.createdAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
                       {message.direction === 'OUTBOUND' && statusIcon(message.status)}
                     </div>

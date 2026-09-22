@@ -585,6 +585,7 @@ tr:last-child td { border-bottom: 0; }
 .message-react-trigger { position: absolute; top: -24px; right: 26px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: white; box-shadow: 0 1px 4px rgba(31,47,76,.18); color: #8b99ad; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
 .message-bubble:hover .message-react-trigger { opacity: 1; }
 .message-badge-pin, .message-badge-star { color: #8b99ad; margin-right: 2px; }
+.message-edited { display: inline-flex; align-items: center; gap: 2px; color: #8b99ad; font-style: italic; }
 
 /* "Responder" quote preview shown above a message's own content. */
 .message-quote { display: block; width: 100%; text-align: left; border: 0; border-left: 3px solid var(--brand); background: rgba(0,0,0,.04); border-radius: 6px; padding: 5px 8px; margin-bottom: 6px; cursor: pointer; }
