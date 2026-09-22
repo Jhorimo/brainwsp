@@ -36,7 +36,9 @@ type Conversation = {
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
 type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; contacts?: Array<{ displayName?: string; vcard?: string }> };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
-type Message = { id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
+// `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
+// identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
+type Message = { id: string; waMessageId?: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
@@ -449,6 +451,10 @@ export default function ConversationsPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageStreamRef = useRef<HTMLDivElement>(null);
+  // `true` mientras el agente esté al final del hilo; en cuanto sube a leer historial se
+  // apaga y el auto-scroll deja de robarle la posición. Es un ref y no estado a propósito:
+  // cambia en cada evento de scroll y no debe provocar re-render.
+  const anclarAbajoRef = useRef(true);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -571,13 +577,38 @@ export default function ConversationsPage() {
       });
       if (selectedIdRef.current === event.conversation.id) {
         setMessages((current) => current.some((item) => item.id === event.message.id) ? current : [...current, event.message]);
+        // El servidor incrementa `unreadCount` en todo mensaje entrante y solo `messages()`
+        // lo reseteaba, así que hasta ahora el contador se limpiaba de rebote al recargar
+        // el hilo. Sin esa recarga hay que marcarlo explícitamente, o el chat que el agente
+        // está leyendo aparecería como no leído para el resto y en el tablero.
+        if (event.message.direction === 'INBOUND') {
+          void apiFetch(`/conversations/${event.conversation.id}/read`, { method: 'POST' }).catch(() => {});
+        }
       }
     });
     socket.on('conversation.updated', (updated: Conversation) => {
       setConversations((current) => sortConversations(current.map((item) => item.id === updated.id ? { ...item, ...updated } : item)));
     });
-    socket.on('message.updated', () => {
-      if (selectedIdRef.current) void loadMessages(selectedIdRef.current);
+    // Parchear en memoria en vez de recargar el hilo. Este evento se publica por EMPRESA
+    // y WhatsApp emite tres por mensaje (SENT -> DELIVERED -> READ), así que recargar
+    // disparaba, por cada agente conectado y por cada acuse de cualquier conversación,
+    // una consulta de 500 mensajes con tres joins más una escritura.
+    // Los emisores mandan dos formas: el mensaje completo (con `id`) o solo
+    // `{ waMessageId, status }` desde el acuse de WhatsApp, de ahí las dos búsquedas.
+    socket.on('message.updated', (payload: (Partial<Message> & { waMessageId?: string }) | null) => {
+      if (!payload) return;
+      setMessages((current) => {
+        const index = payload.id
+          ? current.findIndex((item) => item.id === payload.id)
+          : payload.waMessageId
+            ? current.findIndex((item) => item.waMessageId === payload.waMessageId)
+            : -1;
+        // No está en el hilo abierto: devolver la misma referencia evita el re-render.
+        if (index === -1) return current;
+        const next = [...current];
+        next[index] = { ...next[index], ...payload };
+        return next;
+      });
     });
     socket.on('message.reaction', (event: { messageId: string; reactorJid: string; emoji: string; reaction?: Reaction }) => {
       setMessages((current) => current.map((item) => {
@@ -597,11 +628,18 @@ export default function ConversationsPage() {
     return () => { socket.disconnect(); };
   }, [loadMessages, loadConversations]);
 
-  // Keep the thread pinned to the latest message — on conversation switch and on every new message.
+  // Anclar al último mensaje SOLO si el agente ya estaba abajo. Antes se forzaba en cada
+  // cambio de `messages`, y eso incluye cosas que no son mensajes nuevos: cada acuse de
+  // entrega o de lectura emite `message.updated`, que recarga el hilo completo (ver el
+  // socket más abajo). A quien estaba leyendo historial lo tiraba al final sin que
+  // hubiera tocado nada — y cuanto más activo el chat, más seguido.
   useEffect(() => {
     const el = messageStreamRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && anclarAbajoRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  // Al abrir otra conversación siempre se arranca al final, sin heredar el estado anterior.
+  useEffect(() => { anclarAbajoRef.current = true; }, [selectedId]);
 
   // The emoji picker is teleported to a portal on <body> with `position: fixed`,
   // positioned from the toggle button's own coordinates — `.chat-layout` clips
@@ -992,11 +1030,47 @@ export default function ConversationsPage() {
     } finally { setSending(false); }
   };
 
+  // Última red de seguridad antes de enviar: expande los "/shortcut" que hayan quedado
+  // escritos en crudo. El autocompletado solo se dispara mientras el token es válido
+  // (`findSlashToken` rechaza espacios y tildes), así que escribir el comando de memoria
+  // y pulsar Enter mandaba el "/comando" tal cual al cliente.
+  // Solo se expande lo que coincide EXACTO con un shortcut activo: un "/algo" que no es
+  // comando se envía como texto normal, que es justo lo que se espera.
+  const expandirRespuestasRapidas = (value: string) => {
+    const activos = quickReplies.filter((qr) => qr.active);
+    if (!activos.length) return { texto: value, conMedia: null as QuickReply | null };
+    let conMedia: QuickReply | null = null;
+    const texto = value.replace(/(^|\s)\/([a-z0-9_-]+)/gi, (match, prefijo: string, token: string) => {
+      const qr = activos.find((item) => item.shortcut.toLowerCase() === token.toLowerCase());
+      if (!qr) return match;
+      // Un solo adjunto por envío: si ya hay uno tomado, el resto se deja intacto para
+      // que el agente vea que no se expandió en vez de perder silenciosamente el archivo.
+      if (qr.mediaUrl) {
+        if (conMedia) return match;
+        conMedia = qr;
+      }
+      return prefijo + (qr.content || '');
+    });
+    return { texto, conMedia };
+  };
+
   const send = async () => {
     if (!selectedId || sending) return;
-    if (pendingFile) { await sendMediaFile(pendingFile, { caption: text.trim() || undefined }); return; }
+    if (pendingFile) { await sendMediaFile(pendingFile, { caption: expandirRespuestasRapidas(text).texto.trim() || undefined }); return; }
     if (!text.trim()) return;
-    const body = text.trim();
+    const { texto: expandido, conMedia } = expandirRespuestasRapidas(text);
+    if (conMedia) {
+      const qr = conMedia as QuickReply;
+      setQrSendingId(qr.id);
+      try {
+        const file = await fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream');
+        await sendMediaFile(file, { caption: expandido.trim() || undefined });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida');
+      } finally { setQrSendingId(null); }
+      return;
+    }
+    const body = expandido.trim();
     const quotedMessage = replyToMessage;
     setText('');
     setReplyToMessage(null);
@@ -1407,16 +1481,12 @@ export default function ConversationsPage() {
     });
   };
 
-  const sendQuickReplyFromTray = async (qr: QuickReply) => {
+  // Delega en el autocompletado en vez de insertar a secas: esta versión insertaba el
+  // contenido en el cursor SIN borrar el "/token" que el agente ya hubiera tecleado, así
+  // que abrir la bandeja después de escribir "/com" dejaba el comando pegado al mensaje.
+  const sendQuickReplyFromTray = (qr: QuickReply) => {
     setShowQuickReplyTray(false);
-    if (!qr.mediaUrl) { insertQuickReplyContent(qr.content || ''); return; }
-    setQrSendingId(qr.id);
-    try {
-      const file = await fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream');
-      attachFile(file);
-      if (qr.content) insertQuickReplyContent(qr.content);
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida'); }
-    finally { setQrSendingId(null); }
+    applyQuickReplyAutocomplete(qr);
   };
 
   const resetQuickReplyForm = () => {
@@ -2029,7 +2099,16 @@ export default function ConversationsPage() {
                 <button ref={chatHeaderMenuButtonRef} className="icon-button chat-header-more-btn" onClick={() => setChatHeaderMenuOpen((v) => !v)} title="Más opciones"><MoreHorizontal size={17} /></button>
               </div>
             </header>
-            <div className="message-stream" ref={messageStreamRef}>
+            <div
+              className="message-stream"
+              ref={messageStreamRef}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                // 80px de margen: el navegador redondea y con `scroll-behavior: smooth`
+                // el valor final puede quedar un par de píxeles corto del fondo real.
+                anclarAbajoRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              }}
+            >
               <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
                 {messages.map((message) => (
                   <div

@@ -46,6 +46,14 @@ export class ConversationsController {
     return this.service.messages(user, id);
   }
 
+  // Marcar leído sin traerse el hilo. Antes el único sitio que ponía `unreadCount` a 0
+  // era `messages()`, así que el panel tenía que recargar los 500 mensajes solo para
+  // resetear un contador — y lo hacía en cada acuse de entrega de toda la empresa.
+  @Post(':id/read')
+  markRead(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.markRead(user, id);
+  }
+
   @Post('start')
   start(@CurrentUser() user: JwtUser, @Body() dto: StartConversationDto) {
     return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text, user.sub, dto.name);

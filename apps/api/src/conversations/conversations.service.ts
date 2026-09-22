@@ -241,6 +241,15 @@ export class ConversationsService {
     return items.reverse();
   }
 
+  // Resetea el contador sin cargar el hilo, para que el panel pueda marcar leído cuando
+  // llega un mensaje a la conversación que el agente ya tiene abierta. `getOwned` valida
+  // la pertenencia a la empresa antes de escribir.
+  async markRead(user: JwtUser, conversationId: string) {
+    await this.getOwned(user, conversationId);
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
+    return { ok: true };
+  }
+
   async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string, quotedMessageId?: string) {
     const conversation = await this.getOwned(user, conversationId);
     return this.deliverText(user.companyId, conversation, text, sentByUserId, await this.resolveQuote(user.companyId, conversationId, quotedMessageId));
