@@ -244,7 +244,22 @@ export class SessionManager {
 
     socket.ev.on('messages.update', async (updates) => {
       for (const update of updates) {
-        if (!update.key.id || typeof update.update.status !== 'number') continue;
+        if (!update.key.id) continue;
+
+        // Baileys entrega las ediciones como `messages.update`, no como
+        // `messages.upsert`. En este caso `key.id` es el waMessageId del mensaje
+        // ORIGINAL y el contenido nuevo llega dentro de
+        // `update.message.editedMessage.message`. Debe procesarse antes del filtro
+        // de estados porque una edición no trae `update.status`.
+        const editedContent = update.update.message?.editedMessage?.message;
+        if (editedContent) {
+          await this.persistEdit(instanceId, update.key.id, editedContent).catch((error) => {
+            childLogger.error({ err: error, messageId: update.key.id }, 'failed to persist edited message');
+          });
+          continue;
+        }
+
+        if (typeof update.update.status !== 'number') continue;
         const status = this.mapBaileysStatus(update.update.status);
         if (!status) continue;
         const now = new Date();
