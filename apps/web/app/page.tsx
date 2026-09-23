@@ -5,9 +5,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Bot,
+  CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
+  Code2,
+  CreditCard,
   Database,
   Kanban,
   KeyRound,
@@ -19,13 +22,14 @@ import {
   RefreshCw,
   Rocket,
   Settings2,
+  ShoppingBag,
   ShieldCheck,
   Sparkles,
   UserCog,
   Users,
   Wifi,
 } from 'lucide-react';
-import { BrandIcon } from '@/components/brand-mark';
+import { BrandIcon, ClieneraMark } from '@/components/brand-mark';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
 
 // Anima cada tarjeta/encabezado la primera vez que entra en pantalla (una sola vez — se
@@ -110,6 +114,13 @@ const reliability = [
   { icon: Database, title: 'Sesión persistida en base de datos', body: 'Las credenciales y llaves de tu WhatsApp viven en PostgreSQL, no en archivos sueltos que se pierden al reiniciar un servidor.' },
   { icon: Plug, title: 'Conexión directa con tu ERP', body: 'Endpoint compatible con integraciones PHP existentes, más una API con APP KEY / AUTH KEY para lo que ya tengas armado.' },
   { icon: ShieldCheck, title: 'Multiempresa desde el diseño', body: 'Cada empresa vive aislada por diseño — no es una capa agregada después, es como está construido el sistema.' },
+];
+
+const integrations = [
+  { icon: Code2, label: 'API REST', title: 'ERP y sistemas internos', body: 'Conecta tus herramientas actuales con APP KEY y AUTH KEY, sin rehacer tu operación.', tone: 'blue' },
+  { icon: ShoppingBag, label: 'Ecommerce', title: 'Pedidos desde WhatsApp', body: 'Responde consultas, acompaña pedidos y convierte conversaciones en ventas.', tone: 'pink' },
+  { icon: CalendarDays, label: 'Google Calendar', title: 'Agenda con tu equipo', body: 'Crea y consulta citas desde una conversación, sin cambiar de herramienta.', tone: 'green' },
+  { icon: CreditCard, label: 'Pagos', title: 'Confirma cada operación', body: 'Conecta el estado de tus pagos con los flujos que atienden a tus clientes.', tone: 'orange' },
 ];
 
 const faqs = [
@@ -271,11 +282,11 @@ export default function LandingPage() {
       <header className={`landing-nav ${navScrolled ? 'scrolled' : ''}`}>
         <div className="landing-nav-inner">
           <button type="button" className="landing-brand landing-brand-link" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="landing-brand-mark"><BrandIcon size={24} /></div>
-            <strong>BrainWSP</strong>
+            <span className="landing-vector-logo"><ClieneraMark size={34} /><strong>clienera</strong></span>
           </button>
           <nav className="landing-nav-links">
             <a href="#producto">Producto</a>
+            <a href="#integraciones">Integraciones</a>
             <a href="#confiabilidad">Confiabilidad</a>
             <a href="#precios">Precios</a>
             <a href="#faq">Preguntas</a>
@@ -366,6 +377,35 @@ export default function LandingPage() {
                 </div>
               </Reveal>
             ))}
+          </div>
+        </section>
+
+        <section className="landing-section landing-integrations" id="integraciones">
+          <Reveal className="landing-section-head">
+            <span className="landing-eyebrow">Integraciones</span>
+            <h2>Conecta clienera con lo que ya usas</h2>
+            <p>Tu equipo conserva sus herramientas y suma una capa de atención por WhatsApp, automatizada y medible.</p>
+          </Reveal>
+          <div className="landing-integrations-layout">
+            <Reveal className="landing-integration-visual">
+              <div className="landing-integration-ring ring-one" />
+              <div className="landing-integration-ring ring-two" />
+              <div className="landing-integration-core"><span>c</span><small>clienera</small></div>
+              <span className="landing-integration-node node-api"><Code2 size={16} /></span>
+              <span className="landing-integration-node node-calendar"><CalendarDays size={16} /></span>
+              <span className="landing-integration-node node-shop"><ShoppingBag size={16} /></span>
+              <span className="landing-integration-node node-pay"><CreditCard size={16} /></span>
+            </Reveal>
+            <div className="landing-integration-grid">
+              {integrations.map((item, i) => (
+                <Reveal className="landing-integration-card" delay={i * 80} key={item.title}>
+                  <div className={`landing-integration-icon ${item.tone}`}><item.icon size={19} /></div>
+                  <span>{item.label}</span>
+                  <strong>{item.title}</strong>
+                  <p>{item.body}</p>
+                </Reveal>
+              ))}
+            </div>
           </div>
         </section>
 

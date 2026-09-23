@@ -20,3 +20,13 @@ export function BrandIcon({ size = 34 }: { size?: number }) {
     </svg>
   );
 }
+
+export function ClieneraMark({ size = 38 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden>
+      <path d="M35.8 13.1a16.5 16.5 0 1 0-.2 21.9l-5.5-4.7a9.2 9.2 0 1 1 .1-12.2l5.6-5Z" fill="currentColor" />
+      <path d="m12.3 30.1-2.8 9.6 9.2-4.7-1.8-4.2-4.6-.7Z" fill="currentColor" />
+      <path d="m24 15.2 2.5 6.1 6.1 2.5-6.1 2.5-2.5 6.1-2.5-6.1-6.1-2.5 6.1-2.5 2.5-6.1Z" fill="white" />
+    </svg>
+  );
+}
