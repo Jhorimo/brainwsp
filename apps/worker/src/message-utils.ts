@@ -100,6 +100,26 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
           contacts: (content.contactsArrayMessage?.contacts || []).map((c) => ({ displayName: c.displayName || undefined, vcard: c.vcard || undefined })),
         },
       };
+    // Plantilla enviada por una cuenta de empresa (mensaje con texto fijo y botones).
+    // Llegaba a UNKNOWN y, desde que se descartan los UNKNOWN antes de guardarlos, se perdia
+    // por completo -- el agente ni se enteraba de que la empresa le habia escrito. Se toma
+    // el texto de cualquiera de las tres formas en que WhatsApp la codifica.
+    case 'templateMessage': {
+      const t = content.templateMessage;
+      const text =
+        t?.hydratedTemplate?.hydratedContentText ||
+        t?.hydratedFourRowTemplate?.hydratedContentText ||
+        t?.interactiveMessageTemplate?.body?.text ||
+        '';
+      const title = t?.hydratedTemplate?.hydratedTitleText || t?.hydratedFourRowTemplate?.hydratedTitleText || '';
+      return { type: MessageType.TEXT, body: [title, text].filter(Boolean).join('\n') || '[Plantilla]' };
+    }
+    // Respuesta a un mensaje interactivo (lista o boton nativo) -- no es `buttonsResponseMessage`,
+    // que ya se maneja arriba. Es lo que el cliente elige, asi que el agente tiene que verlo.
+    case 'interactiveResponseMessage': {
+      const r = content.interactiveResponseMessage;
+      return { type: MessageType.TEXT, body: r?.body?.text || r?.nativeFlowResponseMessage?.name || '[Respuesta interactiva]' };
+    }
     default:
       return { type: MessageType.UNKNOWN };
   }

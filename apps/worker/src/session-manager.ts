@@ -26,6 +26,7 @@ import { usePrismaAuthState } from './auth-state.js';
 import { maybeReplyWithAi } from './ai-agent.js';
 import { maybeRunFlow } from './automation-engine.js';
 import { extensionFromMime, extractMessage, jidToPhone } from './message-utils.js';
+import { aBuffer, descifrarEdicion, sinDispositivo } from './secret-edit.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
 
@@ -365,6 +366,20 @@ export class SessionManager {
       return;
     }
 
+    // Edicion CIFRADA: es como la mandan los WhatsApp recientes, y Baileys no la descifra
+    // (no hay una sola referencia a secretEncryptedMessage en su lib/), asi que nunca llega
+    // a `messages.update`. Se procesa aqui y se corta siempre: aunque no se pueda
+    // descifrar, no hay nada mas que mostrar, y seguir de largo la guardaria como UNKNOWN.
+    const cifrada = message.message.secretEncryptedMessage;
+    if (cifrada) {
+      if (cifrada.secretEncType === proto.Message.SecretEncryptedMessage.SecretEncType.MESSAGE_EDIT) {
+        await this.persistSecretEdit(instanceId, message, cifrada).catch((error) => {
+          this.logger.error({ err: error, instanceId, waMessageId: cifrada.targetMessageKey?.id }, 'failed to process encrypted edit');
+        });
+      }
+      return;
+    }
+
     // Reactions and protocol envelopes (revokes, app-state sync notices) ride the
     // same `messages.upsert` stream as real messages. Reactions are already handled by the
     // dedicated `messages.reaction` event above (see persistReaction); neither carries real
@@ -685,6 +700,105 @@ export class SessionManager {
           this.logger.warn({ err: error, conversationId: conversation.id }, 'Automation/AI auto-reply failed');
         });
     }
+  }
+
+  // Descifra una edicion `secretEncryptedMessage` y la aplica con persistEdit. La clave
+  // sale del `messageSecret` del mensaje ORIGINAL, que se guarda dentro de
+  // metadata.rawContent al recibirlo -- si ese mensaje es anterior a que se guardara, o
+  // WhatsApp no lo mando con secreto, no hay forma de descifrar y solo se registra.
+  //
+  // Cada rama de fallo deja un log con QUE faltaba (sin material criptografico): asi un
+  // fallo en produccion dice por si mismo si fue el mensaje, el secreto o los JID.
+  private async persistSecretEdit(instanceId: string, message: WAMessage, cifrada: proto.Message.ISecretEncryptedMessage) {
+    const idOriginal = cifrada.targetMessageKey?.id;
+    if (!idOriginal || !cifrada.encPayload || !cifrada.encIv) {
+      this.logger.warn({ instanceId, idOriginal, tienePayload: !!cifrada.encPayload, tieneIv: !!cifrada.encIv }, 'edicion cifrada incompleta, ignorada');
+      return;
+    }
+
+    const original = await this.prisma.message.findUnique({
+      where: { instanceId_waMessageId: { instanceId, waMessageId: idOriginal } },
+    });
+    if (!original) {
+      this.logger.warn({ instanceId, waMessageId: idOriginal }, 'edicion cifrada de un mensaje que no esta en la base, ignorada');
+      return;
+    }
+
+    let secreto: Buffer | null = null;
+    try {
+      const raw = (original.metadata as { rawContent?: string } | null)?.rawContent;
+      const parsed = raw ? (JSON.parse(raw) as { messageContextInfo?: { messageSecret?: unknown } }) : null;
+      secreto = aBuffer(parsed?.messageContextInfo?.messageSecret);
+    } catch {
+      secreto = null;
+    }
+    if (!secreto) {
+      this.logger.warn({ instanceId, waMessageId: idOriginal, tieneRawContent: !!(original.metadata as { rawContent?: string } | null)?.rawContent }, 'edicion cifrada: el mensaje original no guardo su messageSecret, no se puede descifrar');
+      return;
+    }
+
+    // Todas las formas de JID que la conversacion permite. WhatsApp derivo la clave con una
+    // de ellas (@lid o telefono, con o sin sufijo de dispositivo) y desde aqui no se sabe
+    // cual; el tag de GCM garantiza que solo la correcta puede descifrar.
+    const contacto = await this.prisma.contact.findUnique({ where: { id: original.contactId }, select: { waId: true, phone: true } });
+    const emisores = [
+      ...new Set(
+        [
+          message.key.participant,
+          message.key.participantAlt,
+          message.key.remoteJid?.endsWith('@g.us') ? null : message.key.remoteJid,
+          message.key.remoteJidAlt,
+          cifrada.targetMessageKey?.participant,
+          cifrada.targetMessageKey?.remoteJid?.endsWith('@g.us') ? null : cifrada.targetMessageKey?.remoteJid,
+          contacto?.waId,
+          contacto?.phone ? `${contacto.phone}@s.whatsapp.net` : null,
+        ]
+          .map(sinDispositivo)
+          .filter((jid): jid is string => !!jid),
+      ),
+    ];
+
+    const resultado = descifrarEdicion({
+      encPayload: cifrada.encPayload,
+      encIv: cifrada.encIv,
+      secreto,
+      idOriginal,
+      emisoresOriginal: emisores,
+      emisoresEdicion: emisores,
+    });
+    if (!resultado) {
+      // TEMPORAL -- captura para analizar offline por que no descifro. Solo trae el texto
+      // cifrado y los identificadores, NUNCA el messageSecret: esa es la clave, y el log no
+      // es donde debe vivir. Se recupera de la base (metadata.rawContent del mensaje
+      // original) al momento de analizar. Quitar cuando el descifrado quede resuelto.
+      this.logger.warn(
+        {
+          instanceId,
+          waMessageId: idOriginal,
+          candidatos: emisores.length,
+          captura: {
+            encPayload: Buffer.from(cifrada.encPayload).toString('base64'),
+            encIv: Buffer.from(cifrada.encIv).toString('base64'),
+            secEncType: cifrada.secretEncType,
+            targetMessageKey: cifrada.targetMessageKey,
+            key: message.key,
+            emisoresProbados: emisores,
+          },
+        },
+        'edicion cifrada: ninguna combinacion de clave la descifro',
+      );
+      return;
+    }
+
+    const contenido = proto.Message.decode(resultado.plano);
+    // Si el texto descifrado no es algo que extractMessage sepa leer, NO se marca como
+    // editado: se mostraria el lapiz sin que el texto haya cambiado.
+    if (extractMessage({ key: {}, message: contenido } as WAMessage).type === MessageType.UNKNOWN) {
+      this.logger.warn({ instanceId, waMessageId: idOriginal, etiqueta: resultado.etiqueta, claves: Object.keys(contenido.toJSON()) }, 'edicion cifrada descifrada pero su contenido no es reconocible');
+      return;
+    }
+    this.logger.info({ instanceId, waMessageId: idOriginal, etiqueta: resultado.etiqueta }, 'edicion cifrada descifrada');
+    await this.persistEdit(instanceId, idOriginal, contenido);
   }
 
   // Persiste la edicion de un mensaje ya guardado. `waMessageId` es el id del mensaje
