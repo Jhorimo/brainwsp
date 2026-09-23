@@ -767,34 +767,23 @@ export class SessionManager {
       emisoresEdicion: emisores,
     });
     if (!resultado) {
-      // TEMPORAL -- captura para analizar offline por que no descifro. Solo trae el texto
-      // cifrado y los identificadores, NUNCA el messageSecret: esa es la clave, y el log no
-      // es donde debe vivir. Se recupera de la base (metadata.rawContent del mensaje
-      // original) al momento de analizar. Quitar cuando el descifrado quede resuelto.
-      this.logger.warn(
-        {
-          instanceId,
-          waMessageId: idOriginal,
-          candidatos: emisores.length,
-          captura: {
-            encPayload: Buffer.from(cifrada.encPayload).toString('base64'),
-            encIv: Buffer.from(cifrada.encIv).toString('base64'),
-            secEncType: cifrada.secretEncType,
-            targetMessageKey: cifrada.targetMessageKey,
-            key: message.key,
-            emisoresProbados: emisores,
-          },
-        },
-        'edicion cifrada: ninguna combinacion de clave la descifro',
-      );
+      this.logger.warn({ instanceId, waMessageId: idOriginal, candidatos: emisores.length, largoPayload: cifrada.encPayload.length }, 'edicion cifrada: ninguna combinacion de clave la descifro');
       return;
     }
 
-    const contenido = proto.Message.decode(resultado.plano);
+    // Lo descifrado no es el mensaje nuevo a secas: WhatsApp lo manda envuelto en un
+    // protocolMessage MESSAGE_EDIT, y el texto nuevo esta en su `editedMessage`. Se
+    // comprobo con una edicion real; sin desenvolverlo extractMessage solo veria un
+    // protocolMessage y lo daria por irreconocible.
+    const descifrado = proto.Message.decode(resultado.plano);
+    const envuelto = descifrado.protocolMessage?.type === proto.Message.ProtocolMessage.Type.MESSAGE_EDIT
+      ? descifrado.protocolMessage.editedMessage
+      : null;
+    const contenido = envuelto ?? descifrado;
     // Si el texto descifrado no es algo que extractMessage sepa leer, NO se marca como
     // editado: se mostraria el lapiz sin que el texto haya cambiado.
     if (extractMessage({ key: {}, message: contenido } as WAMessage).type === MessageType.UNKNOWN) {
-      this.logger.warn({ instanceId, waMessageId: idOriginal, etiqueta: resultado.etiqueta, claves: Object.keys(contenido.toJSON()) }, 'edicion cifrada descifrada pero su contenido no es reconocible');
+      this.logger.warn({ instanceId, waMessageId: idOriginal, etiqueta: resultado.etiqueta, claves: Object.keys(contenido) }, 'edicion cifrada descifrada pero su contenido no es reconocible');
       return;
     }
     this.logger.info({ instanceId, waMessageId: idOriginal, etiqueta: resultado.etiqueta }, 'edicion cifrada descifrada');

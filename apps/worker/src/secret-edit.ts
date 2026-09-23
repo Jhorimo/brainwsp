@@ -12,10 +12,14 @@ import { createDecipheriv, createHmac } from 'node:crypto';
 
 const GCM_TAG_LENGTH = 16;
 
-// La etiqueta exacta de MESSAGE_EDIT no esta documentada en ninguna fuente que se pueda
-// consultar aqui. GCM autentica, asi que probar las variantes es seguro: solo la correcta
-// pasa la verificacion del tag, una incorrecta no puede devolver texto falso.
-const ETIQUETAS = ['Message Edit', 'Msg Edit', 'MessageEdit', 'Edit'];
+// Verificado con una edicion real capturada en produccion (2026-09-23), probando miles de
+// variantes offline: la etiqueta es "Message Edit", la clave se deriva igual que en las
+// encuestas, y el AAD de GCM va VACIO -- no `idOriginal\0emisor` como en los votos de
+// encuesta. El emisor del mensaje original y el de la edicion fueron ambos el @lid del
+// cliente, pero segun la conversacion podria ser la forma de telefono, por eso se prueban
+// todas las que la conversacion permite (ver `descifrarEdicion`).
+const ETIQUETA = 'Message Edit';
+const AAD_VACIO = Buffer.alloc(0);
 
 function derivarClave(secreto: Uint8Array, info: Buffer): Buffer {
   const prk = createHmac('sha256', Buffer.alloc(32)).update(secreto).digest();
@@ -54,22 +58,18 @@ export function descifrarEdicion(args: {
   const iv = Buffer.from(args.encIv);
   if (payload.length <= GCM_TAG_LENGTH) return null;
 
-  for (const etiqueta of ETIQUETAS) {
-    for (const emisorOriginal of args.emisoresOriginal) {
-      for (const emisorEdicion of args.emisoresEdicion) {
-        const info = Buffer.concat([
-          Buffer.from(args.idOriginal),
-          Buffer.from(emisorOriginal),
-          Buffer.from(emisorEdicion),
-          Buffer.from(etiqueta),
-        ]);
-        const clave = derivarClave(args.secreto, info);
-        const aad = Buffer.from(`${args.idOriginal}\u0000${emisorEdicion}`);
-        try {
-          return { plano: gcmDescifrar(payload, clave, iv, aad), etiqueta, emisorOriginal, emisorEdicion };
-        } catch {
-          // tag invalido: esta combinacion no era; se sigue con la siguiente
-        }
+  for (const emisorOriginal of args.emisoresOriginal) {
+    for (const emisorEdicion of args.emisoresEdicion) {
+      const info = Buffer.concat([
+        Buffer.from(args.idOriginal),
+        Buffer.from(emisorOriginal),
+        Buffer.from(emisorEdicion),
+        Buffer.from(ETIQUETA),
+      ]);
+      try {
+        return { plano: gcmDescifrar(payload, derivarClave(args.secreto, info), iv, AAD_VACIO), etiqueta: ETIQUETA, emisorOriginal, emisorEdicion };
+      } catch {
+        // tag invalido: esta combinacion de JID no era; se sigue con la siguiente
       }
     }
   }
