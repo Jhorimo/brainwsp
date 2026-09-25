@@ -647,6 +647,19 @@ export default function ConversationsPage() {
     if (el && anclarAbajoRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // Las imágenes, videos y stickers no traen su alto reservado: se cargan DESPUÉS de que el
+  // efecto de arriba ya bajó al fondo, el hilo crece y el agente queda en un mensaje de días
+  // atrás (crecer no dispara `scroll`, así que nada lo corregía). Se re-ancla cada vez que
+  // el contenido cambia de alto, pero solo si el agente seguía abajo.
+  useEffect(() => {
+    const el = messageStreamRef.current;
+    const inner = el?.firstElementChild;
+    if (!el || !inner || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => { if (anclarAbajoRef.current) el.scrollTop = el.scrollHeight; });
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [selectedId, conversations.some((c) => c.id === selectedId)]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Al abrir otra conversación siempre se arranca al final, sin heredar el estado anterior.
   useEffect(() => { anclarAbajoRef.current = true; }, [selectedId]);
 
