@@ -99,7 +99,10 @@ jobs:
                       PREV_WRK=$(docker inspect --format '{{.Image}}' brainwsp-worker-1 2>/dev/null || true)
                       echo "Version actual -> api=$PREV_API web=$PREV_WEB worker=$PREV_WRK"
 
-                      $COMPOSE pull
+                      # Solo las imagenes propias. postgres/redis van fijadas por tag y minio
+                      # ya esta en el servidor: quay.io/minio/minio devuelve "unauthorized"
+                      # (MinIO dejo de publicarla) y un solo pull fallido aborta el despliegue.
+                      $COMPOSE pull api web worker
 
                       # 2. Aplicar las migraciones en un contenedor aparte (mismo script que
                       #    corre el CMD del contenedor api, ver packages/database/migrate-deploy.sh).
