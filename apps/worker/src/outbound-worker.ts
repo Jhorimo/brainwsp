@@ -109,7 +109,9 @@ export class OutboundWorker {
           const msgId = await socket.relayMessage(message.contact.waId, buttonsContent, {});
           response = { key: { id: msgId, remoteJid: message.contact.waId, fromMe: true }, message: buttonsContent } as WAMessage;
         } else {
-          response = await socket.sendMessage(message.contact.waId, { text: message.body || '' }, options);
+          // `mentions` (JIDs) es lo que hace tocable el "@telefono" del texto en el cliente.
+          const mentioned = ((message.metadata as { mentions?: { jid?: string }[] } | null)?.mentions || []).map((m) => m.jid).filter((j): j is string => !!j);
+          response = await socket.sendMessage(message.contact.waId, { text: message.body || '', ...(mentioned.length ? { mentions: mentioned } : {}) }, options);
         }
       } else if (message.type === MessageType.IMAGE) {
         if (!message.mediaUrl) throw new Error('La imagen no tiene URL');

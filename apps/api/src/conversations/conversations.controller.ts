@@ -41,6 +41,12 @@ export class ConversationsController {
     return this.service.list(user, status, from, to, q, departmentIds, projectIds, stageIds, tagIds, contactsOnly);
   }
 
+  // Antes de las rutas ':id' para que "contact-mentions" no se lea como un id.
+  @Get('contact-mentions')
+  contactMentions(@CurrentUser() user: JwtUser, @Query('q') q?: string) {
+    return this.service.mentionContacts(user, q);
+  }
+
   @Get(':id/messages')
   messages(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.messages(user, id);
@@ -61,7 +67,7 @@ export class ConversationsController {
 
   @Post(':id/messages')
   send(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SendAgentMessageDto) {
-    return this.service.sendText(user, id, dto.message, user.sub, dto.quotedMessageId);
+    return this.service.sendText(user, id, dto.message, user.sub, dto.quotedMessageId, dto.mentions);
   }
 
   @Post(':id/messages/sticker')

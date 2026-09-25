@@ -1,6 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
-import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateNested } from 'class-validator';
+
+export class MentionDto {
+  @IsUUID()
+  contactId!: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  label!: string;
+}
 
 export class SendAgentMessageDto {
   @ApiProperty({ example: 'Hola, le envío su comprobante.' })
@@ -12,6 +23,14 @@ export class SendAgentMessageDto {
   @IsOptional()
   @IsUUID()
   quotedMessageId?: string;
+
+  @ApiPropertyOptional({ description: 'Contactos mencionados con "@". `label` es el texto tal como quedó en el mensaje (p. ej. "@Juan Pérez").' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => MentionDto)
+  mentions?: MentionDto[];
 }
 
 export class StartConversationDto {

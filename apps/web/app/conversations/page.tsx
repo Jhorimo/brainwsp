@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -34,7 +34,7 @@ type Conversation = {
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }> };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ phone: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }> };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
@@ -375,6 +375,15 @@ export default function ConversationsPage() {
   const [qrAutocompleteOpen, setQrAutocompleteOpen] = useState(false);
   const [qrAutocompleteMatches, setQrAutocompleteMatches] = useState<QuickReply[]>([]);
   const [qrAutocompleteIndex, setQrAutocompleteIndex] = useState(0);
+  // Popover "@" del composer: null = cerrado, string = lo escrito tras la "@".
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionItems, setMentionItems] = useState<Contact[]>([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const mentionReqRef = useRef(0);
+  const mentionListRef = useRef<HTMLDivElement>(null);
+  // Menciones puestas con "@": el texto lleva "@Nombre"; el servidor lo cambia por "@telefono".
+  const mentionsRef = useRef<Array<{ contactId: string; label: string }>>([]);
   const [emojiPos, setEmojiPos] = useState<{ top: number; left: number } | null>(null);
   const emojiPopoverRef = useRef<HTMLDivElement>(null);
   const [recording, setRecording] = useState(false);
@@ -723,7 +732,25 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [showQuickReplyTray]);
 
-  useEffect(() => { setQrAutocompleteOpen(false); resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); }, [selectedId]);
+  // Busca contactos para el "@". El contador descarta respuestas viejas: sin él, una
+  // respuesta lenta de "@ju" pisaría a la de "@jua". El debounce solo aplica al escribir.
+  useEffect(() => {
+    const id = ++mentionReqRef.current;
+    if (mentionQuery === null) { setMentionItems([]); setMentionLoading(false); return; }
+    setMentionLoading(true);
+    const timer = setTimeout(() => {
+      apiFetch<Contact[]>(`/conversations/contact-mentions?q=${encodeURIComponent(mentionQuery)}`)
+        .then((rows) => { if (id !== mentionReqRef.current) return; setMentionItems(rows); setMentionIndex(0); setMentionLoading(false); })
+        .catch(() => { if (id !== mentionReqRef.current) return; setMentionItems([]); setMentionLoading(false); });
+    }, mentionQuery ? 150 : 0);
+    return () => clearTimeout(timer);
+  }, [mentionQuery]);
+
+  useEffect(() => {
+    mentionListRef.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+  }, [mentionIndex, mentionItems]);
+
+  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); mentionsRef.current = []; resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); }, [selectedId]);
 
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
@@ -1054,6 +1081,8 @@ export default function ConversationsPage() {
     return { texto, conMedia };
   };
 
+  const mentionOpen = mentionQuery !== null && mentionItems.length > 0;
+
   const send = async () => {
     if (!selectedId || sending) return;
     if (pendingFile) { await sendMediaFile(pendingFile, { caption: expandirRespuestasRapidas(text).texto.trim() || undefined }); return; }
@@ -1071,12 +1100,14 @@ export default function ConversationsPage() {
       return;
     }
     const body = expandido.trim();
+    const mentions = mentionsRef.current.filter((m) => body.includes(m.label));
     const quotedMessage = replyToMessage;
     setText('');
     setReplyToMessage(null);
     setSending(true);
     try {
-      const created = await apiFetch<Message>(`/conversations/${selectedId}/messages`, { method: 'POST', body: JSON.stringify({ message: body, quotedMessageId: quotedMessage?.id }) });
+      const created = await apiFetch<Message>(`/conversations/${selectedId}/messages`, { method: 'POST', body: JSON.stringify({ message: body, quotedMessageId: quotedMessage?.id, ...(mentions.length ? { mentions } : {}) }) });
+      mentionsRef.current = [];
       setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
       void loadConversations();
     } catch (err) {
@@ -1384,12 +1415,13 @@ export default function ConversationsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo enviar el sticker'); }
   };
 
-  const sendContactCard = async (contactId: string) => {
-    if (!selectedId) return;
+  const sendContactCard = async (contactId: string): Promise<boolean> => {
+    if (!selectedId) return false;
     setShareContactOpen(false);
     try {
       await apiFetch(`/conversations/${selectedId}/messages/contact`, { method: 'POST', body: JSON.stringify({ contactId }) });
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo compartir el contacto'); }
+      return true;
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo compartir el contacto'); return false; }
   };
 
   const uploadSticker = async (file: File) => {
@@ -1425,10 +1457,51 @@ export default function ConversationsPage() {
     return { start: slashIndex, query: query.toLowerCase() };
   };
 
+  // Igual que el "/": la "@" solo cuenta al inicio o tras un espacio, así que un correo
+  // (juan@x.com) no abre nada. El texto tras la "@" puede llevar espacios (nombres
+  // compuestos) pero no empezar con uno ni pasar de 30 caracteres.
+  const findAtToken = (value: string, caret: number): { start: number; query: string } | null => {
+    const uptoCaret = value.slice(0, caret);
+    const atIndex = uptoCaret.lastIndexOf('@');
+    if (atIndex === -1) return null;
+    const before = atIndex === 0 ? '' : uptoCaret[atIndex - 1];
+    if (before && !/\s/.test(before)) return null;
+    const query = uptoCaret.slice(atIndex + 1);
+    if (!/^(\S[^@\n]{0,29})?$/.test(query)) return null;
+    return { start: atIndex, query };
+  };
+
+  // Un solo popover a la vez: si hay "/" y "@", gana el que quedó más cerca del cursor.
+  const syncMention = (value: string, caret: number) => {
+    const at = findAtToken(value, caret);
+    const slash = findSlashToken(value, caret);
+    const active = at && (!slash || at.start > slash.start) ? at : null;
+    setMentionQuery(active ? active.query : null);
+    return active;
+  };
+
+  const applyMention = (contact: Contact) => {
+    const textarea = textareaRef.current;
+    const caret = textarea?.selectionStart ?? text.length;
+    const token = findAtToken(text, caret);
+    if (!token) { setMentionQuery(null); return; }
+    const label = `@${displayName(contact)}`;
+    const antes = text.slice(0, token.start) + label + ' ';
+    const despues = text.slice(caret).replace(/^ /, '');
+    setText(antes + despues);
+    if (!mentionsRef.current.some((m) => m.contactId === contact.id)) mentionsRef.current.push({ contactId: contact.id, label });
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(antes.length, antes.length);
+    });
+  };
+
   const onComposerTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setText(value);
     const caret = e.target.selectionStart ?? value.length;
+    if (syncMention(value, caret)) { setQrAutocompleteOpen(false); return; }
     const token = findSlashToken(value, caret);
     const matches = token ? quickReplies.filter((qr) => qr.active && qr.shortcut.startsWith(token.query)) : [];
     if (token && matches.length) {
@@ -1946,8 +2019,17 @@ export default function ConversationsPage() {
           </>
         );
       }
-      default:
-        return formatMessageText(message.body || message.caption || message.type, openNewChatWithPhone);
+      default: {
+        const texto = message.body || message.caption || message.type;
+        const menciones = message.metadata?.mentions;
+        if (!menciones?.length) return formatMessageText(texto, openNewChatWithPhone);
+        // "@telefono" (lo que viaja a WhatsApp) se muestra como "@Nombre" resaltado.
+        const porTelefono = new Map(menciones.map((m) => [m.phone, m.name]));
+        return texto.split(/(@\d{6,15})/).map((parte, i) => {
+          const nombre = parte.startsWith('@') ? porTelefono.get(parte.slice(1)) : undefined;
+          return nombre ? <span key={i} className="message-mention">@{nombre}</span> : <Fragment key={i}>{formatMessageText(parte, openNewChatWithPhone)}</Fragment>;
+        });
+      }
     }
   };
 
@@ -2198,6 +2280,25 @@ export default function ConversationsPage() {
             <div className="chat-composer">
               <input ref={fileInputRef} type="file" multiple hidden accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={onFileChange} />
               <input ref={stickerFileInputRef} type="file" hidden accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadSticker(file); }} />
+              {mentionOpen && (
+                <div className="quick-reply-autocomplete mention-autocomplete" ref={mentionListRef} role="listbox">
+                  {mentionItems.map((contact, index) => (
+                    <button
+                      key={contact.id}
+                      role="option"
+                      aria-selected={index === mentionIndex}
+                      className={`quick-reply-autocomplete-item ${index === mentionIndex ? 'active' : ''}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseEnter={() => setMentionIndex(index)}
+                      onClick={() => applyMention(contact)}
+                    >
+                      <div className="chat-avatar">{avatarContent(contact, 13)}</div>
+                      <span className="mention-name">{displayName(contact)}</span>
+                      <span className="quick-reply-autocomplete-title">{contact.phone}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {qrAutocompleteOpen && qrAutocompleteMatches.length > 0 && (
                 <div className="quick-reply-autocomplete">
                   {qrAutocompleteMatches.map((qr, index) => (
@@ -2225,10 +2326,18 @@ export default function ConversationsPage() {
                   <textarea
                     ref={textareaRef}
                     rows={1}
-                    placeholder={pendingFile ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje... ("/" para respuestas rápidas)'}
+                    placeholder={pendingFile ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje... ("/" respuestas rápidas, "@" mencionar)'}
                     value={text}
                     onChange={onComposerTextChange}
+                    onSelect={(e) => { const t = e.currentTarget; syncMention(t.value, t.selectionStart ?? t.value.length); }}
+                    onBlur={() => setMentionQuery(null)}
                     onKeyDown={(e) => {
+                      if (mentionOpen && !e.nativeEvent.isComposing) {
+                        if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionItems.length); return; }
+                        if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionItems.length) % mentionItems.length); return; }
+                        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if (!mentionLoading && mentionItems[mentionIndex]) applyMention(mentionItems[mentionIndex]); return; }
+                        if (e.key === 'Escape') { e.preventDefault(); setMentionQuery(null); return; }
+                      }
                       if (qrAutocompleteOpen && qrAutocompleteMatches.length) {
                         if (e.key === 'ArrowDown') { e.preventDefault(); setQrAutocompleteIndex((i) => (i + 1) % qrAutocompleteMatches.length); return; }
                         if (e.key === 'ArrowUp') { e.preventDefault(); setQrAutocompleteIndex((i) => (i - 1 + qrAutocompleteMatches.length) % qrAutocompleteMatches.length); return; }

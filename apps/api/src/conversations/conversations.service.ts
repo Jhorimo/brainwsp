@@ -250,9 +250,34 @@ export class ConversationsService {
     return { ok: true };
   }
 
-  async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string, quotedMessageId?: string) {
+  async sendText(user: JwtUser, conversationId: string, text: string, sentByUserId?: string, quotedMessageId?: string, mentions?: { contactId: string; label: string }[]) {
     const conversation = await this.getOwned(user, conversationId);
-    return this.deliverText(user.companyId, conversation, text, sentByUserId, await this.resolveQuote(user.companyId, conversationId, quotedMessageId));
+    const resolved = await this.resolveMentions(user.companyId, text, mentions);
+    return this.deliverText(user.companyId, conversation, resolved.text, sentByUserId, await this.resolveQuote(user.companyId, conversationId, quotedMessageId), resolved.mentions);
+  }
+
+  // El panel escribe "@Nombre", pero WhatsApp espera "@<telefono>" en el texto mas el JID en
+  // `mentionedJid` (cada cliente lo pinta con el nombre que tenga guardado). Se resuelve aqui,
+  // con los contactos de ESTA empresa, y no con lo que diga el cliente. Una mencion cuyo
+  // "@Nombre" ya no esta en el texto (el agente lo borro) se descarta.
+  private async resolveMentions(companyId: string, text: string, mentions?: { contactId: string; label: string }[]) {
+    if (!mentions?.length) return { text, mentions: [] as { jid: string; phone: string; name: string }[] };
+    const contacts = await this.prisma.contact.findMany({
+      where: { companyId, id: { in: mentions.map((m) => m.contactId) }, phone: { not: null } },
+      select: { id: true, phone: true },
+    });
+    const phoneById = new Map(contacts.map((c) => [c.id, c.phone as string]));
+    let result = text;
+    const done: { jid: string; phone: string; name: string }[] = [];
+    for (const m of mentions) {
+      const phone = phoneById.get(m.contactId);
+      const label = m.label.startsWith('@') ? m.label : `@${m.label}`;
+      const at = result.indexOf(label);
+      if (!phone || at === -1 || done.some((d) => d.phone === phone)) continue;
+      result = result.slice(0, at) + `@${phone}` + result.slice(at + label.length);
+      done.push({ jid: `${phone}@s.whatsapp.net`, phone, name: label.slice(1) });
+    }
+    return { text: result, mentions: done };
   }
 
   // Agent-initiated first contact: no inbound message exists yet, so the Contact/Conversation
@@ -300,7 +325,7 @@ export class ConversationsService {
 
   // Shared by `sendText` (ownership already verified by `getOwned`) and `startConversation`
   // (owns it implicitly — it just created/upserted the conversation itself).
-  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string, quotedMessageId?: string) {
+  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string, quotedMessageId?: string, mentions: { jid: string; phone: string; name: string }[] = []) {
     const conversationId = conversation.id;
     const message = await this.prisma.message.create({
       data: {
@@ -314,6 +339,7 @@ export class ConversationsService {
         body: text,
         sentByUserId,
         quotedMessageId,
+        ...(mentions.length ? { metadata: { mentions } } : {}),
       },
       include: { quotedMessage: { select: quotedMessageSelect } },
     });
@@ -440,6 +466,26 @@ export class ConversationsService {
       if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     }
     return message;
+  }
+
+  // Lista corta para el popover "@" del composer: contactos con telefono (sin ellos no hay
+  // vCard), sin grupos ni broadcast, de la A a la Z ignorando mayusculas y tildes. Los que
+  // no tienen nombre con letra (solo numeros o simbolos) van al final, por telefono.
+  // Se ordena en SQL porque solo se traen unos pocos: ordenar en el cliente exigiria bajar todos.
+  async mentionContacts(user: JwtUser, q?: string) {
+    const term = q?.trim().slice(0, 60);
+    const like = term ? `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
+    const nombre = Prisma.sql`COALESCE(NULLIF(BTRIM("name"), ''), NULLIF(BTRIM("pushName"), ''))`;
+    const clave = Prisma.sql`translate(lower(${nombre}), 'áéíóúüñ', 'aeiouun')`;
+    return this.prisma.$queryRaw<Array<{ id: string; name: string | null; pushName: string | null; phone: string; waId: string; avatarUrl: string | null }>>(Prisma.sql`
+      SELECT "id", "name", "pushName", "phone", "waId", "avatarUrl"
+      FROM "Contact"
+      WHERE "companyId" = ${user.companyId}
+        AND "phone" IS NOT NULL AND "phone" <> ''
+        AND "waId" NOT LIKE '%@g.us' AND "waId" NOT LIKE '%@broadcast'
+        ${like ? Prisma.sql`AND ("name" ILIKE ${like} OR "pushName" ILIKE ${like} OR "phone" LIKE ${like})` : Prisma.empty}
+      ORDER BY (${clave} ~ '^[a-z]') DESC NULLS LAST, ${clave} ASC NULLS LAST, "phone" ASC
+      LIMIT 8`);
   }
 
   async sendContact(user: JwtUser, conversationId: string, contactId: string, sentByUserId?: string) {

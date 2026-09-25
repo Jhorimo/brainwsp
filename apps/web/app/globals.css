@@ -585,6 +585,7 @@ tr:last-child td { border-bottom: 0; }
 .message-react-trigger { position: absolute; top: -24px; right: 26px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: white; box-shadow: 0 1px 4px rgba(31,47,76,.18); color: #8b99ad; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
 .message-bubble:hover .message-react-trigger { opacity: 1; }
 .message-badge-pin, .message-badge-star { color: #8b99ad; margin-right: 2px; }
+.message-mention { color: #1c6fd1; font-weight: 600; }
 .message-edited { display: inline-flex; align-items: center; gap: 2px; color: #8b99ad; font-style: italic; }
 
 /* "Responder" quote preview shown above a message's own content. */
@@ -707,6 +708,9 @@ tr:last-child td { border-bottom: 0; }
 .quick-reply-autocomplete { position: absolute; bottom: 100%; left: 15px; right: 15px; margin-bottom: 6px; background: white; border-radius: 10px; box-shadow: 0 10px 30px rgba(31,47,76,.25); overflow-y: auto; max-height: 220px; }
 .quick-reply-autocomplete-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; background: none; text-align: left; font-size: 11px; }
 .quick-reply-autocomplete-item.active, .quick-reply-autocomplete-item:hover { background: var(--surface-2); }
+.mention-autocomplete .chat-avatar, .mention-chip-avatar { width: 28px; height: 28px; font-size: 10px; flex-shrink: 0; }
+.mention-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-autocomplete .quick-reply-autocomplete-title { margin-left: auto; padding-left: 8px; flex-shrink: 0; }
 .quick-reply-autocomplete-shortcut { font-weight: 600; color: var(--brand); flex-shrink: 0; }
 .quick-reply-autocomplete-title { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
