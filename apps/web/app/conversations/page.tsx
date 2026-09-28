@@ -34,7 +34,7 @@ type Conversation = {
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ phone: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }> };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }> };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
@@ -660,6 +660,25 @@ export default function ConversationsPage() {
     return () => observer.disconnect();
   }, [selectedId, conversations.some((c) => c.id === selectedId)]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // En el celular la lista y el chat son dos "pantallas" de la misma URL, sin entrada propia
+  // en el historial: el botón Atrás del teléfono (o el gesto) salía de /conversations directo
+  // al dashboard. Se agrega una entrada al abrir el chat para que Atrás la consuma y solo
+  // vuelva a la lista. Se conserva el `history.state` de Next para no romper su router.
+  useEffect(() => {
+    if (!mobileChatOpen || !window.matchMedia('(max-width: 850px)').matches) return;
+    window.history.pushState({ ...(window.history.state || {}), brainwspChat: true }, '', window.location.href);
+    const onPop = () => setMobileChatOpen(false);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [mobileChatOpen]);
+
+  const closeMobileChat = () => {
+    // Si la entrada que agregamos sigue arriba, se retira con history.back() (dispara popstate
+    // y cierra el chat); así el historial no acumula entradas al ir y venir de la lista.
+    if (window.history.state?.brainwspChat) window.history.back();
+    else setMobileChatOpen(false);
+  };
+
   // Al abrir otra conversación siempre se arranca al final, sin heredar el estado anterior.
   useEffect(() => { anclarAbajoRef.current = true; }, [selectedId]);
 
@@ -752,7 +771,7 @@ export default function ConversationsPage() {
     if (mentionQuery === null) { setMentionItems([]); setMentionLoading(false); return; }
     setMentionLoading(true);
     const timer = setTimeout(() => {
-      apiFetch<Contact[]>(`/conversations/contact-mentions?q=${encodeURIComponent(mentionQuery)}`)
+      apiFetch<Contact[]>(`/conversations/contact-mentions?q=${encodeURIComponent(mentionQuery)}${selectedId ? `&conversationId=${selectedId}` : ''}`)
         .then((rows) => { if (id !== mentionReqRef.current) return; setMentionItems(rows); setMentionIndex(0); setMentionLoading(false); })
         .catch(() => { if (id !== mentionReqRef.current) return; setMentionItems([]); setMentionLoading(false); });
     }, mentionQuery ? 150 : 0);
@@ -2037,9 +2056,9 @@ export default function ConversationsPage() {
         const menciones = message.metadata?.mentions;
         if (!menciones?.length) return formatMessageText(texto, openNewChatWithPhone);
         // "@telefono" (lo que viaja a WhatsApp) se muestra como "@Nombre" resaltado.
-        const porTelefono = new Map(menciones.map((m) => [m.phone, m.name]));
+        const porDigitos = new Map(menciones.map((m) => [m.digits, m.name]));
         return texto.split(/(@\d{6,15})/).map((parte, i) => {
-          const nombre = parte.startsWith('@') ? porTelefono.get(parte.slice(1)) : undefined;
+          const nombre = parte.startsWith('@') ? porDigitos.get(parte.slice(1)) : undefined;
           return nombre ? <span key={i} className="message-mention">@{nombre}</span> : <Fragment key={i}>{formatMessageText(parte, openNewChatWithPhone)}</Fragment>;
         });
       }
@@ -2167,7 +2186,7 @@ export default function ConversationsPage() {
           )}
           {selected ? <>
             <header className="chat-header">
-              <button className="chat-back-button" onClick={() => setMobileChatOpen(false)} title="Volver a la lista"><ArrowLeft size={18} /></button>
+              <button className="chat-back-button" onClick={closeMobileChat} title="Volver a la lista"><ArrowLeft size={18} /></button>
               <div className="chat-avatar">{avatarContent(selected.contact, 17)}</div>
               <div className="chat-header-copy">
                 {editingContactName ? (

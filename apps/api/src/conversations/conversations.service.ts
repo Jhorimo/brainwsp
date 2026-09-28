@@ -260,22 +260,30 @@ export class ConversationsService {
   // `mentionedJid` (cada cliente lo pinta con el nombre que tenga guardado). Se resuelve aqui,
   // con los contactos de ESTA empresa, y no con lo que diga el cliente. Una mencion cuyo
   // "@Nombre" ya no esta en el texto (el agente lo borro) se descarta.
+  // Un integrante de grupo visto solo por su @lid (nunca resuelto a un numero de telefono real,
+  // ver la reconciliacion de identidad en session-manager.ts) no tiene `phone`, y aun asi debe
+  // poder etiquetarse: WhatsApp solo exige ALGUN texto "@<digitos>" en el mensaje mas su JID en
+  // `mentionedJid`, el cliente resuelve el nombre por el JID, no por que los digitos sean un
+  // numero real — asi que a falta de telefono se usa la parte numerica del propio @lid.
   private async resolveMentions(companyId: string, text: string, mentions?: { contactId: string; label: string }[]) {
-    if (!mentions?.length) return { text, mentions: [] as { jid: string; phone: string; name: string }[] };
+    if (!mentions?.length) return { text, mentions: [] as { jid: string; digits: string; name: string }[] };
     const contacts = await this.prisma.contact.findMany({
-      where: { companyId, id: { in: mentions.map((m) => m.contactId) }, phone: { not: null } },
-      select: { id: true, phone: true },
+      where: { companyId, id: { in: mentions.map((m) => m.contactId) } },
+      select: { id: true, phone: true, waId: true },
     });
-    const phoneById = new Map(contacts.map((c) => [c.id, c.phone as string]));
+    const byId = new Map(contacts.map((c) => [c.id, c]));
     let result = text;
-    const done: { jid: string; phone: string; name: string }[] = [];
+    const done: { jid: string; digits: string; name: string }[] = [];
     for (const m of mentions) {
-      const phone = phoneById.get(m.contactId);
+      const contact = byId.get(m.contactId);
       const label = m.label.startsWith('@') ? m.label : `@${m.label}`;
       const at = result.indexOf(label);
-      if (!phone || at === -1 || done.some((d) => d.phone === phone)) continue;
-      result = result.slice(0, at) + `@${phone}` + result.slice(at + label.length);
-      done.push({ jid: `${phone}@s.whatsapp.net`, phone, name: label.slice(1) });
+      if (!contact || at === -1) continue;
+      const jid = contact.phone ? `${contact.phone}@s.whatsapp.net` : contact.waId.split('@')[0].split(':')[0] + '@' + contact.waId.split('@')[1];
+      const digits = contact.phone || contact.waId.split('@')[0].split(':')[0];
+      if (done.some((d) => d.jid === jid)) continue;
+      result = result.slice(0, at) + `@${digits}` + result.slice(at + label.length);
+      done.push({ jid, digits, name: label.slice(1) });
     }
     return { text: result, mentions: done };
   }
@@ -325,7 +333,7 @@ export class ConversationsService {
 
   // Shared by `sendText` (ownership already verified by `getOwned`) and `startConversation`
   // (owns it implicitly — it just created/upserted the conversation itself).
-  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string, quotedMessageId?: string, mentions: { jid: string; phone: string; name: string }[] = []) {
+  private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string, quotedMessageId?: string, mentions: { jid: string; digits: string; name: string }[] = []) {
     const conversationId = conversation.id;
     const message = await this.prisma.message.create({
       data: {
@@ -468,24 +476,43 @@ export class ConversationsService {
     return message;
   }
 
-  // Lista corta para el popover "@" del composer: contactos con telefono (sin ellos no hay
-  // vCard), sin grupos ni broadcast, de la A a la Z ignorando mayusculas y tildes. Los que
-  // no tienen nombre con letra (solo numeros o simbolos) van al final, por telefono.
-  // Se ordena en SQL porque solo se traen unos pocos: ordenar en el cliente exigiria bajar todos.
-  async mentionContacts(user: JwtUser, q?: string) {
+  // Lista corta para el popover "@" del composer, de la A a la Z ignorando mayusculas y tildes
+  // (los que no tienen nombre con letra van al final, por telefono). La FUENTE cambia segun el
+  // chat: en un grupo, "@" etiqueta a sus MIEMBROS, no al directorio de la empresa — WhatsApp
+  // no guarda esa lista para nosotros (solo pedimos groupMetadata una vez, para el nombre del
+  // grupo, ver session-manager.ts), asi que se aproxima con quienes YA escribieron algo en ESE
+  // grupo (Message.authorContactId, que ya guardabamos por cada mensaje entrante). No requeire
+  // telefono: un integrante visto solo por su @lid igual se puede etiquetar (ver resolveMentions).
+  async mentionContacts(user: JwtUser, q?: string, conversationId?: string) {
     const term = q?.trim().slice(0, 60);
     const like = term ? `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
     const nombre = Prisma.sql`COALESCE(NULLIF(BTRIM("name"), ''), NULLIF(BTRIM("pushName"), ''))`;
     const clave = Prisma.sql`translate(lower(${nombre}), 'áéíóúüñ', 'aeiouun')`;
-    return this.prisma.$queryRaw<Array<{ id: string; name: string | null; pushName: string | null; phone: string; waId: string; avatarUrl: string | null }>>(Prisma.sql`
+    const orden = Prisma.sql`ORDER BY (${clave} ~ '^[a-z]') DESC NULLS LAST, ${clave} ASC NULLS LAST, "phone" ASC NULLS LAST LIMIT 8`;
+    const filtro = like ? Prisma.sql`AND ("name" ILIKE ${like} OR "pushName" ILIKE ${like} OR "phone" ILIKE ${like})` : Prisma.empty;
+
+    const conversation = conversationId ? await this.getOwned(user, conversationId) : null;
+    if (conversation?.contact.waId.endsWith('@g.us')) {
+      return this.prisma.$queryRaw<Array<{ id: string; name: string | null; pushName: string | null; phone: string | null; waId: string; avatarUrl: string | null }>>(Prisma.sql`
+        WITH participantes AS (
+          SELECT DISTINCT ON (c."id") c."id", c."name", c."pushName", c."phone", c."waId", c."avatarUrl"
+          FROM "Message" m
+          JOIN "Contact" c ON c."id" = m."authorContactId"
+          WHERE m."conversationId" = ${conversationId} AND m."authorContactId" IS NOT NULL
+        )
+        SELECT "id", "name", "pushName", "phone", "waId", "avatarUrl" FROM participantes
+        WHERE true ${filtro}
+        ${orden}`);
+    }
+
+    return this.prisma.$queryRaw<Array<{ id: string; name: string | null; pushName: string | null; phone: string | null; waId: string; avatarUrl: string | null }>>(Prisma.sql`
       SELECT "id", "name", "pushName", "phone", "waId", "avatarUrl"
       FROM "Contact"
       WHERE "companyId" = ${user.companyId}
         AND "phone" IS NOT NULL AND "phone" <> ''
         AND "waId" NOT LIKE '%@g.us' AND "waId" NOT LIKE '%@broadcast'
-        ${like ? Prisma.sql`AND ("name" ILIKE ${like} OR "pushName" ILIKE ${like} OR "phone" LIKE ${like})` : Prisma.empty}
-      ORDER BY (${clave} ~ '^[a-z]') DESC NULLS LAST, ${clave} ASC NULLS LAST, "phone" ASC
-      LIMIT 8`);
+        ${filtro}
+      ${orden}`);
   }
 
   async sendContact(user: JwtUser, conversationId: string, contactId: string, sentByUserId?: string) {
@@ -745,7 +772,10 @@ export class ConversationsService {
   }
 
   private async getOwned(user: JwtUser, id: string) {
-    const conversation = await this.prisma.conversation.findFirst({ where: { id, companyId: user.companyId } });
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id, companyId: user.companyId },
+      include: { contact: { select: { waId: true } } },
+    });
     if (!conversation) throw new NotFoundException('Conversación no encontrada');
     const restriction = await this.resolveDepartmentRestriction(user);
     if (restriction && conversation.departmentId && !restriction.includes(conversation.departmentId)) {

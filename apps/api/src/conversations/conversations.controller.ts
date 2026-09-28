@@ -43,8 +43,8 @@ export class ConversationsController {
 
   // Antes de las rutas ':id' para que "contact-mentions" no se lea como un id.
   @Get('contact-mentions')
-  contactMentions(@CurrentUser() user: JwtUser, @Query('q') q?: string) {
-    return this.service.mentionContacts(user, q);
+  contactMentions(@CurrentUser() user: JwtUser, @Query('q') q?: string, @Query('conversationId') conversationId?: string) {
+    return this.service.mentionContacts(user, q, conversationId);
   }
 
   @Get(':id/messages')
