@@ -120,8 +120,15 @@ export class SessionManager {
       return;
     }
 
+    // Una instancia LOGGED_OUT conserva credenciales muertas de WhatsApp: reusarlas hace que
+    // el servidor las rechace otra vez (401) y nunca aparezca un QR. Se descartan para que
+    // "Conectar" arranque un vínculo limpio sin tener que pasar por "Cerrar sesión".
+    let auth = await usePrismaAuthState(this.prisma, instanceId);
+    if (instance.status === InstanceStatus.LOGGED_OUT) {
+      await auth.clear();
+      auth = await usePrismaAuthState(this.prisma, instanceId);
+    }
     await this.setInstanceState(instanceId, InstanceStatus.CONNECTING, { lastError: null });
-    const auth = await usePrismaAuthState(this.prisma, instanceId);
     const childLogger = this.logger.child({ instanceId });
 
     // An outdated WA Web protocol version is the classic cause of messages
@@ -203,12 +210,20 @@ export class SessionManager {
         }
 
         if (statusCode === DisconnectReason.loggedOut) {
+          // El dispositivo fue desvinculado desde el teléfono: las credenciales ya no sirven.
+          // Se borran y se arranca de inmediato un socket nuevo para que el panel reciba un
+          // QR fresco, en vez de dejar la instancia muerta hasta que alguien cierre sesión.
+          const auth = await usePrismaAuthState(this.prisma, instanceId);
+          await auth.clear();
           await this.setInstanceState(instanceId, InstanceStatus.LOGGED_OUT, {
             qr: null,
-            lastError: 'WhatsApp cerró la sesión. Se requiere volver a vincular el dispositivo.',
+            lastError: 'WhatsApp se desvinculó. Escanea el nuevo código QR para volver a conectar.',
             lastDisconnectedAt: new Date(),
           });
           await this.releaseLease(instanceId);
+          void this.connect(instanceId).catch((error) => {
+            childLogger.error({ err: error }, 'failed to start fresh QR session after logout');
+          });
           return;
         }
 

@@ -36,6 +36,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { Protected } from './protected';
+import { WhatsAppStatusToast } from './whatsapp-status-toast';
 import { API_URL, apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
 import { ALL_MODULE_KEYS, MODULE_TREE } from '@/lib/modules';
 
@@ -452,6 +453,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
             </div>
           </header>
           <div className="page-content">{children}</div>
+          <WhatsAppStatusToast />
         </main>
       </div>
 

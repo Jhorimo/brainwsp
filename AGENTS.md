@@ -49,3 +49,12 @@ Mantener una plataforma SaaS multiempresa para WhatsApp: Gateway API compatible 
 5. Probar `/api/create-message` con multipart form.
 6. Probar `/api/v1/messages/text` con JSON/headers.
 7. Validar reconexión sin volver a escanear QR ante una caída transitoria.
+
+## Memoria persistente
+
+En este repositorio, usa la memoria persistente de Engram mediante sus herramientas MCP (`mem_save`, `mem_search`, `mem_session_summary`, etc.).
+
+- Trabaja siempre dentro del proyecto Engram `brainwsp`; no leas ni guardes memorias de otros proyectos.
+- Busca memoria relevante cuando ayude a retomar decisiones o trabajo previo.
+- Guarda proactivamente decisiones, descubrimientos y resultados importantes después de trabajo significativo.
+- Después de una compactación o reinicio de contexto, persiste primero el resumen inyectado con `mem_session_summary`. Solicita `mem_context` solo si hace falta contexto adicional.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Cable, Pencil, Plus, Power, QrCode, RefreshCw, Search, Smartphone, Trash2, Unplug } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
@@ -22,6 +22,8 @@ export default function InstancesPage() {
   const [name, setName] = useState('WhatsApp Ventas');
   const [slug, setSlug] = useState('ventas');
   const [busy, setBusy] = useState<string | null>(null);
+  // Instancia para la que el usuario pidió conectar: apenas llega su QR se abre el modal solo.
+  const awaitingQr = useRef<string | null>(null);
   const [error, setError] = useState('');
   const [editInstance, setEditInstance] = useState<Instance | null>(null);
   const [editName, setEditName] = useState('');
@@ -46,13 +48,21 @@ export default function InstancesPage() {
     socket.on('instance.updated', (updated: Instance) => {
       setInstances((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
       setQrInstance((current) => current?.id === updated.id ? { ...current, ...updated } : current);
+      if (updated.qr && awaitingQr.current === updated.id) {
+        awaitingQr.current = null;
+        setQrInstance((current) => current ?? updated);
+      }
     });
     return () => { socket.disconnect(); };
   }, [load]);
 
   const action = async (id: string, name: 'connect' | 'disconnect' | 'logout') => {
     setBusy(id + name); setError('');
-    try { await apiFetch(`/instances/${id}/${name}`, { method: 'POST' }); await load(); } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } finally { setBusy(null); }
+    try {
+      await apiFetch(`/instances/${id}/${name}`, { method: 'POST' });
+      if (name === 'connect') awaitingQr.current = id;
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } finally { setBusy(null); }
   };
 
   // Encola un resync completo de fotos (contactos y grupos) en el worker — ver
@@ -124,7 +134,7 @@ export default function InstancesPage() {
             </div>
             {instance.lastError && <div className="instance-error">{instance.lastError}</div>}
             <div className="instance-actions">
-              {instance.status !== 'CONNECTED' && <button className="button small primary" disabled={busy === instance.id + 'connect'} onClick={() => void action(instance.id, 'connect')}><Cable size={14} />Conectar</button>}
+              {instance.status !== 'CONNECTED' && <button className="button small primary" disabled={busy === instance.id + 'connect'} onClick={() => void action(instance.id, 'connect')}><Cable size={14} />{instance.status === 'LOGGED_OUT' || instance.status === 'ERROR' ? 'Generar QR' : 'Conectar'}</button>}
               {instance.qr && <button className="button small" onClick={() => setQrInstance(instance)}><QrCode size={14} />Ver QR</button>}
               {instance.status === 'CONNECTED' && <button className="button small" disabled={busy === instance.id + 'disconnect'} onClick={() => void action(instance.id, 'disconnect')}><Unplug size={14} />Desconectar</button>}
               {instance.status !== 'DISCONNECTED' && instance.status !== 'LOGGED_OUT' && <button className="button small" disabled={busy === instance.id + 'logout'} onClick={() => void action(instance.id, 'logout')}><Power size={14} />Cerrar sesión</button>}

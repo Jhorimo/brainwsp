@@ -17,3 +17,8 @@ docker-compose.prod.yml
 
 # Cache incremental de TypeScript (rompe el build de Docker si se versiona)
 *.tsbuildinfo
+
+# Engram / agentes locales
+.engram/
+.codex/
+CLAUDE.md
