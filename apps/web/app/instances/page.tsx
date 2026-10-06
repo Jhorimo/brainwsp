@@ -1,12 +1,7 @@
 'use client';
 
-<<<<<<< Updated upstream
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Cable, Pencil, Plus, Power, QrCode, RefreshCw, Search, Smartphone, Trash2, Unplug } from 'lucide-react';
-=======
-import { useCallback, useEffect, useState } from 'react';
 import { Cable, Copy, MessageCircle, Pencil, Plus, Power, QrCode, RefreshCw, Search, Smartphone, Trash2, Unplug } from 'lucide-react';
->>>>>>> Stashed changes
 import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
