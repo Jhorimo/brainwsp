@@ -98,8 +98,8 @@ export default function AdminSettingsPage() {
           </div>
         </div>
         <p style={{ color: 'var(--muted)', fontSize: 11, margin: '4px 0 14px' }}>
-          Los archivos que no sean imagen (video, documento, audio) se borran de forma automática pasados los días
-          configurados. El tamaño máximo aplica tanto a lo que un agente envía desde el panel como a lo que se recibe por WhatsApp.
+          Los archivos que no sean imagen ni PDF (video, audio, otros documentos) se borran de forma automática pasados los días
+          configurados. Las imágenes y los PDF se conservan hasta que un superadmin los borre a mano. El tamaño máximo aplica tanto a lo que un agente envía desde el panel como a lo que se recibe por WhatsApp.
         </p>
         <div className="modal-actions" style={{ padding: 0, border: 0, justifyContent: 'flex-start' }}>
           <button type="button" className="button primary" disabled={saving} onClick={save}>

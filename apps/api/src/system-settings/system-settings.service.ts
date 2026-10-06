@@ -76,18 +76,24 @@ export class SystemSettingsService {
   // Reemplaza al script manual /root/mipse/brainwsp/purgar-media-vieja.sh (armado y
   // probado el 2026-09-11, nunca activado en el cron del servidor a pedido del usuario):
   // ahora vive dentro de la app, lee el valor configurado en vez de un "7 dias" fijo, y
-  // corre solo sin depender de un cron externo por SSH. Mismo criterio: todo lo que no
-  // sea IMAGE, mas viejo que el limite configurado, se borra de MinIO y se limpia
-  // mediaUrl para no volver a seleccionarlo el dia siguiente.
+  // corre solo sin depender de un cron externo por SSH. Criterio: todo lo que no sea
+  // IMAGE ni PDF, mas viejo que el limite configurado, se borra de MinIO y se limpia
+  // mediaUrl para no volver a seleccionarlo el dia siguiente. Los PDF se conservan (son
+  // cotizaciones/facturas que los clientes vuelven a abrir semanas despues); el superadmin
+  // los borra a mano desde el panel si hace falta espacio.
   @Cron('30 4 * * *')
   async purgeOldMedia() {
     const { mediaRetentionDays } = await this.get();
     const cutoff = new Date(Date.now() - mediaRetentionDays * 24 * 60 * 60 * 1000);
 
-    const toPurge = await this.prisma.message.findMany({
+    // El filtro de PDF se hace en JS y no con NOT{...} de Prisma: mimeType y fileName pueden
+    // ser NULL (los envios por API no siempre traen mimeType) y un NOT sobre NULL excluiria
+    // por error de la purga documentos que si deben borrarse.
+    const candidates = await this.prisma.message.findMany({
       where: { mediaUrl: { not: null }, type: { not: 'IMAGE' }, createdAt: { lt: cutoff } },
-      select: { id: true, mediaUrl: true },
+      select: { id: true, mediaUrl: true, type: true, mimeType: true, fileName: true },
     });
+    const toPurge = candidates.filter((m) => !(m.type === 'DOCUMENT' && (m.mimeType === 'application/pdf' || m.fileName?.toLowerCase().endsWith('.pdf'))));
 
     if (toPurge.length === 0) {
       this.logger.log('purga de media: nada que purgar');
