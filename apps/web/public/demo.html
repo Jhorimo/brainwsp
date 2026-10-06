@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Brain Tech — Sitio de ejemplo con Clienera Chat</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Segoe UI', Inter, system-ui, sans-serif; color: #1a1f2b; background: #fff; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 18px 48px; border-bottom: 1px solid #eee; }
+  header .logo { font-weight: 800; font-size: 20px; }
+  header .logo span { color: #6b8afd; }
+  nav a { margin-left: 28px; color: #4a4f5c; text-decoration: none; font-size: 14px; font-weight: 600; }
+  .hero { display: flex; align-items: center; gap: 48px; padding: 80px 48px; max-width: 1100px; margin: 0 auto; }
+  .hero-copy { flex: 1; }
+  .hero-copy .tag { color: #6b8afd; font-weight: 700; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; }
+  .hero-copy h1 { font-size: 46px; line-height: 1.1; margin: 14px 0 20px; }
+  .hero-copy p { font-size: 16px; line-height: 1.6; color: #5c6477; max-width: 460px; }
+  .hero-copy .cta { display: inline-block; margin-top: 28px; background: linear-gradient(135deg, #6b8afd, #4a63d6); color: #fff; padding: 14px 28px; border-radius: 10px; font-weight: 700; text-decoration: none; box-shadow: 0 10px 24px -8px rgba(107,138,253,.5); }
+  .hero-art { flex: 1; height: 340px; border-radius: 24px; background: linear-gradient(160deg, #eef1fb, #dbe3fd); display: flex; align-items: center; justify-content: center; color: #9aa6e8; font-size: 14px; }
+  .note { max-width: 680px; margin: 0 auto 60px; padding: 18px 22px; background: #f5f6fa; border-radius: 12px; font-size: 13.5px; color: #5c6477; line-height: 1.6; }
+  .note strong { color: #1a1f2b; }
+  footer { text-align: center; padding: 30px; color: #9aa6b7; font-size: 12px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">Brain<span>Tech</span></div>
+    <nav>
+      <a href="#">Productos</a>
+      <a href="#">Precios</a>
+      <a href="#">Soporte</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <div class="hero-copy">
+      <div class="tag">Nuevo</div>
+      <h1>Gestiona tu negocio sin complicarte</h1>
+      <p>Esta es una página de ejemplo cualquiera, de un cliente cualquiera. Lo único que importa es el botón azul de la esquina inferior derecha — ese es el widget de Clienera Chat embebido con una sola línea de código.</p>
+      <a class="cta" href="#">Empezar ahora</a>
+    </div>
+    <div class="hero-art">(imagen de producto de ejemplo)</div>
+  </div>
+
+  <div class="note">
+    <strong>Cómo se instaló este widget:</strong> se pegó este script justo antes de <code>&lt;/body&gt;</code> —
+    <code>&lt;script src="/widget.js" data-company="brain-tech-peru"&gt;&lt;/script&gt;</code>.
+    Nada más. El botón aparece solo, con el color y el mensaje configurados desde el panel en "Instancias → Clienera Chat → Personalizar".
+  </div>
+
+  <footer>Página de demostración — no es un sitio real de Brain Tech.</footer>
+
+  <script src="/widget.js" data-company="brain-tech-peru"></script>
+</body>
+</html>

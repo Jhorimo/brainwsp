@@ -18,10 +18,20 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: bodyLimit });
   app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-  app.enableCors({
-    origin: createCorsOriginValidator(),
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  // El widget de Clienera Chat se embebe en webs de terceros (dominio desconocido de
+  // antemano) — sus rutas bajo /api/widget necesitan CORS abierto, a diferencia del resto
+  // de la API, que sigue restringida a WEB_ORIGIN. `origin: true` refleja dinámicamente
+  // el Origin de cada request (equivalente a "*" pero válido también si algún día se
+  // necesitara credentials en esa ruta); no lleva cookies ni JWT, solo el token propio del
+  // visitante en el body, así que abrir el origin no expone nada de otra empresa.
+  const strictCorsOrigin = createCorsOriginValidator();
+  app.enableCors((req: { url?: string }, callback: (err: Error | null, options: Record<string, unknown>) => void) => {
+    const isWidgetRoute = req.url?.startsWith('/api/widget/');
+    callback(null, {
+      origin: isWidgetRoute ? true : strictCorsOrigin,
+      credentials: !isWidgetRoute,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    });
   });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.setGlobalPrefix('api');

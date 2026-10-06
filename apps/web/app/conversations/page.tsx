@@ -30,7 +30,7 @@ type Conversation = {
   department?: { id: string; name: string } | null;
   project?: { id: string; name: string } | null;
   stage?: Stage | null;
-  instance: { id: string; name: string; slug: string; status: string };
+  instance: { id: string; name: string; slug: string; status: string; provider: string };
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
@@ -2144,6 +2144,9 @@ export default function ConversationsPage() {
                 <div className="chat-copy">
                   <div className="chat-copy-name-row">
                     <strong>{displayName(conversation.contact)}</strong>
+                    {conversation.instance.provider === 'CLIENERA_CHAT' && (
+                      <span className="channel-badge" title="Clienera Chat">💬</span>
+                    )}
                     {conversation.contact.tags && conversation.contact.tags.length > 0 && (
                       <span className="chat-row-tags">
                         {conversation.contact.tags.slice(0, 4).map(({ tag }) => <span key={tag.id} className="tag-dot" style={{ background: tag.color }} title={tag.name} />)}
@@ -2198,8 +2201,12 @@ export default function ConversationsPage() {
                   </div>
                 )}
                 <div className="chat-header-meta">
-                  <span className="chat-header-phone">{selected.contact.phone || selected.contact.waId}</span>
-                  <span className="chat-header-status">{selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}</span>
+                  <span className="chat-header-phone">{selected.contact.phone || (selected.instance.provider === 'CLIENERA_CHAT' ? 'Visitante web' : selected.contact.waId)}</span>
+                  <span className="chat-header-status">
+                    {selected.instance.provider === 'CLIENERA_CHAT'
+                      ? `💬 ${selected.instance.name}`
+                      : selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}
+                  </span>
                 </div>
               </div>
               <div className="chat-header-actions">

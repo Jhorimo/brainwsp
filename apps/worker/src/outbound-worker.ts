@@ -56,6 +56,20 @@ export class OutboundWorker {
     if (!message) return;
     if (message.status === MessageStatus.SENT || message.status === MessageStatus.DELIVERED || message.status === MessageStatus.READ) return;
 
+    // Clienera Chat no tiene sesión Baileys ni destinatario real que "entregue" el mensaje
+    // — ya quedó visible para el visitante apenas ConversationsService lo publicó por
+    // realtime (ver deliverText). Este job solo existe para cumplir la regla de que todo
+    // saliente pasa por whatsapp.outbound; aquí únicamente cierra el ciclo (SENT) y vuelve
+    // a publicar para que el ✓ del panel dejé de mostrar "enviando...".
+    if (message.instance.provider === 'CLIENERA_CHAT') {
+      const updated = await this.prisma.message.update({
+        where: { id: message.id },
+        data: { status: MessageStatus.SENT, sentAt: new Date(), error: null },
+      });
+      await this.realtime.publish(message.companyId, 'message.updated', updated, undefined, message.conversationId);
+      return updated;
+    }
+
     await this.prisma.message.update({ where: { id: message.id }, data: { status: MessageStatus.PROCESSING, error: null } });
 
     try {

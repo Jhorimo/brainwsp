@@ -15,9 +15,15 @@ enum UserRole {
   AGENT
 }
 
+// CLIENERA_CHAT no es un proveedor de WhatsApp real: es el canal propio (widget/enlace
+// público) modelado como una fila más de WhatsAppInstance para no duplicar el concepto de
+// "canal" en una tabla aparte — Conversation/Message/Flow ya cuelgan de instanceId, así que
+// para ellos un canal Clienera Chat es simplemente una instancia con otro provider. Los
+// campos específicos de Baileys (qr, phoneNumber, authCredential, authKeys...) quedan null.
 enum WhatsAppProvider {
   BAILEYS
   META_CLOUD
+  CLIENERA_CHAT
 }
 
 enum InstanceStatus {
@@ -158,6 +164,7 @@ model Company {
   flows          Flow[]
   flowExecutions FlowExecution[]
   paymentRequests PaymentRequest[]
+  visitorSessions VisitorSession[]
 }
 
 // Platform-level catalog, managed by SUPERADMIN users — not scoped to any one company.
@@ -380,6 +387,12 @@ model WhatsAppInstance {
   lastDisconnectedAt DateTime?
   active           Boolean          @default(true)
   autoConnect      Boolean          @default(false)
+  // Solo relevantes para provider = CLIENERA_CHAT. widgetPublicKey es el token que va en el
+  // <script data-company="..."> embebible — deliberadamente distinto de `id`/`slug` para poder
+  // rotarlo sin afectar el enlace público (que usa Company.slug) ni la fila interna.
+  // configuration guarda branding/horario del widget (logo, color, mensaje inicial, etc.).
+  widgetPublicKey  String?          @unique
+  configuration    Json?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -484,7 +497,13 @@ model Project {
 model Contact {
   id            String         @id @default(uuid())
   companyId     String
+  // Para contactos de Clienera Chat no hay WhatsApp real: waId se llena con un valor
+  // sintético ("web:<visitorId>") para no tocar la unicidad [companyId, waId] que ya depende
+  // de todo el código existente. visitorId es el campo real para resolver/indexar al
+  // visitante desde su VisitorSession; source identifica el origen (web, instagram_bio, qr...).
   waId          String
+  visitorId     String?        @unique
+  source        String?
   phone         String?
   name          String?
   pushName      String?
@@ -504,6 +523,7 @@ model Contact {
   leads         Lead[]
   deals         Deal[]
   calendarEvents CalendarEvent[]
+  visitorSessions VisitorSession[]
 
   @@unique([companyId, waId])
   @@index([companyId, phone])
@@ -814,6 +834,29 @@ model Incident {
 
   @@index([companyId, status])
   @@index([departmentId, status])
+}
+
+// Identidad persistente de un visitante anónimo del widget/enlace público de Clienera Chat.
+// El navegador guarda el token en claro (p. ej. en localStorage) y lo reenvía en cada visita;
+// aquí solo se persiste su hash (`tokenHash`), mismo patrón que ApiCredential.authHash, para
+// que filtrar la tabla no entregue tokens utilizables. Permite reconocer al visitante sin
+// pedirle registro y, más adelante, fusionar varias sesiones/dispositivos bajo un mismo
+// Contact (vía Contact.visitorId) sin perder el historial de conversación.
+model VisitorSession {
+  id         String   @id @default(uuid())
+  companyId  String
+  contactId  String
+  tokenHash  String   @unique
+  ip         String?
+  userAgent  String?
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([contactId])
 }
 
 // --- CRM (Prospectos / Tratos / Pipelines) ---

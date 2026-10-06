@@ -28,6 +28,7 @@ import { StorageModule } from './storage/storage.module';
 import { SystemSettingsModule } from './system-settings/system-settings.module';
 import { TeamModule } from './team/team.module';
 import { UserDeviceModule } from './user-device/user-device.module';
+import { WidgetModule } from './widget/widget.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { UserDeviceModule } from './user-device/user-device.module';
     AnnouncementsModule,
     SystemSettingsModule,
     HealthModule,
+    WidgetModule,
   ],
 })
 export class AppModule {}

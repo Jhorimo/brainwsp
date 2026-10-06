@@ -44,3 +44,11 @@ export function generateApiCredential() {
     authKey: generateAuthKey(),
   };
 }
+
+// Token embebido en el <script data-company="..."> del widget de Clienera Chat. No protege
+// un secreto (va en el HTML público de la empresa), pero debe ser impredecible para que no se
+// pueda enumerar canales de otras empresas probando valores — por eso no es el `id`/`slug`
+// interno y es rotable (ver InstancesService.regenerateWidgetKey).
+export function generateWidgetPublicKey(): string {
+  return randomBytes(16).toString('base64url');
+}

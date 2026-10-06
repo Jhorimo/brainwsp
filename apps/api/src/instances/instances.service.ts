@@ -1,7 +1,20 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InstanceStatus, MessageDirection, WhatsAppProvider } from '@prisma/client';
+import { generateWidgetPublicKey } from '../common/utils/secret';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
+
+export interface WidgetConfiguration {
+  displayName?: string;
+  welcomeMessage?: string;
+  color?: string;
+  position?: 'left' | 'right';
+  buttonText?: string;
+  // Si el panel se abre solo al entrar a la página (true) o si queda cerrado, solo el botón
+  // flotante, hasta que el visitante haga clic (false, default) — ver widget.js, que lee este
+  // valor del bootstrap y decide si auto-abrirse.
+  autoOpen?: boolean;
+}
 
 @Injectable()
 export class InstancesService {
@@ -27,6 +40,8 @@ export class InstancesService {
         lastConnectedAt: true,
         lastDisconnectedAt: true,
         autoConnect: true,
+        widgetPublicKey: true,
+        configuration: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'asc' },
@@ -65,9 +80,50 @@ export class InstancesService {
     });
     if (existing) throw new ConflictException('Ya existe una instancia con ese slug');
 
+    // Clienera Chat no tiene QR ni sesión que conectar: queda operativo apenas se crea. Solo
+    // se admite un canal propio activo por empresa (el enlace público usa Company.slug, no el
+    // slug de la instancia, así que dos canales serían ambiguos para el visitante).
+    if (provider === WhatsAppProvider.CLIENERA_CHAT) {
+      const existingChannel = await this.prisma.whatsAppInstance.findFirst({
+        where: { companyId, provider: WhatsAppProvider.CLIENERA_CHAT, active: true },
+      });
+      if (existingChannel) throw new ConflictException('Esta empresa ya tiene un canal Clienera Chat activo');
+
+      return this.prisma.whatsAppInstance.create({
+        data: { companyId, name, slug, provider, status: InstanceStatus.CONNECTED, widgetPublicKey: generateWidgetPublicKey() },
+      });
+    }
+
     return this.prisma.whatsAppInstance.create({
       data: { companyId, name, slug, provider },
     });
+  }
+
+  // Rota el token público del widget (<script data-company="...">) sin afectar el enlace
+  // público (que usa Company.slug) ni la fila interna — páginas/widgets ya instalados con el
+  // token viejo dejan de resolver de inmediato.
+  async regenerateWidgetKey(companyId: string, id: string) {
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.CLIENERA_CHAT) {
+      throw new ConflictException('Esta acción está disponible solo para el canal Clienera Chat');
+    }
+    const widgetPublicKey = generateWidgetPublicKey();
+    await this.prisma.whatsAppInstance.update({ where: { id }, data: { widgetPublicKey } });
+    return { widgetPublicKey };
+  }
+
+  // Configuración básica del widget (Fase 1): branding mínimo. Se fusiona con lo que ya
+  // hubiera en vez de reemplazar el JSON entero, para no perder claves que el frontend
+  // todavía no edita (ver punto 10 del brief: "no sobrecargar esta parte inicialmente").
+  async updateWidgetConfig(companyId: string, id: string, config: WidgetConfiguration) {
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.CLIENERA_CHAT) {
+      throw new ConflictException('Esta acción está disponible solo para el canal Clienera Chat');
+    }
+    const current = (instance.configuration as WidgetConfiguration | null) ?? {};
+    const merged = { ...current, ...config };
+    const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
+    return updated.configuration;
   }
 
   async connect(companyId: string, id: string) {
@@ -90,14 +146,20 @@ export class InstancesService {
   }
 
   async disconnect(companyId: string, id: string) {
-    await this.getOwned(companyId, id);
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.BAILEYS) {
+      throw new ConflictException('Esta acción está disponible para instancias Baileys');
+    }
     await this.prisma.whatsAppInstance.update({ where: { id }, data: { autoConnect: false } });
     await this.queues.commands.add('disconnect', { instanceId: id }, { removeOnComplete: 1000, removeOnFail: 1000 });
     return { success: true, status: 'DISCONNECTING', instanceId: id };
   }
 
   async logout(companyId: string, id: string) {
-    await this.getOwned(companyId, id);
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.BAILEYS) {
+      throw new ConflictException('Esta acción está disponible para instancias Baileys');
+    }
     await this.prisma.whatsAppInstance.update({ where: { id }, data: { autoConnect: false } });
     await this.queues.commands.add('logout', { instanceId: id }, { removeOnComplete: 1000, removeOnFail: 1000 });
     return { success: true, status: 'LOGGING_OUT', instanceId: id };
@@ -106,7 +168,10 @@ export class InstancesService {
   // One-off resync for contacts whose cached avatar went stale before the contacts.update
   // listener existed to keep it current — see SessionManager.forceRefreshAvatars.
   async refreshAvatars(companyId: string, id: string) {
-    await this.getOwned(companyId, id);
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.BAILEYS) {
+      throw new ConflictException('Esta acción está disponible para instancias Baileys');
+    }
     await this.queues.commands.add('refresh-avatars', { instanceId: id }, { removeOnComplete: 1000, removeOnFail: 1000 });
     return { success: true, instanceId: id };
   }
@@ -147,7 +212,9 @@ export class InstancesService {
 
     const everUsed = Boolean(instance.phoneNumber || instance.lastConnectedAt || conversationCount > 0 || messageCount > 0);
     if (everUsed) {
-      if (instance.status !== InstanceStatus.DISCONNECTED && instance.status !== InstanceStatus.LOGGED_OUT) {
+      // Clienera Chat no tiene sesión Baileys que cerrar — enviar 'logout' igual intentaría
+      // desloguear una sesión que nunca existió.
+      if (instance.provider === WhatsAppProvider.BAILEYS && instance.status !== InstanceStatus.DISCONNECTED && instance.status !== InstanceStatus.LOGGED_OUT) {
         await this.queues.commands.add('logout', { instanceId: id }, { removeOnComplete: 1000, removeOnFail: 1000 });
       }
       await this.prisma.whatsAppInstance.update({ where: { id }, data: { active: false, autoConnect: false } });

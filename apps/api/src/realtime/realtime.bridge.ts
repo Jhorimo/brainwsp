@@ -7,6 +7,7 @@ interface RealtimeEvent {
   event: string;
   payload: unknown;
   departmentId?: string | null;
+  conversationId?: string;
 }
 
 @Injectable()
@@ -20,7 +21,7 @@ export class RealtimeBridge implements OnModuleInit, OnModuleDestroy {
     this.subscriber.on('message', (_channel, raw) => {
       try {
         const data = JSON.parse(raw) as RealtimeEvent;
-        if (data.companyId && data.event) this.gateway.emitScoped(data.companyId, data.event, data.payload, data.departmentId);
+        if (data.companyId && data.event) this.gateway.emitScoped(data.companyId, data.event, data.payload, data.departmentId, data.conversationId);
       } catch (error) {
         console.error('Invalid realtime event', error);
       }

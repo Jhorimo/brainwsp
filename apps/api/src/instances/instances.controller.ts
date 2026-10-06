@@ -6,7 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
-import { CreateInstanceDto, UpdateInstanceDto } from './instances.dto';
+import { CreateInstanceDto, UpdateInstanceDto, UpdateWidgetConfigDto } from './instances.dto';
 import { InstancesService } from './instances.service';
 
 // NOTE: not gated by ModuleAccessGuard/'instances' — the Conversations page calls
@@ -59,6 +59,18 @@ export class InstancesController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   update(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateInstanceDto) {
     return this.service.update(user.companyId, id, dto);
+  }
+
+  @Post(':id/widget-key/regenerate')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  regenerateWidgetKey(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.regenerateWidgetKey(user.companyId, id);
+  }
+
+  @Patch(':id/widget-config')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  updateWidgetConfig(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateWidgetConfigDto) {
+    return this.service.updateWidgetConfig(user.companyId, id, dto);
   }
 
   @Delete(':id')

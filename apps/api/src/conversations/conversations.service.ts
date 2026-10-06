@@ -152,7 +152,7 @@ export class ConversationsService {
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
         stage: { select: { id: true, name: true, color: true } },
-        instance: { select: { id: true, name: true, slug: true, status: true } },
+        instance: { select: { id: true, name: true, slug: true, status: true, provider: true } },
       },
       // Postgres ordena texto por valor de caracter (mayusculas antes que minusculas,
       // simbolos/emoji antes que letras) — con nombres de WhatsApp mezclando "JUAN",
@@ -363,7 +363,7 @@ export class ConversationsService {
 
     const hydrated = await this.getHydrated(companyId, conversationId);
     if (hydrated) {
-      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId);
+      void this.realtime.publish(companyId, 'message.created', { message, conversation: { ...hydrated, messages: [message] } }, hydrated.departmentId, conversationId);
       if (wasAiEnabled) void this.realtime.publish(companyId, 'conversation.updated', hydrated, hydrated.departmentId);
     }
     return message;
@@ -793,7 +793,7 @@ export class ConversationsService {
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
         stage: { select: { id: true, name: true, color: true } },
-        instance: { select: { id: true, name: true, slug: true, status: true } },
+        instance: { select: { id: true, name: true, slug: true, status: true, provider: true } },
         messages: {
           take: 1,
           orderBy: { createdAt: 'desc' },
