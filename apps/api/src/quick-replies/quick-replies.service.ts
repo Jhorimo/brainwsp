@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { extname } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { SystemSettingsService } from '../system-settings/system-settings.service';
 
 type MediaInput = { mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null };
 
@@ -10,6 +11,7 @@ export class QuickRepliesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   list(companyId: string) {
@@ -23,6 +25,10 @@ export class QuickRepliesService {
   }
 
   async uploadMedia(file: Express.Multer.File) {
+    const maxBytes = await this.systemSettings.maxMediaSizeBytes();
+    if (file.size > maxBytes) {
+      throw new BadRequestException(`El archivo supera el tamaño máximo permitido (${Math.round(maxBytes / 1024 / 1024)} MB)`);
+    }
     const { internalUrl } = await this.storage.uploadBuffer(file.buffer, file.mimetype, extname(file.originalname).replace('.', ''));
     return { mediaUrl: internalUrl, fileName: file.originalname, mimeType: file.mimetype, fileSize: file.size };
   }

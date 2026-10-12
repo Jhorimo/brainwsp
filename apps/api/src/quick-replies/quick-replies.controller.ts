@@ -13,7 +13,11 @@ import { CreateQuickReplyDto, UpdateQuickReplyDto } from './quick-replies.dto';
 import { QuickRepliesService } from './quick-replies.service';
 import { pipeToResponse } from '../common/pipe-stream';
 
-const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
+// Techo tecnico fijo del interceptor de Multer (rechaza el multipart antes de que corra el
+// handler, por eso es generoso). El limite REAL, configurable por el superadmin, se aplica
+// en QuickRepliesService.uploadMedia via SystemSettingsService — igual que en sendMedia de
+// conversaciones. Debe ser >= al maximo de UpdateSystemSettingsDto.maxMediaSizeBytes (500MB).
+const MAX_MEDIA_BYTES = 500 * 1024 * 1024;
 
 @ApiTags('Quick Replies')
 @ApiBearerAuth()
