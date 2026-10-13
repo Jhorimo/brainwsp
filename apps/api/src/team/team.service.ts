@@ -12,7 +12,14 @@ export class TeamService {
     return company;
   }
 
-  async updateCompanyProfile(companyId: string, data: { name?: string; phone?: string }) {
+  async updateCompanyProfile(companyId: string, data: { name?: string; phone?: string; slug?: string }) {
+    if (data.slug !== undefined) {
+      // Es el identificador del enlace público de Clienera Chat (clienera.com/<slug>) y del
+      // widget embebible — cambiarlo invalida de inmediato cualquier link/script ya repartido
+      // con el slug anterior, por eso valida unicidad antes de pisar nada.
+      const existing = await this.prisma.company.findUnique({ where: { slug: data.slug }, select: { id: true } });
+      if (existing && existing.id !== companyId) throw new BadRequestException('Ese enlace ya lo está usando otra empresa');
+    }
     const company = await this.prisma.company.update({
       where: { id: companyId },
       data: {
@@ -20,6 +27,7 @@ export class TeamService {
         // Cadena vacía borra el teléfono en vez de guardarlo como "" — mismo criterio que el
         // resto de campos opcionales de texto en el schema.
         ...(data.phone !== undefined ? { phone: data.phone.trim() || null } : {}),
+        ...(data.slug !== undefined ? { slug: data.slug.trim() } : {}),
       },
     });
     return { id: company.id, name: company.name, slug: company.slug, phone: company.phone };

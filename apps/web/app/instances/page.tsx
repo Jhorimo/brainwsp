@@ -6,7 +6,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
 import { StatusPill } from '@/components/status-pill';
-import { apiFetch, getStoredCompany, getToken, SOCKET_URL } from '@/lib/api';
+import { apiFetch, getStoredCompany, getToken, SOCKET_URL, updateStoredCompany } from '@/lib/api';
 
 type WidgetConfig = { displayName?: string; welcomeMessage?: string; color?: string; position?: 'left' | 'right'; buttonText?: string; autoOpen?: boolean };
 type Instance = {
@@ -40,7 +40,11 @@ export default function InstancesPage() {
   const [widgetConfigDraft, setWidgetConfigDraft] = useState<WidgetConfig>({});
   const [savingWidgetConfig, setSavingWidgetConfig] = useState(false);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
-  const companySlug = (getStoredCompany<{ slug?: string }>().slug) || '';
+  const [companySlug, setCompanySlug] = useState(() => getStoredCompany<{ slug?: string }>().slug || '');
+  const [editSlugOpen, setEditSlugOpen] = useState(false);
+  const [slugDraft, setSlugDraft] = useState('');
+  const [slugError, setSlugError] = useState('');
+  const [savingSlug, setSavingSlug] = useState(false);
 
   const load = useCallback(async () => {
     try { setInstances(await apiFetch<Instance[]>('/instances')); } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
@@ -168,6 +172,28 @@ export default function InstancesPage() {
     try { await navigator.clipboard.writeText(embedSnippet); setCopiedSnippet(true); setTimeout(() => setCopiedSnippet(false), 2000); } catch {}
   };
 
+  const openEditSlug = () => {
+    setSlugDraft(companySlug);
+    setSlugError('');
+    setEditSlugOpen(true);
+  };
+
+  const saveSlug = async () => {
+    const next = slugDraft.trim().toLowerCase();
+    if (next.length < 3) { setSlugError('Mínimo 3 caracteres'); return; }
+    setSavingSlug(true); setSlugError('');
+    try {
+      const updated = await apiFetch<{ slug: string }>('/team/company', { method: 'PATCH', body: JSON.stringify({ slug: next }) });
+      setCompanySlug(updated.slug);
+      updateStoredCompany({ slug: updated.slug });
+      setEditSlugOpen(false);
+    } catch (err) {
+      setSlugError(err instanceof Error ? err.message : 'No se pudo guardar el enlace');
+    } finally {
+      setSavingSlug(false);
+    }
+  };
+
   return (
     <AppShell title="WhatsApp" subtitle="Administra las conexiones y sesiones" actions={<button className="button primary" onClick={() => setCreateOpen(true)}><Plus size={16} />Nueva instancia</button>}>
       {error && <div className="error-box">{error}</div>}
@@ -188,7 +214,13 @@ export default function InstancesPage() {
           ) : (
             <>
               <div className="instance-meta">
-                <div className="meta-item"><span>Enlace público</span><strong style={{ wordBreak: 'break-all' }}>{publicLink || 'Configura el slug de tu empresa'}</strong></div>
+                <div className="meta-item">
+                  <span>Enlace público</span>
+                  <strong style={{ wordBreak: 'break-all', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {publicLink || 'Configura el slug de tu empresa'}
+                    <button className="icon-button ghost small" title="Cambiar enlace" onClick={openEditSlug}><Pencil size={12} /></button>
+                  </strong>
+                </div>
                 <div className="meta-item"><span>Conversaciones recibidas</span><strong>{clieneraChannel.inboundCount}</strong></div>
                 <div className="meta-item"><span>Respuestas enviadas</span><strong>{clieneraChannel.outboundCount}</strong></div>
               </div>
@@ -253,6 +285,30 @@ export default function InstancesPage() {
             <div className="modal-actions">
               <button className="button" onClick={() => setEditInstance(null)}>Cancelar</button>
               <button className="button primary" disabled={savingEdit || !editName.trim() || !editSlug.trim()} onClick={() => void saveEdit()}>{savingEdit ? 'Guardando...' : 'Guardar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editSlugOpen && (
+        <div className="modal-backdrop" onClick={() => setEditSlugOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header"><h2>Enlace público</h2><p>El identificador que usan tus clientes para hablarte: <code>{SITE_URL}/c/&lt;enlace&gt;</code></p></div>
+            <div className="modal-body form-grid">
+              {slugError && <div className="error-box">{slugError}</div>}
+              <div className="field">
+                <label>Enlace</label>
+                <input
+                  value={slugDraft}
+                  onChange={(e) => setSlugDraft(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void saveSlug(); }}
+                />
+              </div>
+              <div className="warning-box">Si lo cambias, el enlace y el script que ya hayas repartido (en tu web, redes, QR) dejan de funcionar — tendrás que actualizarlos con el nuevo.</div>
+            </div>
+            <div className="modal-actions">
+              <button className="button" onClick={() => setEditSlugOpen(false)}>Cancelar</button>
+              <button className="button primary" disabled={savingSlug || slugDraft.trim().length < 3} onClick={() => void saveSlug()}>{savingSlug ? 'Guardando...' : 'Guardar'}</button>
             </div>
           </div>
         </div>

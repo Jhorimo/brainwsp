@@ -6,21 +6,49 @@
   var origin = script.src.replace(/\/widget\.js.*$/, '');
   var position = script.getAttribute('data-position') === 'left' ? 'left' : 'right';
 
-  var CHAT_ICON = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
-  var CLOSE_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  var CHAT_ICON = '<svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+  var CLOSE_ICON = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
   var side = position === 'left' ? 'left:20px;' : 'right:20px;';
+
+  // Mismo degradé + sombra de color que el header del panel (ver chat.css `shade()`),
+  // reimplementado acá porque widget.js es un script estático, sin acceso a ese módulo.
+  function shade(hex, amount) {
+    var num = parseInt(hex.replace('#', ''), 16);
+    var clamp = function (c) { return Math.max(0, Math.min(255, c)); };
+    var r = clamp(((num >> 16) & 255) + amount);
+    var g = clamp(((num >> 8) & 255) + amount);
+    var b = clamp((num & 255) + amount);
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+  function hexToRgb(hex) {
+    var num = parseInt(hex.replace('#', ''), 16);
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+  }
+  function paintLauncher(color) {
+    var rgb = hexToRgb(color);
+    var glow = 'rgba(' + rgb.join(',') + ',.45)';
+    launcher.style.background = 'linear-gradient(145deg, ' + shade(color, 18) + ', ' + shade(color, -26) + ')';
+    launcher.style.boxShadow = '0 10px 26px -6px ' + glow + ', 0 2px 6px rgba(0,0,0,.18), inset 0 1px 1px rgba(255,255,255,.35)';
+  }
 
   var launcher = document.createElement('button');
   launcher.setAttribute('aria-label', 'Abrir chat');
   launcher.innerHTML = CHAT_ICON;
   launcher.style.cssText =
-    'position:fixed;bottom:20px;' + side +
-    'z-index:2147483000;width:58px;height:58px;border-radius:50%;border:none;' +
-    'background:#6b8afd;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;' +
-    'box-shadow:0 10px 24px -6px rgba(0,0,0,.35);transition:transform .18s ease,box-shadow .18s ease;';
-  launcher.onmouseenter = function () { launcher.style.transform = 'scale(1.06)'; };
+    'position:fixed;bottom:22px;' + side +
+    'z-index:2147483000;width:58px;height:58px;border-radius:50%;' +
+    'border:1.5px solid rgba(255,255,255,.3);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;' +
+    'transform:scale(0);opacity:0;' +
+    'transition:transform .22s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease,background .25s ease;';
+  paintLauncher('#6b8afd');
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () { launcher.style.transform = 'scale(1)'; launcher.style.opacity = '1'; });
+  });
+  launcher.onmouseenter = function () { launcher.style.transform = 'scale(1.07)'; };
   launcher.onmouseleave = function () { launcher.style.transform = 'scale(1)'; };
+  launcher.onmousedown = function () { launcher.style.transform = 'scale(0.94)'; };
+  launcher.onmouseup = function () { launcher.style.transform = 'scale(1.07)'; };
 
   var teaser = document.createElement('div');
   teaser.style.cssText =
@@ -72,7 +100,7 @@
     if (!data || typeof data !== 'object') return;
     if (data.type === 'clienera:ready') {
       if (data.color) {
-        launcher.style.background = data.color;
+        paintLauncher(data.color);
         teaser.style.borderColor = data.color;
       }
       if (data.autoOpen && !open) {

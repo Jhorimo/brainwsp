@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { MODULE_KEYS, type ModuleKey } from '../common/constants/modules';
 
 export class CreateTeamUserDto {
@@ -194,6 +194,14 @@ export class UpdateCompanyDto {
   @IsString()
   @MaxLength(40)
   phone?: string;
+
+  @ApiPropertyOptional({ description: 'Identificador del enlace público de Clienera Chat (clienera.com/<slug>) y del widget embebible. Solo minúsculas, números y guiones.', example: 'brain-tech' })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(60)
+  @Matches(/^[a-z0-9-]+$/, { message: 'El enlace solo puede tener minúsculas, números y guiones' })
+  slug?: string;
 }
 
 export class UpdateAiSettingsDto {
