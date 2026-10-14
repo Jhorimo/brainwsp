@@ -31,6 +31,7 @@
   --chat-outgoing-border: #d5e6fb;
   --tooltip-bg: #172033;
   --tooltip-text: #ffffff;
+  --theme-switch-thumb-shadow: 0 1px 3px rgba(20, 42, 80, .12);
   --calendar-agent-1: #2a78d6;
   --calendar-agent-2: #eb6834;
   --calendar-agent-3: #1baf7a;
@@ -634,10 +635,17 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .topbar p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .topbar-left { display: flex; align-items: center; gap: 16px; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
-.theme-toggle { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); }
-.theme-toggle select { min-width: 0; max-width: 110px; border: 0; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
+.theme-toggle { position: relative; display: inline-flex; align-items: center; justify-content: space-between; flex-shrink: 0; width: 68px; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--muted); transition: background-color .2s ease, border-color .2s ease; }
+.theme-toggle-thumb { position: absolute; top: 3px; left: 3px; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); box-shadow: var(--theme-switch-thumb-shadow); transition: transform .2s ease, background-color .2s ease; }
+.theme-toggle > svg { position: relative; flex-shrink: 0; pointer-events: none; }
+.theme-toggle-sun { color: var(--brand-text); }
+.theme-toggle[aria-checked="true"] { background: var(--brand-soft); }
+.theme-toggle[aria-checked="true"] .theme-toggle-thumb { transform: translateX(32px); background: var(--brand-text); border-color: var(--brand-text); }
+.theme-toggle[aria-checked="true"] .theme-toggle-sun { color: var(--muted); }
+.theme-toggle[aria-checked="true"] .theme-toggle-moon { color: var(--brand); }
 .theme-toggle:hover { border-color: var(--line-strong); }
-.theme-toggle:focus-within { outline: 2px solid var(--brand-light); outline-offset: 2px; }
+.theme-toggle:focus-visible { outline: 2px solid var(--brand-light); outline-offset: 3px; border-radius: 999px; }
+@media (prefers-reduced-motion: reduce) { .theme-toggle, .theme-toggle-thumb { transition: none; } }
 :where(:root[data-theme="dark"]) :is(input, textarea, select) { background-color: var(--input-bg); color: var(--text); }
 :root[data-theme="dark"] input::placeholder, :root[data-theme="dark"] textarea::placeholder { color: var(--muted); opacity: 1; }
 :root[data-theme="dark"] :is(input, textarea, select):disabled { opacity: .65; }
@@ -647,10 +655,7 @@ textarea:focus-visible, [tabindex]:focus-visible {
   .topbar-left { min-width: 0; gap: 8px; }
   .topbar-left > div { min-width: 0; }
   .topbar-actions { flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
-  .theme-toggle { height: 34px; padding: 0 6px; gap: 3px; }
-  .theme-toggle select { max-width: 95px; font-size: 11px; }
-  .theme-toggle > svg { display: none; }
-  .flow-editor-toolbar { height: auto; min-height: 62px; padding: 10px; flex-wrap: wrap; }
+  .flow-editor-shell .flow-editor-toolbar { height: auto; min-height: 62px; padding: 10px; flex-wrap: wrap; }
   .flow-editor-toolbar-right { flex-wrap: wrap; }
 }
 .sidebar-toggle { width: 40px; height: 40px; flex-shrink: 0; border: 1px solid var(--line); background: var(--surface); color: var(--text-neutral-1); border-radius: 11px; display: grid; place-items: center; }

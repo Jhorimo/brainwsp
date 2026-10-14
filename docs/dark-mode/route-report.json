@@ -1,0 +1,638 @@
+{
+  "functional": "persist/system/explicit/cross-tab/public: passed",
+  "results": [
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "card plan-usage-card",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "",
+        "",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "stat-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/conversations",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "chat-layout ",
+        "button small",
+        "",
+        "icon-button ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-header",
+        "icon-button ",
+        "icon-button chat-header-action-extra",
+        "icon-button chat-header-action-extra",
+        "icon-button chat-header-action-extra",
+        "message-bubble   "
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/conversations",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/instances",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "instance-card",
+        "",
+        "instance-card",
+        "button small",
+        "button small",
+        "button small",
+        "button small",
+        "instance-card",
+        "button small",
+        "button small",
+        "button small"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/instances",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/team",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "table-card",
+        "icon-button ",
+        "button small",
+        "button small ",
+        "card",
+        "button small",
+        "icon-button ",
+        "button small"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/team",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/calendar",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "card",
+        "calendar-sidebar",
+        "button small",
+        "icon-button",
+        "icon-button"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/calendar",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/crm/pipelines",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "status-select",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "",
+        "",
+        "kanban-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/crm/pipelines",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/crm/leads",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "",
+        "status-select",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "",
+        "",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/crm/leads",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/crm/deals",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "",
+        "status-select",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "",
+        "",
+        "table-card",
+        "status-select"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/crm/deals",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/automations",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/automations",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/automations/templates",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "chat-quick-tab ",
+        "template-card",
+        "template-card",
+        "template-card",
+        "template-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/automations/templates",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/automations/qa-flow",
+      "theme": "light",
+      "white": [
+        "flow-editor-toolbar",
+        "button small",
+        "theme-toggle",
+        "button small",
+        "button small ",
+        "flow-edge-delete nodrag nopan",
+        "flow-node flow-node-start",
+        "flow-node flow-node-content"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/automations/qa-flow",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/incidents",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/incidents",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/api-settings",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "",
+        "button",
+        "table-card",
+        "card",
+        "card",
+        "lang-tab ",
+        "lang-tab ",
+        "lang-tab ",
+        "lang-tab ",
+        "lang-tab ",
+        "lang-tab ",
+        "lang-tab "
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/api-settings",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/feedback",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/feedback",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/my-plan",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "icon-button",
+        "card plan-usage-card",
+        "plan-mode-pill qr",
+        "card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/my-plan",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/clients",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "stat-card",
+        "stat-card",
+        "stat-card",
+        "table-card table-card-fit"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/clients",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/plans",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/plans",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/licenses",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/licenses",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/payment-methods",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/payment-methods",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/payment-requests",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "chat-quick-tab ",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/payment-requests",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/announcements",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "table-card",
+        "",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/announcements",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/suggestions",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/suggestions",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/security",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "",
+        "status-select",
+        "status-select",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/security",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/admin/settings",
+      "theme": "light",
+      "white": [
+        "sidebar-toggle",
+        "theme-toggle",
+        "table-card",
+        "",
+        "",
+        "table-card"
+      ],
+      "overflow": false
+    },
+    {
+      "route": "/admin/settings",
+      "theme": "dark",
+      "white": [],
+      "overflow": false
+    },
+    {
+      "route": "/dashboard",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/conversations",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/instances",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/team",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/calendar",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/crm/pipelines",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/crm/leads",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/crm/deals",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/automations",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/automations/templates",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/automations/qa-flow",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/incidents",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/api-settings",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/feedback",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/my-plan",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/clients",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/plans",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/licenses",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/payment-methods",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/payment-requests",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/announcements",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/suggestions",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/security",
+      "mobile": true,
+      "overflow": false
+    },
+    {
+      "route": "/admin/settings",
+      "mobile": true,
+      "overflow": false
+    }
+  ],
+  "errors": []
+}

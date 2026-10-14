@@ -2,6 +2,18 @@
 
 Alcance: panel y administración. Landing, login, registro, legales, widget público y Open Graph permanecen claros. Sidebar, logotipo, medios y bloques de código conservan sus colores de marca. No se modifica la API ni la base de datos.
 
+## Actualización: interruptor claro/oscuro
+
+El selector desplegable fue sustituido por un botón tipo switch con sol, luna y un indicador deslizante. Hay solo dos modos. Sin preferencia guardada, el panel abre **en claro**, incluso si el sistema está en oscuro; las elecciones manuales se recuerdan. El antiguo valor `system`, valores inválidos y storage bloqueado se interpretan como claro.
+
+El botón funciona con clic, Espacio y Enter, expone `role="switch"` y `aria-checked`, mantiene foco visible y omite la animación cuando se pide reducir movimiento. Se comparte entre panel, administración y editor de flujos.
+
+[Escritorio claro](dark-mode/theme-switch-dashboard-1440-light.png) · [Escritorio oscuro](dark-mode/theme-switch-dashboard-1440-dark.png) · [Móvil claro](dark-mode/theme-switch-dashboard-390-light.png) · [Móvil oscuro](dark-mode/theme-switch-dashboard-390-dark.png).
+
+Verificado con 4 pruebas de tema y revisión en Chromium del panel, administración y editor, en claro/oscuro a 1440 px y 390 px: clic y teclado, persistencia tras recargar, sincronización entre pestañas, sistema oscuro sin preferencia, valor antiguo `system` y almacenamiento bloqueado. Sin errores JavaScript. La barra del editor móvil ahora crece con sus botones para que el lienzo no cubra el interruptor.
+
+La validación inicial y sus capturas se conservan abajo como historial del trabajo de paleta. El informe actual del interruptor se encuentra en [theme-switch-report.json](dark-mode/theme-switch-report.json).
+
 ## Inventario previo
 
 CSS original: 1615 líneas. 291 literales distintos contando CSS y TSX; el conteo incluye vistas públicas, SVG y valores de configuración.
@@ -611,6 +623,7 @@ Valores finales. Las variantes numéricas conservan matices del CSS original par
 | `--text-warning-4` | `#6b4600` | `#f6cf89` |
 | `--text-warning-5` | `#d97706` | `#f6cf89` |
 | `--text-warning-6` | `#d9702b` | `#f6cf89` |
+| `--theme-switch-thumb-shadow` | `0 1px 3px rgba(20, 42, 80, .12)` | `0 1px 3px rgba(20, 42, 80, .12)` |
 | `--tooltip-bg` | `#172033` | `#334157` |
 | `--tooltip-text` | `#ffffff` | `#e5ecf7` |
 | `--topbar-bg` | `rgba(255,255,255,.88)` | `rgba(22,30,45,.94)` |
@@ -663,7 +676,7 @@ Valores finales. Las variantes numéricas conservan matices del CSS original par
 - QR: SVG negro sobre blanco y margen de seguridad blanco en ambos temas.
 - El fondo del chat contiene un SVG con colores codificados `%23d9d0c0`. Se conserva el recurso original en claro y se atenúa mediante `background-blend-mode: soft-light` en oscuro.
 
-## Validación
+## Validación de la entrega inicial
 
 Verificado el 2026-10-14, con Chromium y datos simulados. No se conectó a sesiones reales ni se enviaron mensajes.
 
@@ -685,14 +698,14 @@ Las pruebas visuales de autenticación y recursos usan una API simulada. No se r
 ## Implementación
 
 - Sin dependencias nuevas en el proyecto. `ThemeProvider` comparte preferencia y tema resuelto para panel, portales, emojis y React Flow.
-- La clave `brainwsp_theme` acepta `light`, `dark`, `system`; un valor ausente o inválido sigue al sistema. Acceso a storage protegido con `try/catch`.
-- El script del head y el proveedor comparten clave, consulta de medios y regla de rutas públicas. Los cambios internos de ruta se aplican antes de pintar mediante layout effect.
+- La clave `brainwsp_theme` acepta `light` y `dark`; un valor ausente, inválido o `system` anterior usa claro. Acceso a storage protegido con `try/catch`.
+- El script del head y el proveedor comparten clave y regla de rutas públicas; no siguen la preferencia del sistema. Los cambios internos de ruta se aplican antes de pintar mediante layout effect.
 - Tokens separados para fondos de marca y texto de marca/estado; el texto oscuro no reutiliza el azul profundo de un botón.
 - Colores elegidos por usuarios permanecen como datos; `color-mix` aclara su texto en oscuro y mantiene su indicador original.
 - Sidebar azul de marca; QR blanco/negro; landing, login, registro, legales, widget y Open Graph conservan su apariencia clara.
 - Se entrega el conjunto en el árbol de trabajo local, sin commits, PR ni publicación. El inventario se creó antes de los cambios y las fases se validaron de forma secuencial.
 
-## Capturas
+## Capturas de la entrega inicial
 
 Datos ficticios de Empresa Demo. Las capturas corresponden a un navegador de desarrollo.
 

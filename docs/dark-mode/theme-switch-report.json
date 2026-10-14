@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "fresh session defaults to light on dark OS",
+    "click, reload, Space and Enter",
+    "cross-tab sync",
+    "panel, admin, editor: desktop/mobile in both modes",
+    "legacy automatic, cleared storage and system changes stay light",
+    "blocked storage defaults light and remembers toggle in memory"
+  ],
+  "errors": []
+}

@@ -1,0 +1,112 @@
+{
+  "parity": [
+    {
+      "route": "/dashboard",
+      "identical": false,
+      "styleDifferences": []
+    },
+    {
+      "route": "/conversations",
+      "identical": false,
+      "styleDifferences": []
+    },
+    {
+      "route": "/instances",
+      "identical": true,
+      "styleDifferences": []
+    },
+    {
+      "route": "/team",
+      "identical": true,
+      "styleDifferences": []
+    },
+    {
+      "route": "/calendar",
+      "identical": false,
+      "styleDifferences": []
+    },
+    {
+      "route": "/crm/pipelines",
+      "identical": false,
+      "styleDifferences": []
+    },
+    {
+      "route": "/crm/deals",
+      "identical": false,
+      "styleDifferences": []
+    },
+    {
+      "route": "/automations/qa-flow",
+      "identical": false,
+      "styleDifferences": []
+    },
+    {
+      "route": "/admin/settings",
+      "identical": true,
+      "styleDifferences": []
+    },
+    {
+      "route": "/api-settings",
+      "identical": true,
+      "styleDifferences": []
+    },
+    {
+      "route": "/my-plan",
+      "identical": false,
+      "styleDifferences": []
+    }
+  ],
+  "contrast": [
+    {
+      "route": "/dashboard",
+      "low": []
+    },
+    {
+      "route": "/conversations",
+      "low": []
+    },
+    {
+      "route": "/instances",
+      "low": []
+    },
+    {
+      "route": "/team",
+      "low": []
+    },
+    {
+      "route": "/calendar",
+      "low": []
+    },
+    {
+      "route": "/crm/pipelines",
+      "low": []
+    },
+    {
+      "route": "/crm/deals",
+      "low": []
+    },
+    {
+      "route": "/automations/qa-flow",
+      "low": []
+    },
+    {
+      "route": "/admin/settings",
+      "low": []
+    },
+    {
+      "route": "/api-settings",
+      "low": []
+    },
+    {
+      "route": "/my-plan",
+      "low": []
+    }
+  ],
+  "checks": [
+    "bootstrap before hydration",
+    "blocked storage, change and soft navigation",
+    "logout/login soft navigation restores dark preference",
+    "dark QR screenshot decoded successfully"
+  ],
+  "errors": []
+}

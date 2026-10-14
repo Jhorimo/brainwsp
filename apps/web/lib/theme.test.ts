@@ -23,26 +23,26 @@ test('a saved dark preference applies before hydration, regardless of the system
   assert.equal(bootstrap('/admin/settings', 'dark', false), 'dark');
 });
 
-test('automatic follows the system; explicit preferences override it', () => {
-  assert.equal(resolveTheme('system', true, '/dashboard'), 'dark');
-  assert.equal(resolveTheme('system', false, '/dashboard'), 'light');
-  assert.equal(resolveTheme('light', true, '/dashboard'), 'light');
-  assert.equal(resolveTheme('dark', false, '/dashboard'), 'dark');
+test('light is the default even when the system prefers dark', () => {
+  assert.equal(bootstrap('/dashboard', null, true), 'light');
+  assert.equal(bootstrap('/dashboard', 'light', true), 'light');
+  assert.equal(resolveTheme('light', '/dashboard'), 'light');
+  assert.equal(resolveTheme('dark', '/dashboard'), 'dark');
 });
 
 test('public pages stay light while the saved panel preference remains dark', () => {
   for (const path of ['/', '/login', '/register', '/terminos', '/privacidad', '/c/demo']) {
     assert.equal(bootstrap(path, 'dark', true), 'light', path);
-    assert.equal(resolveTheme('dark', true, path), 'light', path);
+    assert.equal(resolveTheme('dark', path), 'light', path);
   }
   assert.equal(bootstrap('/automations/demo', 'dark', false), 'dark');
 });
 
-test('missing, invalid, or inaccessible storage falls back to system', () => {
-  for (const saved of [null, '', 'invalid']) {
-    assert.equal(parseThemePreference(saved), 'system');
-    assert.equal(bootstrap('/instances', saved, true), 'dark');
+test('missing, legacy automatic, invalid, or inaccessible storage falls back to light', () => {
+  for (const saved of [null, '', 'system', 'invalid']) {
+    assert.equal(parseThemePreference(saved), 'light');
+    assert.equal(bootstrap('/instances', saved, true), 'light');
     assert.equal(bootstrap('/instances', saved, false), 'light');
   }
-  assert.equal(bootstrap('/instances', null, true, true), 'dark');
+  assert.equal(bootstrap('/instances', null, true, true), 'light');
 });

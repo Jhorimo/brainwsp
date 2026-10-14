@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { parseThemePreference, resolveTheme, THEME_MEDIA_QUERY, THEME_STORAGE_KEY, type ResolvedTheme, type ThemePreference } from '@/lib/theme';
+import { parseThemePreference, resolveTheme, THEME_STORAGE_KEY, type ResolvedTheme, type ThemePreference } from '@/lib/theme';
 
 type ThemeContextValue = {
   preference: ThemePreference;
@@ -14,13 +14,13 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [preference, setPreferenceState] = useState<ThemePreference>('system');
+  const [preference, setPreferenceState] = useState<ThemePreference>('light');
   const [theme, setTheme] = useState<ResolvedTheme>('light');
-  const preferenceRef = useRef<ThemePreference>('system');
+  const preferenceRef = useRef<ThemePreference>('light');
   const initialized = useRef(false);
 
   const apply = (next: ThemePreference) => {
-    const resolved = resolveTheme(next, window.matchMedia(THEME_MEDIA_QUERY).matches, pathname);
+    const resolved = resolveTheme(next, pathname);
     document.documentElement.dataset.theme = resolved;
     setTheme(resolved);
   };
@@ -39,9 +39,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       initialized.current = true;
       setPreferenceState(preferenceRef.current);
     }
-    const media = window.matchMedia(THEME_MEDIA_QUERY);
     const sync = () => {
-      const resolved = resolveTheme(preferenceRef.current, media.matches, pathname);
+      const resolved = resolveTheme(preferenceRef.current, pathname);
       document.documentElement.dataset.theme = resolved;
       setTheme(resolved);
     };
@@ -56,10 +55,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       sync();
     };
     sync();
-    media.addEventListener('change', sync);
     window.addEventListener('storage', onStorage);
     return () => {
-      media.removeEventListener('change', sync);
       window.removeEventListener('storage', onStorage);
     };
   }, [pathname]);
