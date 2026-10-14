@@ -190,7 +190,7 @@ export default function DealsPage() {
                   {deal.notes && <NoteButton notes={deal.notes} />}
                 </td>
                 <td>
-                  <select className="status-select" style={{ color: deal.stage.color, borderColor: `${deal.stage.color}55`, background: `${deal.stage.color}18` }} value={deal.stage.id} onChange={(e) => void updateDeal(deal, { stageId: e.target.value })}>
+                  <select className="status-select" style={{ color: `color-mix(in srgb, ${deal.stage.color} var(--user-color-weight), var(--text))`, borderColor: `${deal.stage.color}55`, background: `${deal.stage.color}18` }} value={deal.stage.id} onChange={(e) => void updateDeal(deal, { stageId: e.target.value })}>
                     {currentDepartment?.stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
                   </select>
                 </td>
@@ -209,7 +209,7 @@ export default function DealsPage() {
                 <td>{deal.project?.name || '—'}</td>
                 <td>{deal.expectedCloseAt ? new Date(deal.expectedCloseAt).toLocaleDateString('es-PE') : '—'}</td>
                 <td>{deal.probability != null ? `${deal.probability}%` : '—'}</td>
-                <td>{deal.contactTags?.length ? deal.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
+                <td>{deal.contactTags?.length ? deal.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: `color-mix(in srgb, ${tag.color} var(--user-color-weight), var(--text))`, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
                 <td style={{ textAlign: 'right' }}><button className="button small danger" disabled={busyId === deal.id} onClick={() => void remove(deal)}><Trash2 size={13} /></button></td>
               </tr>
             ))}

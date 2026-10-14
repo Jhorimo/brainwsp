@@ -5,6 +5,7 @@ import '@xyflow/react/dist/style.css';
 import { Layers, X } from 'lucide-react';
 import { nodeTypes } from '../[id]/flow-nodes';
 import type { FlowTemplate } from './data';
+import { useTheme } from '@/components/theme-provider';
 
 function toReactFlow(graph: FlowTemplate['graph']): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = graph.nodes.map((node) => ({ id: node.id, type: node.type, position: node.position, data: (node.data as Record<string, unknown>) || {} }));
@@ -13,6 +14,7 @@ function toReactFlow(graph: FlowTemplate['graph']): { nodes: Node[]; edges: Edge
 }
 
 export function TemplatePreviewModal({ template, onClose, onUse }: { template: FlowTemplate; onClose: () => void; onUse: () => void }) {
+  const { theme } = useTheme();
   const { nodes, edges } = toReactFlow(template.graph);
 
   return (
@@ -27,6 +29,7 @@ export function TemplatePreviewModal({ template, onClose, onUse }: { template: F
         <div className="template-preview-canvas">
           <ReactFlowProvider>
             <ReactFlow
+              colorMode={theme}
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}

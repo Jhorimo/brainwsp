@@ -99,7 +99,7 @@ export default function MyPlanPage() {
           </div>
 
           <div className="plan-tiles">
-            <div className="plan-tile" style={{ borderLeftColor: '#3ec6d6' }}>
+            <div className="plan-tile" style={{ borderLeftColor: 'var(--text-info-12)' }}>
               <div className="plan-tile-icon"><Calendar size={15} /></div>
               <div className="plan-tile-label">Vencimiento</div>
               <div className={`plan-tile-value ${planUrgent ? 'danger' : ''}`}>

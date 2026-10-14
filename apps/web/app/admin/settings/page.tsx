@@ -105,7 +105,7 @@ export default function AdminSettingsPage() {
           <button type="button" className="button primary" disabled={saving} onClick={save}>
             {saving ? 'Guardando...' : 'Guardar cambios'}
           </button>
-          {saved && <span style={{ color: 'var(--success)', fontSize: 11, alignSelf: 'center' }}>Guardado</span>}
+          {saved && <span style={{ color: 'var(--success-text)', fontSize: 11, alignSelf: 'center' }}>Guardado</span>}
         </div>
       </section>
 

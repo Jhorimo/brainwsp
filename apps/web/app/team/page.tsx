@@ -411,7 +411,7 @@ export default function TeamPage() {
                 <div className="field">
                   <label>Correo</label>
                   <input type="email" value={agentForm.email} onChange={(e) => setAgentForm({ ...agentForm, email: e.target.value })} placeholder="carlos@empresa.com" style={emailTaken ? { borderColor: 'var(--danger)' } : undefined} />
-                  {emailTaken && <p className="field-hint" style={{ color: 'var(--danger)' }}>Ya existe un usuario con este correo — usa otro para no duplicar el acceso.</p>}
+                  {emailTaken && <p className="field-hint" style={{ color: 'var(--danger-text)' }}>Ya existe un usuario con este correo — usa otro para no duplicar el acceso.</p>}
                 </div>
                 <div className="field"><label>Contraseña inicial</label><input type="password" value={agentForm.password} onChange={(e) => setAgentForm({ ...agentForm, password: e.target.value })} placeholder="Mínimo 10 caracteres" /></div>
                 <div className="field"><label>Rol</label><select value={agentForm.role} onChange={(e) => setAgentForm({ ...agentForm, role: e.target.value as TeamUser['role'] })}><option value="AGENT">Agente</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></div>

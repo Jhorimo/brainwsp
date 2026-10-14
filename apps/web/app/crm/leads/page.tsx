@@ -218,7 +218,7 @@ export default function LeadsPage() {
                   </select>
                 </td>
                 <td>{lead.project?.name || '—'}</td>
-                <td>{lead.contactTags?.length ? lead.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
+                <td>{lead.contactTags?.length ? lead.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: `color-mix(in srgb, ${tag.color} var(--user-color-weight), var(--text))`, borderColor: `${tag.color}55` }}>{tag.name}</span>) : '—'}</td>
                 <td>{lead.channel || '—'}</td>
                 <td>{lead.value ? `USD ${lead.value.toLocaleString('es-PE')}` : '—'}</td>
                 <td>

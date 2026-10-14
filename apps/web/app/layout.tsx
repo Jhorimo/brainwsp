@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { AnnouncementsProvider } from '@/components/announcements-provider';
 import { ConfirmProvider } from '@/components/confirm-provider';
+import { ThemeProvider } from '@/components/theme-provider';
+import { THEME_INIT_SCRIPT } from '@/lib/theme';
 import './globals.css';
 
 // Self-hosted at build time (no runtime request to Google) — globals.css was already
@@ -51,8 +53,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" className={inter.variable}>
-      <body><ConfirmProvider><AnnouncementsProvider>{children}</AnnouncementsProvider></ConfirmProvider></body>
+    <html lang="es" className={inter.variable} data-theme="light" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} /></head>
+      <body><ThemeProvider><ConfirmProvider><AnnouncementsProvider>{children}</AnnouncementsProvider></ConfirmProvider></ThemeProvider></body>
     </html>
   );
 }

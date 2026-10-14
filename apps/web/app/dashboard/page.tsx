@@ -242,9 +242,9 @@ export default function DashboardPage() {
   // "Volumen" queda como la serie rellena (fill) — es casi siempre la más grande de las tres
   // (varios mensajes por conversación), igual que la referencia rellena su métrica "Total".
   const activityChartSeries: ChartSeries[] = [
-    { key: 'volume', label: 'Volumen de Mensajes', color: '#2563eb', fill: true, points: volume.map((day) => ({ date: day.date, value: day.inbound + day.outbound })) },
-    { key: 'interactions', label: 'Interacciones Totales', color: '#d97706', points: volume.map((day) => ({ date: day.date, value: day.interactions })) },
-    { key: 'contacts', label: 'Nuevos Contactos', color: '#168a55', points: contactsNew.map((day) => ({ date: day.date, value: day.count })) },
+    { key: 'volume', label: 'Volumen de Mensajes', color: 'var(--text-info-2)', fill: true, points: volume.map((day) => ({ date: day.date, value: day.inbound + day.outbound })) },
+    { key: 'interactions', label: 'Interacciones Totales', color: 'var(--text-warning-5)', points: volume.map((day) => ({ date: day.date, value: day.interactions })) },
+    { key: 'contacts', label: 'Nuevos Contactos', color: 'var(--success-text)', points: contactsNew.map((day) => ({ date: day.date, value: day.count })) },
   ];
   const totalContacts = contactsNew.reduce((sum, day) => sum + day.count, 0);
   const totalInteractions = volume.reduce((sum, day) => sum + day.inbound + day.outbound, 0);
@@ -424,13 +424,13 @@ export default function DashboardPage() {
                         {department.stages.filter((stage) => stage.count > 0).map((stage) => (
                           <div key={stage.id} className="pipeline-bar-seg" style={{ width: `${(stage.count / total) * 100}%`, background: stage.color }} title={`${stage.name}: ${stage.count}`} />
                         ))}
-                        {department.noStage > 0 && <div className="pipeline-bar-seg" style={{ width: `${(department.noStage / total) * 100}%`, background: '#dde1ea' }} title={`Sin etapa: ${department.noStage}`} />}
+                        {department.noStage > 0 && <div className="pipeline-bar-seg" style={{ width: `${(department.noStage / total) * 100}%`, background: 'var(--border-neutral-16)' }} title={`Sin etapa: ${department.noStage}`} />}
                       </div>
                       <div className="pipeline-legend">
                         {department.stages.filter((stage) => stage.count > 0).map((stage) => (
                           <span className="pipeline-legend-item" key={stage.id}><span className="pipeline-legend-dot" style={{ background: stage.color }} />{stage.name} · {stage.count}</span>
                         ))}
-                        {department.noStage > 0 && <span className="pipeline-legend-item muted"><span className="pipeline-legend-dot" style={{ background: '#dde1ea' }} />Sin etapa · {department.noStage}</span>}
+                        {department.noStage > 0 && <span className="pipeline-legend-item muted"><span className="pipeline-legend-dot" style={{ background: 'var(--border-neutral-16)' }} />Sin etapa · {department.noStage}</span>}
                       </div>
                     </>
                   ) : <p className="contact-empty-hint">Sin conversaciones abiertas en este departamento.</p>}

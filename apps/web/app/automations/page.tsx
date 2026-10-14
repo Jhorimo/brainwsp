@@ -250,7 +250,7 @@ export default function AutomationsPage() {
               <Fragment key={flow.id}>
                 <tr>
                   <td>
-                    <div className="row-main"><Zap size={13} style={{ verticalAlign: -2, marginRight: 6, color: 'var(--brand)' }} />{flow.name}</div>
+                    <div className="row-main"><Zap size={13} style={{ verticalAlign: -2, marginRight: 6, color: 'var(--brand-text)' }} />{flow.name}</div>
                   </td>
                   <td>{flow.triggerKeywords.map((keyword) => <span key={keyword} className="status-pill neutral" style={{ marginRight: 4 }}>{keyword}</span>)}</td>
                   <td>{flow.folder ? <span className="status-pill info">{flow.folder.name}</span> : <span className="row-sub">Sin carpeta</span>}</td>
@@ -299,7 +299,7 @@ export default function AutomationsPage() {
                         {moveTarget === NEW_FOLDER_VALUE && (
                           <input value={moveNewFolderName} onChange={(e) => setMoveNewFolderName(e.target.value)} placeholder="Nombre de la carpeta" autoFocus style={{ maxWidth: 180 }} />
                         )}
-                        {moveError && <span className="row-sub" style={{ color: 'var(--danger)' }}>{moveError}</span>}
+                        {moveError && <span className="row-sub" style={{ color: 'var(--danger-text)' }}>{moveError}</span>}
                         <button className="button small primary" type="button" disabled={moveSaving} onClick={() => void submitMove(flow)}>{moveSaving ? 'Moviendo...' : 'Mover'}</button>
                         <button className="button small" type="button" onClick={() => setMoveOpenId(null)}>Cancelar</button>
                       </div>

@@ -218,7 +218,7 @@ export default function AdminClientsPage() {
                   <td><Radio size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.instances} inst. · <MessagesSquare size={11} style={{ verticalAlign: -1, marginRight: 3, opacity: .5 }} />{company._count.conversations} conv.</td>
                   <td>{new Date(company.createdAt).toLocaleDateString('es-PE')}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button className="button small" onClick={() => openModules(company)}><LayoutGrid size={13} />Módulos{company.moduleOverrides.length > 0 && <Sparkles size={11} color="#d97706" style={{ marginLeft: 4 }} />}</button>{' '}
+                    <button className="button small" onClick={() => openModules(company)}><LayoutGrid size={13} />Módulos{company.moduleOverrides.length > 0 && <Sparkles size={11} color="var(--text-warning-5)" style={{ marginLeft: 4 }} />}</button>{' '}
                     <button className="button small info" disabled={busyId === company.id} onClick={() => void viewPanel(company)}>{busyId === company.id ? '...' : 'Ver panel'}</button>{' '}
                     <button className={`button small ${company.active ? 'danger' : 'primary'}`} onClick={() => void toggleActive(company)}>{company.active ? 'Suspender' : 'Activar'}</button>{' '}
                     <button className="button small danger" disabled={busyId === company.id} onClick={() => void deleteCompany(company)}>Eliminar</button>

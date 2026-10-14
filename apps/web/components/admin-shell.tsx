@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BrandIcon } from './brand-mark';
+import { ThemeToggle } from './theme-toggle';
 import { usePathname, useRouter } from 'next/navigation';
 import { Building2, Check, ChevronDown, CreditCard, FileCheck, KeyRound, Lightbulb, LogOut, Megaphone, Menu, Settings, ShieldCheck, Wallet } from 'lucide-react';
 import { apiFetch, clearAuthSession, getStoredUser, getToken, updateStoredUser } from '@/lib/api';
@@ -64,7 +65,7 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
       setName(String(user.name || 'Super Admin'));
       setEmail(String(user.email || ''));
     } catch {}
-    setCollapsed(localStorage.getItem('brainwsp_admin_sidebar_collapsed') === '1');
+    try { setCollapsed(localStorage.getItem('brainwsp_admin_sidebar_collapsed') === '1'); } catch {}
   }, []);
 
   const openProfile = () => {
@@ -121,7 +122,7 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
   const toggleCollapsed = () => {
     setCollapsed((current) => {
       const next = !current;
-      localStorage.setItem('brainwsp_admin_sidebar_collapsed', next ? '1' : '0');
+      try { localStorage.setItem('brainwsp_admin_sidebar_collapsed', next ? '1' : '0'); } catch {}
       return next;
     });
     setMobileNavOpen((current) => !current);
@@ -180,7 +181,7 @@ export function AdminShell({ title, subtitle, children, actions }: { title: stri
                 {subtitle && <p>{subtitle}</p>}
               </div>
             </div>
-            <div className="topbar-actions">{actions}</div>
+            <div className="topbar-actions"><ThemeToggle />{actions}</div>
           </header>
           <div className="page-content">{children}</div>
         </main>

@@ -69,7 +69,7 @@ function DealCard({ deal }: { deal: Deal }) {
       {deal.project && <span className="kanban-card-project">{deal.project.name}</span>}
       {!!deal.contactTags?.length && (
         <div className="kanban-card-tags">
-          {deal.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}</span>)}
+          {deal.contactTags.map((tag) => <span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: `color-mix(in srgb, ${tag.color} var(--user-color-weight), var(--text))`, borderColor: `${tag.color}55` }}>{tag.name}</span>)}
         </div>
       )}
       <div className="kanban-card-footer">

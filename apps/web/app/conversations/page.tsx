@@ -6,7 +6,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
-import type { EmojiClickData } from 'emoji-picker-react';
+import { Theme as EmojiTheme, type EmojiClickData } from 'emoji-picker-react';
+import { useTheme } from '@/components/theme-provider';
 import { AppShell } from '@/components/app-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { MultiSelectFilter } from '@/components/multi-select-filter';
@@ -232,17 +233,17 @@ function fileExtLabel(fileName?: string | null, mimeType?: string | null) {
 // reads as red, a spreadsheet as green, etc. instead of one generic grey icon for
 // everything. Falls back to a plain icon for anything outside this common set.
 const FILE_TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
-  PDF: { bg: '#fbe7e5', fg: '#dc4a3a' },
-  DOC: { bg: '#e5edfb', fg: '#3467d6' },
-  DOCX: { bg: '#e5edfb', fg: '#3467d6' },
-  XLS: { bg: '#e3f4e9', fg: '#1e8f52' },
-  XLSX: { bg: '#e3f4e9', fg: '#1e8f52' },
-  CSV: { bg: '#e3f4e9', fg: '#1e8f52' },
-  PPT: { bg: '#fcebe0', fg: '#d9702b' },
-  PPTX: { bg: '#fcebe0', fg: '#d9702b' },
-  ZIP: { bg: '#f0eafb', fg: '#7749d1' },
-  RAR: { bg: '#f0eafb', fg: '#7749d1' },
-  TXT: { bg: '#ebeef2', fg: '#5c6b80' },
+  PDF: { bg: 'var(--doc-pdf-bg)', fg: 'var(--text-danger-4)' },
+  DOC: { bg: 'var(--doc-word-bg)', fg: 'var(--text-info-13)' },
+  DOCX: { bg: 'var(--doc-word-bg)', fg: 'var(--text-info-13)' },
+  XLS: { bg: 'var(--doc-sheet-bg)', fg: 'var(--text-success-6)' },
+  XLSX: { bg: 'var(--doc-sheet-bg)', fg: 'var(--text-success-6)' },
+  CSV: { bg: 'var(--doc-sheet-bg)', fg: 'var(--text-success-6)' },
+  PPT: { bg: 'var(--doc-slides-bg)', fg: 'var(--text-warning-6)' },
+  PPTX: { bg: 'var(--doc-slides-bg)', fg: 'var(--text-warning-6)' },
+  ZIP: { bg: 'var(--doc-archive-bg)', fg: 'var(--text-info-14)' },
+  RAR: { bg: 'var(--doc-archive-bg)', fg: 'var(--text-info-14)' },
+  TXT: { bg: 'var(--surface-neutral-28)', fg: 'var(--text-neutral-14)' },
 };
 // For pre-filling a <input type="datetime-local">, which needs local time with no
 // timezone suffix — `toISOString()` would shift it to UTC and show the wrong hour.
@@ -280,6 +281,7 @@ function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 export default function ConversationsPage() {
+  const { theme } = useTheme();
   const confirm = useConfirm();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2404,10 +2406,10 @@ export default function ConversationsPage() {
         <div className={`contact-panel-backdrop ${contactPanelOpen ? 'open' : ''}`} onClick={() => setContactPanelOpen(false)} />
         <aside className={`contact-panel ${contactPanelOpen ? 'mobile-open' : ''}`}>
           <button className="icon-button ghost contact-panel-close" onClick={() => setContactPanelOpen(false)} title="Cerrar"><X size={18} /></button>
-          {selected ? <><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label>{editingTagId === tag.id ? (<input className="tag-menu-name-input" autoFocus value={editingTagName} onChange={(e) => setEditingTagName(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Enter') void saveTagName(tag.id); if (e.key === 'Escape') { cancelTagEditRef.current = true; setEditingTagId(null); } }} onBlur={() => void saveTagName(tag.id)} />) : (<button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>)}{canDeleteTags && editingTagId !== tag.id && <button className="tag-menu-edit" onClick={(e) => { e.stopPropagation(); startEditTagName(tag); }} title="Renombrar etiqueta"><Pencil size={12} /></button>}{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: tag.color, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
+          {selected ? <><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0,display:'flex',alignItems:'center',gap:6}}><TagIcon size={13} />Etiquetas</h4><div className="tag-add-wrap" ref={tagMenuRef}><button className="icon-button" onClick={() => setTagMenuOpen((v) => !v)} title="Agregar etiqueta"><Plus size={14} /></button>{tagMenuOpen && (<div className="tag-menu">{companyTags.filter((tag) => !selected.contact.tags?.some((t) => t.tag.id === tag.id)).map((tag) => (<div className="tag-menu-row" key={tag.id}><label className="tag-dot-picker" style={{ background: tag.color }} title="Cambiar color" onClick={(e) => e.stopPropagation()}><input type="color" value={tag.color} onChange={(e) => void updateTagColor(tag.id, e.target.value)} /></label>{editingTagId === tag.id ? (<input className="tag-menu-name-input" autoFocus value={editingTagName} onChange={(e) => setEditingTagName(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Enter') void saveTagName(tag.id); if (e.key === 'Escape') { cancelTagEditRef.current = true; setEditingTagId(null); } }} onBlur={() => void saveTagName(tag.id)} />) : (<button className="tag-menu-name" onClick={() => void addTag(tag.id)}>{tag.name}</button>)}{canDeleteTags && editingTagId !== tag.id && <button className="tag-menu-edit" onClick={(e) => { e.stopPropagation(); startEditTagName(tag); }} title="Renombrar etiqueta"><Pencil size={12} /></button>}{canDeleteTags && <button className="tag-menu-delete" onClick={() => void deleteCompanyTag(tag)} title="Eliminar etiqueta de la empresa"><Trash2 size={12} /></button>}</div>))}{!companyTags.length && <p className="contact-empty-hint">Aún no hay etiquetas.</p>}<div className="tag-menu-create"><input type="color" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} title="Color" /><input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder="Nueva etiqueta..." onKeyDown={(e) => { if (e.key === 'Enter') void createTag(); }} /><button onClick={() => void createTag()} disabled={!newTagName.trim()}><Plus size={12} /></button></div></div>)}</div></div><div className="tag-pills">{selected.contact.tags?.map(({ tag }) => (<span className="tag-pill" key={tag.id} style={{ background: `${tag.color}22`, color: `color-mix(in srgb, ${tag.color} var(--user-color-weight), var(--text))`, borderColor: `${tag.color}55` }}>{tag.name}<button onClick={() => void removeTag(tag.id)} title="Quitar etiqueta"><X size={10} /></button></span>))}{!selected.contact.tags?.length && <p className="contact-empty-hint">Sin etiquetas.</p>}</div></div><div className="contact-section"><h4>Etapa</h4>{selected.department ? (() => {
               const stages = stagesByDept[selected.department!.id] || [];
               return stages.length ? (
-                <select className="lead-stage-select" style={{ background: `${(selected.stage?.color) || '#eef1f7'}22`, borderColor: `${(selected.stage?.color) || '#dde1ea'}55`, color: selected.stage?.color || '#5b6478' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>
+                <select className="lead-stage-select" style={{ background: selected.stage?.color ? `${selected.stage.color}22` : 'var(--stage-empty-bg)', borderColor: selected.stage?.color ? `${selected.stage.color}55` : 'var(--stage-empty-border)', color: selected.stage?.color ? `color-mix(in srgb, ${selected.stage.color} var(--user-color-weight), var(--text))` : 'var(--text-neutral-15)' }} value={selected.stage?.id || ''} onChange={(e) => void updateStage(e.target.value || null)}>
                   <option value="">Sin etapa</option>
                   {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
                 </select>
@@ -2678,7 +2680,7 @@ export default function ConversationsPage() {
     )}
     {showEmoji && emojiPos && typeof document !== 'undefined' && createPortal(
       <div ref={emojiPopoverRef} className="emoji-popover" style={{ top: emojiPos.top, left: emojiPos.left }}>
-        <EmojiPicker onEmojiClick={insertEmoji} />
+        <EmojiPicker theme={theme === 'dark' ? EmojiTheme.DARK : EmojiTheme.LIGHT} onEmojiClick={insertEmoji} />
       </div>,
       document.body,
     )}
@@ -2784,7 +2786,7 @@ export default function ConversationsPage() {
         return (
           <div ref={reactionMenuRef} className={`reaction-picker ${reactionMoreOpen ? 'expanded' : ''}`} style={{ top: reactionPos.top, left: reactionPos.left }}>
             {reactionMoreOpen ? (
-              <EmojiPicker onEmojiClick={(data) => void sendReaction(message, data.emoji)} />
+              <EmojiPicker theme={theme === 'dark' ? EmojiTheme.DARK : EmojiTheme.LIGHT} onEmojiClick={(data) => void sendReaction(message, data.emoji)} />
             ) : (
               <>
                 {QUICK_REACTIONS.map((emoji) => (

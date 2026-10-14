@@ -17,6 +17,8 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Plus, Save, Settings, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { useTheme } from '@/components/theme-provider';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { edgeTypes } from './flow-edges';
 import { MenuConfigModal } from './menu-config-modal';
 import { nodeTypes } from './flow-nodes';
@@ -39,6 +41,7 @@ function toReactFlow(graph: FlowDetail['graph']): { nodes: Node[]; edges: Edge[]
 }
 
 function EditorInner() {
+  const { theme } = useTheme();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const flowId = params.id;
@@ -210,6 +213,7 @@ function EditorInner() {
             <button className={`button primary small`} type="button" onClick={() => setLibraryOpen((v) => !v)}><Plus size={14} /> Añadir módulo</button>
             {libraryOpen && <NodeLibrary onSelectContent={addContentNode} onSelectWait={addWaitNode} onSelectMenu={addMenuNode} onClose={() => setLibraryOpen(false)} />}
           </div>
+          <ThemeToggle />
           <button className="button small" type="button" onClick={openConfig}><Settings size={14} /> Configurar</button>
           <button className={`button small ${simulatorOpen ? 'info' : ''}`} type="button" onClick={() => setSimulatorOpen((v) => !v)}><Sparkles size={14} /> Simular</button>
           <button className="button primary small" type="button" disabled={saving} onClick={() => void persistGraph()}>
@@ -223,6 +227,7 @@ function EditorInner() {
       <div className="flow-editor-canvas-row">
         <div className="flow-editor-canvas">
           <ReactFlow
+            colorMode={theme}
             nodes={displayNodes}
             edges={edges}
             onNodesChange={onNodesChange}

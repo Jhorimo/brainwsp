@@ -26,8 +26,8 @@ type Identity = { key: string; label: string; color: string };
 
 // Validated categorical palette (dataviz skill, light-surface set) — fixed order, never
 // cycled; identities past the 8th slot fold into the muted "otros" gray below.
-const AGENT_PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
-const FALLBACK_COLOR = '#748097';
+const AGENT_PALETTE = Array.from({ length: 8 }, (_, index) => `var(--calendar-agent-${index + 1})`);
+const FALLBACK_COLOR = 'var(--muted)';
 const colorForIndex = (i: number) => (i < AGENT_PALETTE.length ? AGENT_PALETTE[i] : FALLBACK_COLOR);
 
 const ROW_HEIGHT = 52; // px per hour
@@ -421,8 +421,8 @@ export default function CalendarPage() {
                           height: Math.max((endMin - startMin) * pxPerMin, 40),
                           left: `calc(${(lane / laneCount) * 100}% + 2px)`,
                           width: `calc(${100 / laneCount}% - 4px)`,
-                          background: `${color}1a`,
-                          borderColor: `${color}55`,
+                          background: `color-mix(in srgb, ${color} 10.1960784314%, transparent)`,
+                          borderColor: `color-mix(in srgb, ${color} 33.3333333333%, transparent)`,
                           color,
                         }}
                       >

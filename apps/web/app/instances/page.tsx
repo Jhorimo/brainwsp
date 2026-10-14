@@ -206,7 +206,7 @@ export default function InstancesPage() {
           </div>
           {!clieneraChannel ? (
             <>
-              <p style={{ fontSize: 12, color: '#748097', margin: '4px 0 12px' }}>Permite que tus clientes te escriban directamente desde tu web, Instagram o cualquier enlace, sin depender de WhatsApp.</p>
+              <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 12px' }}>Permite que tus clientes te escriban directamente desde tu web, Instagram o cualquier enlace, sin depender de WhatsApp.</p>
               <div className="instance-actions">
                 <button className="button small primary" disabled={activatingChat} onClick={() => void activateClieneraChat()}><Plus size={14} />{activatingChat ? 'Activando...' : 'Activar Clienera Chat'}</button>
               </div>
@@ -268,7 +268,7 @@ export default function InstancesPage() {
         ))}
       </div>
 
-      {qrInstance?.qr && <div className="qr-backdrop" onClick={() => setQrInstance(null)}><div className="modal" onClick={(e) => e.stopPropagation()}><div className="modal-header"><h2>Vincular {qrInstance.name}</h2><p>En WhatsApp: Dispositivos vinculados → Vincular dispositivo. El QR se actualiza automáticamente si la sesión lo renueva.</p></div><div className="modal-body"><div className="qr-box"><QRCodeSVG value={qrInstance.qr} size={230} level="M" /></div><div style={{textAlign:'center',fontSize:10,color:'#748097',marginTop:12}}>Estado: {qrInstance.status}</div></div><div className="modal-actions"><button className="button" onClick={() => setQrInstance(null)}>Cerrar</button></div></div></div>}
+      {qrInstance?.qr && <div className="qr-backdrop" onClick={() => setQrInstance(null)}><div className="modal" onClick={(e) => e.stopPropagation()}><div className="modal-header"><h2>Vincular {qrInstance.name}</h2><p>En WhatsApp: Dispositivos vinculados → Vincular dispositivo. El QR se actualiza automáticamente si la sesión lo renueva.</p></div><div className="modal-body"><div className="qr-box"><QRCodeSVG value={qrInstance.qr} size={230} level="M" /></div><div style={{textAlign:'center',fontSize:10,color:'var(--muted)',marginTop:12}}>Estado: {qrInstance.status}</div></div><div className="modal-actions"><button className="button" onClick={() => setQrInstance(null)}>Cerrar</button></div></div></div>}
 
       {createOpen && <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>Nueva instancia</h2><p>Crea un canal independiente de WhatsApp para ventas, soporte, delivery u otra área.</p></div><div className="modal-body form-grid"><div className="field"><label>Nombre</label><input value={name} onChange={(e) => setName(e.target.value)} /></div><div className="field"><label>Slug</label><input value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} /></div><div className="field"><label>Proveedor</label><select><option>BAILEYS</option></select></div></div><div className="modal-actions"><button className="button" onClick={() => setCreateOpen(false)}>Cancelar</button><button className="button primary" onClick={() => void create()}>Crear instancia</button></div></div></div>}
 
@@ -327,7 +327,7 @@ export default function InstancesPage() {
                 <input type="checkbox" checked={!!widgetConfigDraft.autoOpen} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, autoOpen: e.target.checked }))} />
                 Abrir automáticamente al entrar a la página
               </label>
-              <p style={{ fontSize: 11, color: '#92a0b5', margin: '-6px 0 0' }}>
+              <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
                 {widgetConfigDraft.autoOpen
                   ? 'El panel de chat se abre solo apenas el visitante carga la página.'
                   : 'El visitante solo ve el botón flotante; el chat se abre al hacer clic.'}

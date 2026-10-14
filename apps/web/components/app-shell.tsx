@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BrandIcon } from './brand-mark';
+import { ThemeToggle } from './theme-toggle';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -128,8 +129,10 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem('brainwsp_sidebar_collapsed') === '1');
-    setImpersonating(isImpersonating());
+    try {
+      setCollapsed(localStorage.getItem('brainwsp_sidebar_collapsed') === '1');
+      setImpersonating(isImpersonating());
+    } catch {}
   }, []);
 
   const returnToAdmin = () => {
@@ -147,7 +150,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const toggleCollapsed = () => {
     setCollapsed((current) => {
       const next = !current;
-      localStorage.setItem('brainwsp_sidebar_collapsed', next ? '1' : '0');
+      try { localStorage.setItem('brainwsp_sidebar_collapsed', next ? '1' : '0'); } catch {}
       return next;
     });
     setMobileNavOpen((current) => !current);
@@ -448,6 +451,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
               </div>
             </div>
             <div className="topbar-actions">
+              <ThemeToggle />
               {actions}
               <button className="icon-button" type="button" aria-label="Configuración" title="Mi perfil y configuración" onClick={openProfile}><Settings size={19} /></button>
             </div>
@@ -527,7 +531,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                               </button>
                             )}
                           </div>
-                          {phoneError && <span className="row-sub" style={{ color: 'var(--danger)' }}>{phoneError}</span>}
+                          {phoneError && <span className="row-sub" style={{ color: 'var(--danger-text)' }}>{phoneError}</span>}
                         </div>
                       )}
                     </div>
@@ -543,7 +547,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                           const keys = (node.children ?? [node]).map((child) => child.key);
                           const activeCount = keys.filter((key) => effectiveModules.includes(key)).length;
                           const StatusIcon = activeCount === keys.length ? Check : activeCount === 0 ? Lock : Minus;
-                          const statusColor = activeCount === keys.length ? '#16a34a' : activeCount === 0 ? '#94a3b8' : '#d97706';
+                          const statusColor = activeCount === keys.length ? 'var(--text-success-5)' : activeCount === 0 ? 'var(--text-neutral-13)' : 'var(--text-warning-5)';
                           return (
                             <div key={node.key} className="module-group">
                               <div className="module-row">
@@ -558,7 +562,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                                     const active = effectiveModules.includes(child.key);
                                     return (
                                       <div className="member-option" key={child.key} style={{ border: 0, padding: '4px 0', cursor: 'default' }}>
-                                        {active ? <Check size={13} color="#16a34a" /> : <Lock size={12} color="#94a3b8" />}
+                                        {active ? <Check size={13} color="var(--text-success-5)" /> : <Lock size={12} color="var(--text-neutral-13)" />}
                                         <div><strong style={{ opacity: active ? 1 : .55 }}>{child.label}</strong></div>
                                       </div>
                                     );
