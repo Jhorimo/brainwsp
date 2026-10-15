@@ -70,6 +70,7 @@ jobs:
                   build-args: |
                       NEXT_PUBLIC_API_URL=https://${{ env.API_HOST }}/api
                       NEXT_PUBLIC_SOCKET_URL=https://${{ env.API_HOST }}
+                      NEXT_PUBLIC_SITE_URL=https://${{ env.APP_HOST }}
                   tags: |
                       ${{ env.IMAGE_PREFIX }}-web:latest
                       ${{ env.IMAGE_PREFIX }}-web:${{ github.sha }}
