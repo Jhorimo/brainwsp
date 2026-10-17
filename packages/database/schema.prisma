@@ -504,6 +504,11 @@ model Contact {
   waId          String
   visitorId     String?        @unique
   source        String?
+  // Página/dominio donde el visitante tenía abierto Clienera Chat (ej. el ERP de un cliente,
+  // "gastromaq.erp.brainpos.pe/venta/orden/37") — reportado por widget.js en cada
+  // WidgetService.startSession, para que soporte sepa de qué cliente se trata sin preguntar.
+  // Se actualiza con la última página; null para contactos de WhatsApp u otros canales.
+  sourceUrl     String?
   phone         String?
   name          String?
   pushName      String?

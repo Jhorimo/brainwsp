@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { AlertTriangle, ArrowDown, ArrowUp, Bold, Calendar, Clock, Contact as ContactIcon, Hand, Image as ImageIcon, Menu, Mic, MessageSquareText, Paperclip, Phone, Power, Search, Smile, Timer, Trash2, Upload, User, Video, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
+import emojiDataEs from 'emoji-picker-react/dist/data/emojis-es.json';
 import { apiFetch } from '@/lib/api';
 import { blockMediaSrc, newBlockId, type ContentBlock } from '../types';
 import { DurationPicker } from './duration-picker';
@@ -360,7 +361,7 @@ export function NodeConfigModal({ label: initialLabel, blocks: initialBlocks, on
         {popover && typeof document !== 'undefined' && createPortal(
           <div ref={popoverRef} className={popover.kind === 'emoji' ? 'emoji-popover' : 'variables-popover'} style={{ top: popover.top, left: popover.left }}>
             {popover.kind === 'emoji' ? (
-              <EmojiPicker onEmojiClick={(data: EmojiClickData) => { insertIntoActive(data.emoji); setPopover(null); }} />
+              <EmojiPicker onEmojiClick={(data: EmojiClickData) => { insertIntoActive(data.emoji); setPopover(null); }} emojiData={emojiDataEs} />
             ) : (
               <>
                 <div className="variables-popover-search">

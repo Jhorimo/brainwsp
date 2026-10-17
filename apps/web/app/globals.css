@@ -1103,6 +1103,8 @@ tr:last-child td { border-bottom: 0; }
 .chat-header-meta .chat-header-phone { color: var(--muted) !important; flex-shrink: 0; }
 .chat-header-meta .chat-header-phone::after { content: '·'; margin-left: 4px; color: var(--muted); }
 .chat-header-meta .chat-header-status { color: var(--success-text) !important; }
+.chat-header-meta .chat-header-source { display: inline-flex !important; align-items: center; gap: 3px; color: var(--muted) !important; flex-shrink: 0; }
+.chat-header-meta .chat-header-source::before { content: '·'; margin-right: 4px; color: var(--muted); }
 .chat-header-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 /* Escondido en escritorio (ahi entran los 7 botones sin problema) — el breakpoint de abajo
    lo muestra y esconde .chat-header-action-extra, que es donde vive el resto. */

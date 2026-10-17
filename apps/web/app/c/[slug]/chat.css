@@ -20,7 +20,11 @@
 }
 .cc-standalone .cc-panel { width: 100%; max-width: 400px; height: min(680px, calc(100dvh - 48px)); border-radius: 20px; box-shadow: 0 24px 60px -16px rgba(20, 30, 60, 0.25); overflow: hidden; }
 
-.cc-panel { display: flex; flex-direction: column; height: 100%; background: #fff; }
+.cc-panel { position: relative; display: flex; flex-direction: column; height: 100%; background: #fff; }
+
+/* Arrastrar y soltar un archivo sobre el panel */
+.cc-drop-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.92); pointer-events: none; }
+.cc-drop-box { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 28px; border: 2px dashed var(--cc-color); border-radius: 16px; color: var(--cc-color); font-size: 13px; font-weight: 600; }
 
 .cc-center { display: flex; align-items: center; justify-content: center; height: 100dvh; font-family: 'Inter', system-ui, sans-serif; color: #7a8294; font-size: 14px; }
 
@@ -64,6 +68,8 @@
 /* Imágenes y archivos adjuntos */
 .cc-bubble-media { padding: 4px; overflow: hidden; }
 .cc-image { display: block; max-width: 100%; max-height: 240px; border-radius: 12px; object-fit: cover; }
+.cc-video { display: block; max-width: 100%; max-height: 240px; border-radius: 12px; background: #000; }
+.cc-audio { display: block; width: 230px; max-width: 100%; margin: 4px 3px; }
 .cc-caption { padding: 6px 7px 2px; font-size: 13px; }
 .cc-file { display: flex; align-items: center; gap: 10px; text-decoration: none; cursor: pointer; }
 .cc-row-agent .cc-file { color: #23283a; }
@@ -86,6 +92,10 @@
 .cc-send { border: none; border-radius: 50%; width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: transform 0.12s ease, opacity 0.12s ease; }
 .cc-send:disabled { opacity: 0.4; cursor: default; }
 .cc-send:not(:disabled):hover { transform: scale(1.06); }
+
+.cc-recording { flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 13px; font-weight: 600; color: #c0392b; }
+.cc-recording-dot { width: 8px; height: 8px; border-radius: 50%; background: #e74c3c; animation: cc-pulse 1s ease-in-out infinite; }
+@keyframes cc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .cc-footer { flex-shrink: 0; text-align: center; padding: 7px 0 9px; font-size: 10.5px; color: #adb2c0; background: #fff; }
 .cc-footer strong { color: #747c91; font-weight: 700; }

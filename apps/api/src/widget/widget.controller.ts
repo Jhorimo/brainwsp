@@ -47,7 +47,7 @@ export class WidgetController {
   @Post(':widgetPublicKey/session')
   startSession(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: StartWidgetSessionDto) {
     this.guardRateLimit(req);
-    return this.service.startSession(widgetPublicKey, dto.token);
+    return this.service.startSession(widgetPublicKey, dto.token, dto.pageUrl);
   }
 
   @Post(':widgetPublicKey/messages')

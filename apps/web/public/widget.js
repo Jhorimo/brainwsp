@@ -5,6 +5,12 @@
   if (!slug) return;
   var origin = script.src.replace(/\/widget\.js.*$/, '');
   var position = script.getAttribute('data-position') === 'left' ? 'left' : 'right';
+  // Dominio + ruta de la página donde vive este script (ej. el ERP de un cliente,
+  // "gastromaq.erp.brainpos.pe/venta/orden/37") — se la pasamos a /c/[slug] para que la
+  // guarde en el contacto y soporte sepa de qué cliente se trata sin preguntar. Sin query
+  // string ni hash: podrían traer tokens de sesión del sitio anfitrión.
+  var pageUrl = '';
+  try { pageUrl = window.location.origin + window.location.pathname; } catch (e) {}
 
   // Clave de localStorage para "minimizado" — por slug de empresa (no por widgetPublicKey,
   // que recién se conoce tras el bootstrap) y por navegador: pensado para cuando este script
@@ -118,7 +124,7 @@
 
   var frame = document.createElement('iframe');
   frame.title = 'Chat';
-  frame.src = origin + '/c/' + encodeURIComponent(slug) + '?embed=1';
+  frame.src = origin + '/c/' + encodeURIComponent(slug) + '?embed=1' + (pageUrl ? '&pageUrl=' + encodeURIComponent(pageUrl) : '');
   frame.style.cssText =
     'position:fixed;bottom:88px;' + side +
     'width:368px;height:540px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 120px);' +
@@ -182,6 +188,7 @@
     var data = event.data;
     if (!data || typeof data !== 'object') return;
     if (data.type === 'clienera:ready') {
+      reposition(data.position);
       if (data.color) {
         paintLauncher(data.color);
         teaser.style.borderColor = data.color;
@@ -217,6 +224,38 @@
       setOpen(false);
     }
   });
+
+  // El atributo data-position del <script> es solo una adivinanza para el primer pintado
+  // (sin esperar la red, para no arrancar invisible) — la posición real la decide el panel
+  // ("Instancias → Clienera Chat → Personalizar"), que llega recién acá. Si difieren (p.ej.
+  // el <script> ya pegado en la web del cliente es viejo o no tiene el atributo), se
+  // reposiciona todo al lado correcto en vez de quedarse pegado al valor adivinado.
+  function reposition(newPosition) {
+    if (newPosition !== 'left' && newPosition !== 'right') return;
+    if (newPosition === position) return;
+    position = newPosition;
+
+    if (position === 'left') { launcher.style.left = '20px'; launcher.style.right = ''; }
+    else { launcher.style.right = '20px'; launcher.style.left = ''; }
+
+    if (position === 'left') { minimizeBadge.style.left = '20px'; minimizeBadge.style.right = ''; }
+    else { minimizeBadge.style.right = '20px'; minimizeBadge.style.left = ''; }
+
+    if (position === 'left') { restoreTab.style.left = '0'; restoreTab.style.right = ''; restoreTab.style.borderRadius = '0 10px 10px 0'; }
+    else { restoreTab.style.right = '0'; restoreTab.style.left = ''; restoreTab.style.borderRadius = '10px 0 0 10px'; }
+    restoreTab.innerHTML = CHEVRON_ICON(position === 'left' ? 'right' : 'left');
+
+    if (position === 'left') {
+      teaser.style.left = '90px'; teaser.style.right = '';
+      teaser.style.borderBottomLeftRadius = '4px'; teaser.style.borderBottomRightRadius = '14px';
+    } else {
+      teaser.style.right = '90px'; teaser.style.left = '';
+      teaser.style.borderBottomRightRadius = '4px'; teaser.style.borderBottomLeftRadius = '14px';
+    }
+
+    if (position === 'left') { frame.style.left = '20px'; frame.style.right = ''; }
+    else { frame.style.right = '20px'; frame.style.left = ''; }
+  }
 
   teaser.addEventListener('click', function () { setOpen(true); });
 

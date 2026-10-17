@@ -6,6 +6,12 @@ export class StartWidgetSessionDto {
   @IsOptional()
   @IsString()
   token?: string;
+
+  @ApiPropertyOptional({ description: 'Origen (dominio + ruta) de la página donde está embebido el widget, reportado por widget.js — para que soporte sepa de qué cliente se trata' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  pageUrl?: string;
 }
 
 export class SendWidgetMessageDto {

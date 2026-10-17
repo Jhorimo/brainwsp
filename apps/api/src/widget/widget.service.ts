@@ -17,12 +17,17 @@ const VISITOR_SESSION_DAYS = 180;
 // AGENTS.md "no aceptar archivos ejecutables libremente" y el punto 22/23 del brief.
 const WIDGET_MAX_MEDIA_BYTES = 15 * 1024 * 1024;
 
-// Lista blanca deliberadamente corta para Fase 1 del widget (imágenes + PDF, ver punto 22
-// del brief) — nada de ejecutables, scripts, ni el "application/* => DOCUMENT" permisivo
-// que sí usa conversations.service.ts para el panel interno (agentes de confianza).
+// Lista blanca del widget (imágenes, PDF, audio y video — ver punto 22 del brief): nada de
+// ejecutables, scripts, ni el "application/* => DOCUMENT" permisivo que sí usa
+// conversations.service.ts para el panel interno (agentes de confianza). audio/video quedan
+// abiertos por prefijo (en vez de una lista fija de mimetypes) porque el formato que entrega
+// el MediaRecorder del navegador varía por navegador/SO (audio/webm;codecs=opus,
+// audio/ogg;codecs=opus, video/webm, etc.) — WIDGET_MAX_MEDIA_BYTES sigue acotando el abuso.
 function widgetMessageType(mimetype: string): MessageType | null {
   if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mimetype)) return MessageType.IMAGE;
   if (mimetype === 'application/pdf') return MessageType.DOCUMENT;
+  if (mimetype.startsWith('audio/')) return MessageType.AUDIO;
+  if (mimetype.startsWith('video/')) return MessageType.VIDEO;
   return null;
 }
 
@@ -120,13 +125,17 @@ export class WidgetService {
   // Sin registro: a un visitante nuevo se le crea Contact + VisitorSession en el momento.
   // Si ya traía un token válido (localStorage de una visita anterior), se reconoce al mismo
   // contacto y se le devuelve el id de su conversación existente, si la tiene.
-  async startSession(widgetPublicKey: string, existingToken?: string) {
+  // pageUrl viene de widget.js (window.location del sitio donde está embebido, ej. el ERP de
+  // un cliente) — se guarda/actualiza en el Contact para que soporte vea de inmediato de qué
+  // cliente se trata sin preguntar (ver Contact.sourceUrl en schema.prisma).
+  async startSession(widgetPublicKey: string, existingToken?: string, pageUrl?: string) {
     const instance = await this.resolveChannel(widgetPublicKey);
 
     if (existingToken) {
       const session = await this.findSession(instance.companyId, existingToken);
       if (session) {
         await this.prisma.visitorSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
+        if (pageUrl) await this.prisma.contact.update({ where: { id: session.contactId }, data: { sourceUrl: pageUrl } });
         const conversation = await this.prisma.conversation.findUnique({
           where: { instanceId_contactId: { instanceId: instance.id, contactId: session.contactId } },
           select: { id: true },
@@ -137,7 +146,7 @@ export class WidgetService {
 
     const visitorId = randomUUID();
     const contact = await this.prisma.contact.create({
-      data: { companyId: instance.companyId, waId: `web:${visitorId}`, visitorId, source: 'widget' },
+      data: { companyId: instance.companyId, waId: `web:${visitorId}`, visitorId, source: 'widget', sourceUrl: pageUrl },
     });
     const token = generateVisitorToken();
     await this.prisma.visitorSession.create({
@@ -248,7 +257,7 @@ export class WidgetService {
   async sendMedia(widgetPublicKey: string, token: string, file: Express.Multer.File | undefined, caption?: string) {
     if (!file) throw new BadRequestException('Archivo requerido');
     const type = widgetMessageType(file.mimetype);
-    if (!type) throw new BadRequestException('Tipo de archivo no soportado. Solo se aceptan imágenes y PDF.');
+    if (!type) throw new BadRequestException('Tipo de archivo no soportado. Solo se aceptan imágenes, PDF, audio o video.');
 
     const configuredMax = await this.systemSettings.maxMediaSizeBytes();
     const maxBytes = Math.min(configuredMax, WIDGET_MAX_MEDIA_BYTES);

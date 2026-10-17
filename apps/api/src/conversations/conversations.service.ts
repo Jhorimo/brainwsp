@@ -147,7 +147,7 @@ export class ConversationsService {
         ],
       },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, sourceUrl: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
@@ -788,7 +788,7 @@ export class ConversationsService {
     return this.prisma.conversation.findFirst({
       where: { id, companyId },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, sourceUrl: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },

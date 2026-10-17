@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
-import { FileText, MessageCircle, Paperclip, Send, Smile, X } from 'lucide-react';
+import { FileText, Mic, MessageCircle, Paperclip, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
+import emojiDataEs from 'emoji-picker-react/dist/data/emojis-es.json';
 import { ClieneraMark } from '@/components/brand-mark';
 import './chat.css';
 
@@ -13,8 +14,21 @@ const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
-const ACCEPTED_FILE_TYPES = 'image/jpeg,image/png,image/gif,image/webp,application/pdf';
+// El `accept` del input de archivo es solo una sugerencia del selector del SO — la
+// validación real (acá y en WidgetService.widgetMessageType) es por prefijo para audio/video.
+const ACCEPTED_FILE_TYPES = 'image/jpeg,image/png,image/gif,image/webp,application/pdf,video/*,audio/*';
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+function isAcceptedFile(file: File) {
+  if (['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'].includes(file.type)) return true;
+  return file.type.startsWith('video/') || file.type.startsWith('audio/');
+}
+
+function formatRecordTime(seconds: number) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
 
 type Bootstrap = {
   widgetPublicKey: string; companyName: string; welcomeMessage: string; color: string; buttonText: string;
@@ -80,10 +94,18 @@ export default function PublicChatPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiBoxRef = useRef<HTMLDivElement>(null);
+  const dragCounterRef = useRef(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 1. Resuelve el canal por el slug de la empresa y arranca/recupera la sesión del visitante.
   useEffect(() => {
@@ -102,10 +124,14 @@ export default function PublicChatPage() {
         }
 
         const storedToken = localStorage.getItem(storageKey(data.widgetPublicKey, 'token'));
+        // pageUrl lo agrega widget.js al src del iframe (origen+ruta de la página del
+        // cliente donde está embebido) — se la pasamos al backend para guardarla en el
+        // contacto (ver Contact.sourceUrl) y que soporte sepa de qué cliente es sin preguntar.
+        const pageUrl = searchParams.get('pageUrl') || undefined;
         const session = await fetch(`${API_URL}/widget/${data.widgetPublicKey}/session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: storedToken || undefined }),
+          body: JSON.stringify({ token: storedToken || undefined, pageUrl }),
         }).then((r) => r.json() as Promise<{ token: string; conversationId: string | null }>);
         if (cancelled) return;
 
@@ -152,6 +178,13 @@ export default function PublicChatPage() {
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [messages]);
 
+  // Libera el micrófono y el timer si el visitante cierra/navega fuera con una grabación
+  // a medias — si no, el navegador deja el ícono de "micrófono en uso" activo.
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
   // Cierra el popover de emojis al tocar fuera de él.
   useEffect(() => {
     if (!showEmoji) return;
@@ -191,8 +224,8 @@ export default function PublicChatPage() {
       setUploadError('El archivo supera 15 MB.');
       return;
     }
-    if (!ACCEPTED_FILE_TYPES.split(',').includes(file.type)) {
-      setUploadError('Solo se aceptan imágenes (JPG, PNG, GIF, WEBP) o PDF.');
+    if (!isAcceptedFile(file)) {
+      setUploadError('Solo se aceptan imágenes, PDF, audio o video.');
       return;
     }
     setUploading(true);
@@ -214,6 +247,82 @@ export default function PublicChatPage() {
     }
   }, [bootstrap, token, addMessage]);
 
+  // Arrastrar y soltar un archivo sobre el panel — mismo patrón que la bandeja de agentes
+  // (ver conversations/page.tsx onChatDragEnter/Drop): dragCounterRef cuenta la profundidad
+  // de enter/leave porque esos eventos también disparan por cada elemento hijo cruzado, no
+  // solo por el contenedor exterior.
+  const onPanelDragEnter = useCallback((e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setDragActive(true);
+  }, []);
+  const onPanelDragOver = useCallback((e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+  }, []);
+  const onPanelDragLeave = useCallback((e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragActive(false);
+  }, []);
+  const onPanelDrop = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragActive(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) void sendFile(file);
+  }, [sendFile]);
+
+  // Pegar una captura de pantalla (Ctrl+V) directo en el input, igual que en la bandeja de
+  // agentes (ver conversations/page.tsx onComposerPaste).
+  const onInputPaste = useCallback((e: ClipboardEvent) => {
+    const item = Array.from(e.clipboardData?.items || []).find((entry) => entry.kind === 'file' && entry.type.startsWith('image/'));
+    const file = item?.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    void sendFile(new File([file], file.name || `captura-${Date.now()}.png`, { type: file.type }));
+  }, [sendFile]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : 'audio/webm;codecs=opus';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+      setRecordSeconds(0);
+      timerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+    } catch {
+      setUploadError('No se pudo acceder al micrófono');
+    }
+  }, []);
+
+  const stopRecording = useCallback((confirmSend: boolean) => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+    const mimeType = recorder.mimeType;
+    recorder.onstop = () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (confirmSend && chunksRef.current.length) {
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
+        void sendFile(new File([blob], `nota-de-voz.${extension}`, { type: mimeType }));
+      }
+      chunksRef.current = [];
+    };
+    recorder.stop();
+    mediaRecorderRef.current = null;
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    setRecording(false);
+  }, [sendFile]);
+
   const mediaSrc = useCallback((messageId: string) => {
     if (!bootstrap || !token) return '';
     return `${API_URL}/widget/${bootstrap.widgetPublicKey}/media/${messageId}?token=${encodeURIComponent(token)}`;
@@ -231,7 +340,12 @@ export default function PublicChatPage() {
   }
 
   const panel = (
-    <div className="cc-panel">
+    <div className="cc-panel" onDragEnter={onPanelDragEnter} onDragOver={onPanelDragOver} onDragLeave={onPanelDragLeave} onDrop={onPanelDrop}>
+      {dragActive && (
+        <div className="cc-drop-overlay">
+          <div className="cc-drop-box"><Upload size={22} />Suelta el archivo para enviarlo</div>
+        </div>
+      )}
       <header className="cc-header" style={{ background: gradient }}>
         <div className="cc-header-row">
           <div className="cc-avatar">{initials(bootstrap.companyName)}</div>
@@ -267,6 +381,15 @@ export default function PublicChatPage() {
                     <img className="cc-image" src={mediaSrc(message.id)} alt={message.caption || 'Imagen'} loading="lazy" />
                     {message.caption && <div className="cc-caption">{message.caption}</div>}
                   </div>
+                ) : message.type === 'VIDEO' ? (
+                  <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
+                    <video className="cc-video" controls src={mediaSrc(message.id)} />
+                    {message.caption && <div className="cc-caption">{message.caption}</div>}
+                  </div>
+                ) : message.type === 'AUDIO' ? (
+                  <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
+                    <audio className="cc-audio" controls src={mediaSrc(message.id)} />
+                  </div>
                 ) : message.type === 'DOCUMENT' ? (
                   <a className={`cc-bubble cc-file ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle} href={mediaSrc(message.id)} target="_blank" rel="noreferrer">
                     <FileText size={22} />
@@ -290,12 +413,11 @@ export default function PublicChatPage() {
       {uploadError && <div className="cc-error">{uploadError}</div>}
 
       <div className="cc-composer">
-        {showEmoji && (
+        {showEmoji && !recording && (
           <div className="cc-emoji-box" ref={emojiBoxRef}>
-            <EmojiPicker onEmojiClick={onEmojiClick} width={290} height={340} searchDisabled lazyLoadEmojis />
+            <EmojiPicker onEmojiClick={onEmojiClick} width={290} height={340} searchDisabled lazyLoadEmojis emojiData={emojiDataEs} />
           </div>
         )}
-        <button className="cc-icon-btn" aria-label="Emojis" onClick={() => setShowEmoji((v) => !v)}><Smile size={19} /></button>
         <input
           ref={fileInputRef}
           type="file"
@@ -303,18 +425,34 @@ export default function PublicChatPage() {
           style={{ display: 'none' }}
           onChange={(e) => { const file = e.target.files?.[0]; if (file) void sendFile(file); e.target.value = ''; }}
         />
-        <button className="cc-icon-btn" aria-label="Adjuntar archivo" disabled={uploading} onClick={() => fileInputRef.current?.click()}><Paperclip size={19} /></button>
-        <input
-          className="cc-input"
-          style={{ ['--cc-color' as string]: bootstrap.color }}
-          placeholder="Escribe un mensaje..."
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void send(); }}
-        />
-        <button className="cc-send" style={{ background: bootstrap.color }} disabled={sending || !draft.trim()} onClick={() => void send()}>
-          <Send size={16} />
-        </button>
+        {recording ? (
+          <div className="cc-recording">
+            <span className="cc-recording-dot" />
+            <span>Grabando · {formatRecordTime(recordSeconds)}</span>
+            <button className="cc-icon-btn" aria-label="Cancelar grabación" onClick={() => stopRecording(false)}><Trash2 size={17} /></button>
+          </div>
+        ) : (
+          <>
+            <button className="cc-icon-btn" aria-label="Emojis" onClick={() => setShowEmoji((v) => !v)}><Smile size={19} /></button>
+            <button className="cc-icon-btn" aria-label="Adjuntar archivo" disabled={uploading} onClick={() => fileInputRef.current?.click()}><Paperclip size={19} /></button>
+            <input
+              className="cc-input"
+              style={{ ['--cc-color' as string]: bootstrap.color }}
+              placeholder="Escribe un mensaje..."
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void send(); }}
+              onPaste={onInputPaste}
+            />
+          </>
+        )}
+        {recording ? (
+          <button className="cc-send" style={{ background: bootstrap.color }} onClick={() => stopRecording(true)} title="Enviar nota de voz"><Square size={14} /></button>
+        ) : draft.trim() ? (
+          <button className="cc-send" style={{ background: bootstrap.color }} disabled={sending} onClick={() => void send()}><Send size={16} /></button>
+        ) : (
+          <button className="cc-send" style={{ background: bootstrap.color }} onClick={() => void startRecording()} title="Grabar nota de voz"><Mic size={16} /></button>
+        )}
       </div>
       <div className="cc-footer">Impulsado por <span className="cc-footer-mark"><ClieneraMark size={13} /><strong>Clienera</strong></span></div>
     </div>

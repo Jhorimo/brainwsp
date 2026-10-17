@@ -167,8 +167,16 @@ export default function InstancesPage() {
   const saveWidgetConfig = async () => {
     if (!clieneraChannel) return;
     setSavingWidgetConfig(true); setError('');
+    // Solo los campos que este formulario edita — iconObjectName/iconMimeType viven en el
+    // draft (se cargan junto con el resto de la configuración guardada) pero los maneja el
+    // endpoint dedicado de subir/quitar ícono, no este; UpdateWidgetConfigDto los rechaza
+    // (forbidNonWhitelisted) si se reenvían acá.
+    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize } = widgetConfigDraft;
     try {
-      await apiFetch(`/instances/${clieneraChannel.id}/widget-config`, { method: 'PATCH', body: JSON.stringify(widgetConfigDraft) });
+      await apiFetch(`/instances/${clieneraChannel.id}/widget-config`, {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize }),
+      });
       setWidgetConfigOpen(false);
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la configuración'); }
