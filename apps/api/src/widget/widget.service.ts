@@ -31,6 +31,10 @@ function widgetMessageType(mimetype: string): MessageType | null {
   return null;
 }
 
+function hostnameFromUrl(url: string): string | null {
+  try { return new URL(url).hostname || null; } catch { return null; }
+}
+
 // Selects shared with ConversationsService/SessionManager's own "hydrate for realtime"
 // shape, kept in sync by hand since the widget creates these rows outside either of those
 // — the panel's conversations list/thread rendering depends on this exact shape.
@@ -145,8 +149,17 @@ export class WidgetService {
     }
 
     const visitorId = randomUUID();
+    // Nombre inicial legible para un visitante nuevo del widget — "web 1: gastromaq" en vez
+    // del "web:<uuid>" crudo (waId), tomando el primer label del hostname de pageUrl y un
+    // correlativo por ese mismo hostname (así cada cliente ERP que la empresa atiende por
+    // Clienera Chat numera su propia serie). Queda igual de editable después con el lápiz del
+    // header — esto solo mejora el valor por defecto, no reemplaza el rename manual.
+    const hostname = pageUrl ? hostnameFromUrl(pageUrl) : null;
+    const contactName = hostname
+      ? `web ${(await this.prisma.contact.count({ where: { companyId: instance.companyId, source: 'widget', sourceUrl: { contains: hostname } } })) + 1}: ${hostname.split('.')[0]}`
+      : undefined;
     const contact = await this.prisma.contact.create({
-      data: { companyId: instance.companyId, waId: `web:${visitorId}`, visitorId, source: 'widget', sourceUrl: pageUrl },
+      data: { companyId: instance.companyId, waId: `web:${visitorId}`, visitorId, source: 'widget', sourceUrl: pageUrl, name: contactName },
     });
     const token = generateVisitorToken();
     await this.prisma.visitorSession.create({
