@@ -7,7 +7,8 @@ import Link from 'next/link';
 import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { Theme as EmojiTheme, type EmojiClickData } from 'emoji-picker-react';
-import emojiDataEs from 'emoji-picker-react/dist/data/emojis-es.json';
+import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
+import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { useTheme } from '@/components/theme-provider';
 import { AppShell } from '@/components/app-shell';
 import { useConfirm } from '@/components/confirm-provider';
@@ -15,6 +16,11 @@ import { MultiSelectFilter } from '@/components/multi-select-filter';
 import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
+// El JSON de categorías tipa `category` como `string` plano — EmojiData lo quiere como el
+// enum `Categories`. Son los mismos valores en runtime (el propio paquete los genera), así
+// que el cast es seguro; sin esto el type-check de producción (`next build`) lo rechaza
+// aunque en dev (Turbopack) no se nota.
+const emojiDataEs = emojiDataEsRaw as unknown as EmojiData;
 
 type Tag = { id: string; name: string; color: string };
 type Stage = { id: string; name: string; color: string };

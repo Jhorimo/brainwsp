@@ -5,12 +5,18 @@ import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { AlertTriangle, ArrowDown, ArrowUp, Bold, Calendar, Clock, Contact as ContactIcon, Hand, Image as ImageIcon, Menu, Mic, MessageSquareText, Paperclip, Phone, Power, Search, Smile, Timer, Trash2, Upload, User, Video, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
-import emojiDataEs from 'emoji-picker-react/dist/data/emojis-es.json';
+import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
+import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { apiFetch } from '@/lib/api';
 import { blockMediaSrc, newBlockId, type ContentBlock } from '../types';
 import { DurationPicker } from './duration-picker';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
+// El JSON de categorías tipa `category` como `string` plano — EmojiData lo quiere como el
+// enum `Categories`. Son los mismos valores en runtime (el propio paquete los genera), así
+// que el cast es seguro; sin esto el type-check de producción (`next build`) lo rechaza
+// aunque en dev (Turbopack) no se nota.
+const emojiDataEs = emojiDataEsRaw as unknown as EmojiData;
 
 type Props = {
   label: string;

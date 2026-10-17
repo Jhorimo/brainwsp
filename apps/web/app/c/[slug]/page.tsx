@@ -1,16 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
 import { FileText, Mic, MessageCircle, Paperclip, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
-import emojiDataEs from 'emoji-picker-react/dist/data/emojis-es.json';
+import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
+import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { ClieneraMark } from '@/components/brand-mark';
 import './chat.css';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
+// El JSON de categorías tipa `category` como `string` plano — EmojiData lo quiere como el
+// enum `Categories`. Son los mismos valores en runtime (el propio paquete los genera), así
+// que el cast es seguro; sin esto el type-check de producción (`next build`) lo rechaza
+// aunque en dev (Turbopack) no se nota.
+const emojiDataEs = emojiDataEsRaw as unknown as EmojiData;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
