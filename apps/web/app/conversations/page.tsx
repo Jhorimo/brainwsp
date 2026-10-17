@@ -2156,10 +2156,12 @@ export default function ConversationsPage() {
                     )}
                   </div>
                   <span>{lastText(conversation)}</span>
-                  <span className={`chat-row-agent ${conversation.assignedUser ? '' : 'unassigned'}`} title={conversation.assignedUser ? `Asignado a ${conversation.assignedUser.name}` : 'Sin asignar'}>
-                    <User size={10} />
-                    {conversation.assignedUser ? conversation.assignedUser.name : 'Sin asignar'}
-                  </span>
+                  {teamUsers.length > 1 && (
+                    <span className={`chat-row-agent ${conversation.assignedUser ? '' : 'unassigned'}`} title={conversation.assignedUser ? `Asignado a ${conversation.assignedUser.name}` : 'Sin asignar'}>
+                      <User size={10} />
+                      {conversation.assignedUser ? conversation.assignedUser.name : 'Sin asignar'}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <div className="chat-time">{new Date(conversation.lastMessageAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</div>

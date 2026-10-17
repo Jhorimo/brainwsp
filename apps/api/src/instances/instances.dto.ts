@@ -69,4 +69,9 @@ export class UpdateWidgetConfigDto {
   @IsOptional()
   @IsBoolean()
   autoOpen?: boolean;
+
+  @ApiPropertyOptional({ description: 'Si el visitante puede minimizar el botón flotante por su cuenta (queda recordado en su navegador). true por defecto' })
+  @IsOptional()
+  @IsBoolean()
+  allowMinimize?: boolean;
 }

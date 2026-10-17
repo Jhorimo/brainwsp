@@ -65,11 +65,28 @@ export class WidgetService {
       position: config.position || 'right',
       buttonText: config.buttonText || '¿Necesitas ayuda?',
       autoOpen: config.autoOpen ?? false,
+      // La página /c/[slug] arma la URL pública GET /widget/:widgetPublicKey/icon solo cuando
+      // hasIcon es true, usando iconVersion como cache-buster (cambia con cada reemplazo, ver
+      // InstancesService.uploadWidgetIcon) — el nombre de objeto en sí no es sensible, es un
+      // UUID aleatorio sin relación con el contenido.
+      hasIcon: Boolean(config.iconObjectName),
+      iconVersion: config.iconObjectName || undefined,
+      allowMinimize: config.allowMinimize ?? true,
     };
   }
 
   async getBootstrap(widgetPublicKey: string) {
     return this.branding(await this.resolveChannel(widgetPublicKey));
+  }
+
+  // Sirve el ícono propio del botón flotante sin auth (mismo nivel de exposición que el
+  // nombre/color de la empresa, ya públicos en el bootstrap) — lo consume un <img> embebido
+  // en cualquier web del cliente, no puede llevar token.
+  async resolveIcon(widgetPublicKey: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const config = (instance.configuration as WidgetConfiguration | null) ?? {};
+    if (!config.iconObjectName) throw new NotFoundException('Este canal no tiene ícono propio');
+    return { objectName: config.iconObjectName, mimeType: config.iconMimeType || 'application/octet-stream' };
   }
 
   // El enlace público ("clienera.com/<slug>") no conoce el widgetPublicKey de antemano —

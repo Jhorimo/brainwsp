@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -8,6 +9,8 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { CreateInstanceDto, UpdateInstanceDto, UpdateWidgetConfigDto } from './instances.dto';
 import { InstancesService } from './instances.service';
+
+const WIDGET_ICON_UPLOAD_LIMIT_BYTES = 3 * 1024 * 1024;
 
 // NOTE: not gated by ModuleAccessGuard/'instances' — the Conversations page calls
 // GET /instances directly (to pick a WhatsApp number when starting a new chat),
@@ -71,6 +74,20 @@ export class InstancesController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   updateWidgetConfig(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateWidgetConfigDto) {
     return this.service.updateWidgetConfig(user.companyId, id, dto);
+  }
+
+  @Post(':id/widget-icon')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: WIDGET_ICON_UPLOAD_LIMIT_BYTES } }))
+  uploadWidgetIcon(@CurrentUser() user: JwtUser, @Param('id') id: string, @UploadedFile() file: Express.Multer.File | undefined) {
+    return this.service.uploadWidgetIcon(user.companyId, id, file);
+  }
+
+  @Delete(':id/widget-icon')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  removeWidgetIcon(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.removeWidgetIcon(user.companyId, id);
   }
 
   @Delete(':id')

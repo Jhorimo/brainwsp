@@ -1,8 +1,10 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { extname } from 'node:path';
 import { InstanceStatus, MessageDirection, WhatsAppProvider } from '@prisma/client';
 import { generateWidgetPublicKey } from '../common/utils/secret';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
+import { StorageService } from '../storage/storage.service';
 
 export interface WidgetConfiguration {
   displayName?: string;
@@ -14,13 +16,28 @@ export interface WidgetConfiguration {
   // flotante, hasta que el visitante haga clic (false, default) — ver widget.js, que lee este
   // valor del bootstrap y decide si auto-abrirse.
   autoOpen?: boolean;
+  // Nombre del objeto en MinIO con el ícono/mascota propia del botón flotante (en vez del
+  // ícono de chat genérico) — se sirve público sin auth en GET /widget/:key/icon, ver
+  // WidgetController. No se expone tal cual al widget.js: la página /c/[slug] arma la URL
+  // pública a partir de `hasIcon` (ver WidgetService.branding) + su propio API_URL.
+  iconObjectName?: string | null;
+  iconMimeType?: string | null;
+  // Si el visitante puede minimizar el botón flotante por su cuenta (y que quede así,
+  // recordado en su navegador) — pensado para cuando el widget vive embebido dentro de OTRO
+  // software (ver AGENTS.md: el enlace público/widget es un canal más) y no siempre se quiere
+  // ver la burbuja flotando encima de la UI propia. true por defecto.
+  allowMinimize?: boolean;
 }
+
+const WIDGET_ICON_MAX_BYTES = 2 * 1024 * 1024;
+const WIDGET_ICON_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 @Injectable()
 export class InstancesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly queues: QueueService,
+    private readonly storage: StorageService,
   ) {}
 
   async list(companyId: string) {
@@ -123,6 +140,49 @@ export class InstancesService {
     const current = (instance.configuration as WidgetConfiguration | null) ?? {};
     const merged = { ...current, ...config };
     const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
+    return updated.configuration;
+  }
+
+  // Ícono/mascota propia del botón flotante. Reemplaza el archivo anterior si había uno (no
+  // deja objetos huérfanos en MinIO) y guarda solo el nombre de objeto — la URL pública la
+  // arma el frontend con GET /widget/:widgetPublicKey/icon (ver WidgetController.icon).
+  async uploadWidgetIcon(companyId: string, id: string, file: Express.Multer.File | undefined) {
+    if (!file) throw new BadRequestException('Archivo requerido');
+    if (!WIDGET_ICON_MIME_TYPES.includes(file.mimetype)) {
+      throw new BadRequestException('Formato no soportado. Usa JPG, PNG, GIF o WEBP.');
+    }
+    if (file.buffer.length > WIDGET_ICON_MAX_BYTES) {
+      throw new BadRequestException(`La imagen supera el tamaño máximo permitido (${Math.round(WIDGET_ICON_MAX_BYTES / 1024 / 1024)} MB)`);
+    }
+
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.CLIENERA_CHAT) {
+      throw new ConflictException('Esta acción está disponible solo para el canal Clienera Chat');
+    }
+    const current = (instance.configuration as WidgetConfiguration | null) ?? {};
+    const previousObjectName = current.iconObjectName;
+
+    const { objectName } = await this.storage.uploadBuffer(file.buffer, file.mimetype, extname(file.originalname).replace('.', ''));
+    // Sin anotar el tipo del literal (como en updateWidgetConfig): con `: WidgetConfiguration`
+    // explícito, TS exige índice de firma `[key: string]` para el Json de Prisma y no compila.
+    const merged = { ...current, iconObjectName: objectName, iconMimeType: file.mimetype };
+    const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
+
+    if (previousObjectName) await this.storage.removeObject(previousObjectName).catch(() => undefined);
+    return updated.configuration;
+  }
+
+  async removeWidgetIcon(companyId: string, id: string) {
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.CLIENERA_CHAT) {
+      throw new ConflictException('Esta acción está disponible solo para el canal Clienera Chat');
+    }
+    const current = (instance.configuration as WidgetConfiguration | null) ?? {};
+    if (!current.iconObjectName) return instance.configuration;
+
+    const merged = { ...current, iconObjectName: null, iconMimeType: null };
+    const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
+    await this.storage.removeObject(current.iconObjectName).catch(() => undefined);
     return updated.configuration;
   }
 

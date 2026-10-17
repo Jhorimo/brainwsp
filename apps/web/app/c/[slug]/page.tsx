@@ -16,7 +16,10 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000'
 const ACCEPTED_FILE_TYPES = 'image/jpeg,image/png,image/gif,image/webp,application/pdf';
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
-type Bootstrap = { widgetPublicKey: string; companyName: string; welcomeMessage: string; color: string; buttonText: string; autoOpen: boolean };
+type Bootstrap = {
+  widgetPublicKey: string; companyName: string; welcomeMessage: string; color: string; buttonText: string;
+  autoOpen: boolean; position: 'left' | 'right'; hasIcon: boolean; iconVersion?: string; allowMinimize: boolean;
+};
 type WidgetMessage = {
   id: string; direction: 'INBOUND' | 'OUTBOUND'; type: string; status: string; body?: string | null;
   caption?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; createdAt: string;
@@ -94,7 +97,8 @@ export default function PublicChatPage() {
         if (cancelled) return;
         setBootstrap(data);
         if (embedded) {
-          window.parent.postMessage({ type: 'clienera:ready', ...data }, '*');
+          const iconUrl = data.hasIcon ? `${API_URL}/widget/${data.widgetPublicKey}/icon?v=${encodeURIComponent(data.iconVersion || '')}` : null;
+          window.parent.postMessage({ type: 'clienera:ready', ...data, iconUrl }, '*');
         }
 
         const storedToken = localStorage.getItem(storageKey(data.widgetPublicKey, 'token'));

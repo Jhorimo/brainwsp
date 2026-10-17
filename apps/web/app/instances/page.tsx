@@ -1,14 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Cable, Copy, MessageCircle, Pencil, Plus, Power, QrCode, RefreshCw, Search, Smartphone, Trash2, Unplug } from 'lucide-react';
+import { Cable, Copy, MessageCircle, Pencil, Plus, Power, QrCode, RefreshCw, Search, Smartphone, Trash2, Unplug, Upload } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
 import { StatusPill } from '@/components/status-pill';
-import { apiFetch, getStoredCompany, getToken, SOCKET_URL, updateStoredCompany } from '@/lib/api';
+import { API_URL, apiFetch, getStoredCompany, getToken, SOCKET_URL, updateStoredCompany } from '@/lib/api';
 
-type WidgetConfig = { displayName?: string; welcomeMessage?: string; color?: string; position?: 'left' | 'right'; buttonText?: string; autoOpen?: boolean };
+type WidgetConfig = {
+  displayName?: string; welcomeMessage?: string; color?: string; position?: 'left' | 'right'; buttonText?: string;
+  autoOpen?: boolean; allowMinimize?: boolean; iconObjectName?: string | null;
+};
 type Instance = {
   id: string; name: string; slug: string; provider: string; phoneNumber?: string | null; displayName?: string | null;
   status: string; qr?: string | null; reconnectAttempt: number; lastError?: string | null; lastConnectedAt?: string | null;
@@ -39,6 +42,9 @@ export default function InstancesPage() {
   const [widgetConfigOpen, setWidgetConfigOpen] = useState(false);
   const [widgetConfigDraft, setWidgetConfigDraft] = useState<WidgetConfig>({});
   const [savingWidgetConfig, setSavingWidgetConfig] = useState(false);
+  const [widgetIconBusy, setWidgetIconBusy] = useState(false);
+  const [widgetIconError, setWidgetIconError] = useState('');
+  const widgetIconInputRef = useRef<HTMLInputElement>(null);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [companySlug, setCompanySlug] = useState(() => getStoredCompany<{ slug?: string }>().slug || '');
   const [editSlugOpen, setEditSlugOpen] = useState(false);
@@ -154,6 +160,7 @@ export default function InstancesPage() {
 
   const openWidgetConfig = () => {
     setWidgetConfigDraft(clieneraChannel?.configuration || {});
+    setWidgetIconError('');
     setWidgetConfigOpen(true);
   };
 
@@ -166,6 +173,30 @@ export default function InstancesPage() {
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la configuración'); }
     finally { setSavingWidgetConfig(false); }
+  };
+
+  const uploadWidgetIcon = async (file: File) => {
+    if (!clieneraChannel) return;
+    setWidgetIconBusy(true); setWidgetIconError('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const configuration = await apiFetch<WidgetConfig>(`/instances/${clieneraChannel.id}/widget-icon`, { method: 'POST', body: form });
+      setWidgetConfigDraft((d) => ({ ...d, iconObjectName: configuration.iconObjectName }));
+      await load();
+    } catch (err) { setWidgetIconError(err instanceof Error ? err.message : 'No se pudo subir la imagen'); }
+    finally { setWidgetIconBusy(false); }
+  };
+
+  const removeWidgetIcon = async () => {
+    if (!clieneraChannel) return;
+    setWidgetIconBusy(true); setWidgetIconError('');
+    try {
+      await apiFetch(`/instances/${clieneraChannel.id}/widget-icon`, { method: 'DELETE' });
+      setWidgetConfigDraft((d) => ({ ...d, iconObjectName: null }));
+      await load();
+    } catch (err) { setWidgetIconError(err instanceof Error ? err.message : 'No se pudo quitar la imagen'); }
+    finally { setWidgetIconBusy(false); }
   };
 
   const copySnippet = async () => {
@@ -323,6 +354,33 @@ export default function InstancesPage() {
               <div className="field"><label>Mensaje de bienvenida</label><input value={widgetConfigDraft.welcomeMessage || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, welcomeMessage: e.target.value }))} placeholder="Hola 👋 ¿En qué podemos ayudarte?" /></div>
               <div className="field"><label>Color principal</label><input type="color" value={widgetConfigDraft.color || '#6b8afd'} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, color: e.target.value }))} /></div>
               <div className="field"><label>Texto del botón</label><input value={widgetConfigDraft.buttonText || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, buttonText: e.target.value }))} placeholder="¿Necesitas ayuda?" /></div>
+
+              <div className="field">
+                <label>Posición en la pantalla</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className={`button small${(widgetConfigDraft.position || 'right') === 'right' ? ' primary' : ''}`} onClick={() => setWidgetConfigDraft((d) => ({ ...d, position: 'right' }))}>Derecha</button>
+                  <button type="button" className={`button small${widgetConfigDraft.position === 'left' ? ' primary' : ''}`} onClick={() => setWidgetConfigDraft((d) => ({ ...d, position: 'left' }))}>Izquierda</button>
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Ícono del botón flotante</label>
+                {widgetIconError && <div className="error-box" style={{ marginBottom: 6 }}>{widgetIconError}</div>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 48, height: 48, borderRadius: '50%', overflow: 'hidden', background: widgetConfigDraft.color || '#6b8afd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {widgetConfigDraft.iconObjectName && clieneraChannel?.widgetPublicKey ? (
+                      <img src={`${API_URL}/widget/${clieneraChannel.widgetPublicKey}/icon?v=${encodeURIComponent(widgetConfigDraft.iconObjectName)}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <MessageCircle size={22} color="#fff" />
+                    )}
+                  </div>
+                  <input ref={widgetIconInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) void uploadWidgetIcon(file); e.target.value = ''; }} />
+                  <button type="button" className="button small" disabled={widgetIconBusy} onClick={() => widgetIconInputRef.current?.click()}><Upload size={13} />{widgetIconBusy ? 'Subiendo...' : 'Subir imagen'}</button>
+                  {widgetConfigDraft.iconObjectName && <button type="button" className="button small" disabled={widgetIconBusy} onClick={() => void removeWidgetIcon()}><Trash2 size={13} />Quitar</button>}
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '6px 0 0' }}>Tu logo o mascota en vez del ícono genérico. JPG, PNG, GIF o WEBP, máx. 2 MB.</p>
+              </div>
+
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!widgetConfigDraft.autoOpen} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, autoOpen: e.target.checked }))} />
                 Abrir automáticamente al entrar a la página
@@ -331,6 +389,14 @@ export default function InstancesPage() {
                 {widgetConfigDraft.autoOpen
                   ? 'El panel de chat se abre solo apenas el visitante carga la página.'
                   : 'El visitante solo ve el botón flotante; el chat se abre al hacer clic.'}
+              </p>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={widgetConfigDraft.allowMinimize !== false} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, allowMinimize: e.target.checked }))} />
+                Permitir minimizar el botón flotante
+              </label>
+              <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
+                Útil si el widget queda embebido dentro de otro software: el visitante puede ocultar la burbuja con un clic y queda recordado en su navegador.
               </p>
             </div>
             <div className="modal-actions">
