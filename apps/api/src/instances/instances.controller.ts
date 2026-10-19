@@ -11,6 +11,7 @@ import { CreateInstanceDto, UpdateInstanceDto, UpdateWidgetConfigDto } from './i
 import { InstancesService } from './instances.service';
 
 const WIDGET_ICON_UPLOAD_LIMIT_BYTES = 3 * 1024 * 1024;
+const WIDGET_TEASER_UPLOAD_LIMIT_BYTES = 3 * 1024 * 1024;
 
 // NOTE: not gated by ModuleAccessGuard/'instances' — the Conversations page calls
 // GET /instances directly (to pick a WhatsApp number when starting a new chat),
@@ -88,6 +89,20 @@ export class InstancesController {
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   removeWidgetIcon(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.removeWidgetIcon(user.companyId, id);
+  }
+
+  @Post(':id/widget-teaser-image')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: WIDGET_TEASER_UPLOAD_LIMIT_BYTES } }))
+  uploadWidgetTeaserImage(@CurrentUser() user: JwtUser, @Param('id') id: string, @UploadedFile() file: Express.Multer.File | undefined) {
+    return this.service.uploadWidgetTeaserImage(user.companyId, id, file);
+  }
+
+  @Delete(':id/widget-teaser-image')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  removeWidgetTeaserImage(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.removeWidgetTeaserImage(user.companyId, id);
   }
 
   @Delete(':id')

@@ -81,6 +81,11 @@ export class WidgetService {
       hasIcon: Boolean(config.iconObjectName),
       iconVersion: config.iconObjectName || undefined,
       allowMinimize: config.allowMinimize ?? true,
+      // Burbuja de saludo: si quedó marcada "image" pero el archivo se borró después, cae a
+      // texto en vez de no mostrar nada (ver WidgetConfiguration.teaserType).
+      teaserType: config.teaserType === 'image' && config.teaserImageObjectName ? 'image' : 'text',
+      hasTeaserImage: Boolean(config.teaserImageObjectName),
+      teaserImageVersion: config.teaserImageObjectName || undefined,
     };
   }
 
@@ -96,6 +101,16 @@ export class WidgetService {
     const config = (instance.configuration as WidgetConfiguration | null) ?? {};
     if (!config.iconObjectName) throw new NotFoundException('Este canal no tiene ícono propio');
     return { objectName: config.iconObjectName, mimeType: config.iconMimeType || 'application/octet-stream' };
+  }
+
+  // Igual que resolveIcon de arriba, pero para la imagen propia de la burbuja de saludo
+  // (ver WidgetConfiguration.teaserImageObjectName) — también pública y sin auth, mismo
+  // nivel de exposición que el ícono y el branding.
+  async resolveTeaserImage(widgetPublicKey: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const config = (instance.configuration as WidgetConfiguration | null) ?? {};
+    if (!config.teaserImageObjectName) throw new NotFoundException('Este canal no tiene imagen de bienvenida');
+    return { objectName: config.teaserImageObjectName, mimeType: config.teaserImageMimeType || 'application/octet-stream' };
   }
 
   // El enlace público ("clienera.com/<slug>") no conoce el widgetPublicKey de antemano —

@@ -27,10 +27,19 @@ export interface WidgetConfiguration {
   // software (ver AGENTS.md: el enlace público/widget es un canal más) y no siempre se quiere
   // ver la burbuja flotando encima de la UI propia. true por defecto.
   allowMinimize?: boolean;
+  // Burbuja de saludo flotante (la que aparece junto al botón antes de que el visitante
+  // haga clic): 'text' usa welcomeMessage de siempre; 'image' la reemplaza por una
+  // ilustración propia con el mensaje ya dibujado (p.ej. un personaje señalando el botón,
+  // como en taypi.pe) — ver teaserImageObjectName. 'text' por defecto. Si quedó en 'image'
+  // pero no hay archivo (se borró después), WidgetService.branding cae a texto.
+  teaserType?: 'text' | 'image';
+  teaserImageObjectName?: string | null;
+  teaserImageMimeType?: string | null;
 }
 
 const WIDGET_ICON_MAX_BYTES = 2 * 1024 * 1024;
 const WIDGET_ICON_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const WIDGET_TEASER_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 
 @Injectable()
 export class InstancesService {
@@ -183,6 +192,48 @@ export class InstancesService {
     const merged = { ...current, iconObjectName: null, iconMimeType: null };
     const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
     await this.storage.removeObject(current.iconObjectName).catch(() => undefined);
+    return updated.configuration;
+  }
+
+  // Imagen propia de la burbuja de saludo (en vez del texto de welcomeMessage) — mismo
+  // patrón que uploadWidgetIcon/removeWidgetIcon de arriba (reemplaza el archivo anterior,
+  // guarda solo el nombre de objeto). La URL pública la arma el frontend con
+  // GET /widget/:widgetPublicKey/teaser-image (ver WidgetController.teaserImage).
+  async uploadWidgetTeaserImage(companyId: string, id: string, file: Express.Multer.File | undefined) {
+    if (!file) throw new BadRequestException('Archivo requerido');
+    if (!WIDGET_ICON_MIME_TYPES.includes(file.mimetype)) {
+      throw new BadRequestException('Formato no soportado. Usa JPG, PNG, GIF o WEBP.');
+    }
+    if (file.buffer.length > WIDGET_TEASER_IMAGE_MAX_BYTES) {
+      throw new BadRequestException(`La imagen supera el tamaño máximo permitido (${Math.round(WIDGET_TEASER_IMAGE_MAX_BYTES / 1024 / 1024)} MB)`);
+    }
+
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.CLIENERA_CHAT) {
+      throw new ConflictException('Esta acción está disponible solo para el canal Clienera Chat');
+    }
+    const current = (instance.configuration as WidgetConfiguration | null) ?? {};
+    const previousObjectName = current.teaserImageObjectName;
+
+    const { objectName } = await this.storage.uploadBuffer(file.buffer, file.mimetype, extname(file.originalname).replace('.', ''));
+    const merged = { ...current, teaserImageObjectName: objectName, teaserImageMimeType: file.mimetype };
+    const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
+
+    if (previousObjectName) await this.storage.removeObject(previousObjectName).catch(() => undefined);
+    return updated.configuration;
+  }
+
+  async removeWidgetTeaserImage(companyId: string, id: string) {
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.CLIENERA_CHAT) {
+      throw new ConflictException('Esta acción está disponible solo para el canal Clienera Chat');
+    }
+    const current = (instance.configuration as WidgetConfiguration | null) ?? {};
+    if (!current.teaserImageObjectName) return instance.configuration;
+
+    const merged = { ...current, teaserImageObjectName: null, teaserImageMimeType: null };
+    const updated = await this.prisma.whatsAppInstance.update({ where: { id }, data: { configuration: merged } });
+    await this.storage.removeObject(current.teaserImageObjectName).catch(() => undefined);
     return updated.configuration;
   }
 

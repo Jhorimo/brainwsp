@@ -11,6 +11,7 @@ import { API_URL, apiFetch, getStoredCompany, getToken, SOCKET_URL, updateStored
 type WidgetConfig = {
   displayName?: string; welcomeMessage?: string; color?: string; position?: 'left' | 'right'; buttonText?: string;
   autoOpen?: boolean; allowMinimize?: boolean; iconObjectName?: string | null;
+  teaserType?: 'text' | 'image'; teaserImageObjectName?: string | null;
 };
 type Instance = {
   id: string; name: string; slug: string; provider: string; phoneNumber?: string | null; displayName?: string | null;
@@ -45,6 +46,9 @@ export default function InstancesPage() {
   const [widgetIconBusy, setWidgetIconBusy] = useState(false);
   const [widgetIconError, setWidgetIconError] = useState('');
   const widgetIconInputRef = useRef<HTMLInputElement>(null);
+  const [widgetTeaserBusy, setWidgetTeaserBusy] = useState(false);
+  const [widgetTeaserError, setWidgetTeaserError] = useState('');
+  const widgetTeaserInputRef = useRef<HTMLInputElement>(null);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [companySlug, setCompanySlug] = useState(() => getStoredCompany<{ slug?: string }>().slug || '');
   const [editSlugOpen, setEditSlugOpen] = useState(false);
@@ -161,21 +165,23 @@ export default function InstancesPage() {
   const openWidgetConfig = () => {
     setWidgetConfigDraft(clieneraChannel?.configuration || {});
     setWidgetIconError('');
+    setWidgetTeaserError('');
     setWidgetConfigOpen(true);
   };
 
   const saveWidgetConfig = async () => {
     if (!clieneraChannel) return;
     setSavingWidgetConfig(true); setError('');
-    // Solo los campos que este formulario edita — iconObjectName/iconMimeType viven en el
-    // draft (se cargan junto con el resto de la configuración guardada) pero los maneja el
-    // endpoint dedicado de subir/quitar ícono, no este; UpdateWidgetConfigDto los rechaza
-    // (forbidNonWhitelisted) si se reenvían acá.
-    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize } = widgetConfigDraft;
+    // Solo los campos que este formulario edita — iconObjectName/iconMimeType y
+    // teaserImageObjectName/teaserImageMimeType viven en el draft (se cargan junto con el
+    // resto de la configuración guardada) pero los maneja su propio endpoint dedicado de
+    // subir/quitar imagen, no este; UpdateWidgetConfigDto los rechaza (forbidNonWhitelisted)
+    // si se reenvían acá.
+    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, teaserType } = widgetConfigDraft;
     try {
       await apiFetch(`/instances/${clieneraChannel.id}/widget-config`, {
         method: 'PATCH',
-        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize }),
+        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, teaserType }),
       });
       setWidgetConfigOpen(false);
       await load();
@@ -205,6 +211,30 @@ export default function InstancesPage() {
       await load();
     } catch (err) { setWidgetIconError(err instanceof Error ? err.message : 'No se pudo quitar la imagen'); }
     finally { setWidgetIconBusy(false); }
+  };
+
+  const uploadWidgetTeaserImage = async (file: File) => {
+    if (!clieneraChannel) return;
+    setWidgetTeaserBusy(true); setWidgetTeaserError('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const configuration = await apiFetch<WidgetConfig>(`/instances/${clieneraChannel.id}/widget-teaser-image`, { method: 'POST', body: form });
+      setWidgetConfigDraft((d) => ({ ...d, teaserImageObjectName: configuration.teaserImageObjectName }));
+      await load();
+    } catch (err) { setWidgetTeaserError(err instanceof Error ? err.message : 'No se pudo subir la imagen'); }
+    finally { setWidgetTeaserBusy(false); }
+  };
+
+  const removeWidgetTeaserImage = async () => {
+    if (!clieneraChannel) return;
+    setWidgetTeaserBusy(true); setWidgetTeaserError('');
+    try {
+      await apiFetch(`/instances/${clieneraChannel.id}/widget-teaser-image`, { method: 'DELETE' });
+      setWidgetConfigDraft((d) => ({ ...d, teaserImageObjectName: null }));
+      await load();
+    } catch (err) { setWidgetTeaserError(err instanceof Error ? err.message : 'No se pudo quitar la imagen'); }
+    finally { setWidgetTeaserBusy(false); }
   };
 
   const copySnippet = async () => {
@@ -359,7 +389,33 @@ export default function InstancesPage() {
             <div className="modal-header"><h2>Personalizar Clienera Chat</h2><p>Cómo se ve el canal para tus clientes.</p></div>
             <div className="modal-body form-grid">
               <div className="field"><label>Nombre mostrado</label><input value={widgetConfigDraft.displayName || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, displayName: e.target.value }))} placeholder="Nombre de tu empresa" /></div>
-              <div className="field"><label>Mensaje de bienvenida</label><input value={widgetConfigDraft.welcomeMessage || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, welcomeMessage: e.target.value }))} placeholder="Hola 👋 ¿En qué podemos ayudarte?" /></div>
+              <div className="field">
+                <label>Burbuja de saludo</label>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <button type="button" className={`button small${(widgetConfigDraft.teaserType || 'text') === 'text' ? ' primary' : ''}`} onClick={() => setWidgetConfigDraft((d) => ({ ...d, teaserType: 'text' }))}>Texto</button>
+                  <button type="button" className={`button small${widgetConfigDraft.teaserType === 'image' ? ' primary' : ''}`} onClick={() => setWidgetConfigDraft((d) => ({ ...d, teaserType: 'image' }))}>Imagen</button>
+                </div>
+                {(widgetConfigDraft.teaserType || 'text') === 'text' ? (
+                  <input value={widgetConfigDraft.welcomeMessage || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, welcomeMessage: e.target.value }))} placeholder="Hola 👋 ¿En qué podemos ayudarte?" />
+                ) : (
+                  <>
+                    {widgetTeaserError && <div className="error-box" style={{ marginBottom: 6 }}>{widgetTeaserError}</div>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {widgetConfigDraft.teaserImageObjectName && clieneraChannel?.widgetPublicKey ? (
+                        <img src={`${API_URL}/widget/${clieneraChannel.widgetPublicKey}/teaser-image?v=${encodeURIComponent(widgetConfigDraft.teaserImageObjectName)}`} alt="" style={{ width: 64, height: 64, objectFit: 'contain', background: 'var(--surface-2, #f2f3f7)', borderRadius: 8, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 64, height: 64, borderRadius: 8, background: 'var(--surface-2, #f2f3f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <MessageCircle size={20} color="#9298a8" />
+                        </div>
+                      )}
+                      <input ref={widgetTeaserInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) void uploadWidgetTeaserImage(file); e.target.value = ''; }} />
+                      <button type="button" className="button small" disabled={widgetTeaserBusy} onClick={() => widgetTeaserInputRef.current?.click()}><Upload size={13} />{widgetTeaserBusy ? 'Subiendo...' : 'Subir imagen'}</button>
+                      {widgetConfigDraft.teaserImageObjectName && <button type="button" className="button small" disabled={widgetTeaserBusy} onClick={() => void removeWidgetTeaserImage()}><Trash2 size={13} />Quitar</button>}
+                    </div>
+                    <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '6px 0 0' }}>Usa una imagen con el mensaje ya incluido (por ejemplo un personaje señalando el botón de chat), como en taypi.pe. Fondo transparente recomendado. JPG, PNG, GIF o WEBP, máx. 3 MB.</p>
+                  </>
+                )}
+              </div>
               <div className="field"><label>Color principal</label><input type="color" value={widgetConfigDraft.color || '#6b8afd'} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, color: e.target.value }))} /></div>
               <div className="field"><label>Texto del botón</label><input value={widgetConfigDraft.buttonText || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, buttonText: e.target.value }))} placeholder="¿Necesitas ayuda?" /></div>
 

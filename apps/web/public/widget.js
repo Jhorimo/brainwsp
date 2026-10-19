@@ -133,12 +133,30 @@
   restoreTab.onmouseleave = function () { restoreTab.style.background = 'rgba(40,44,58,.55)'; };
 
   var teaser = document.createElement('div');
-  teaser.style.cssText =
-    'position:fixed;bottom:30px;' + (position === 'left' ? 'left:90px;' : 'right:90px;') +
-    'z-index:2147482999;max-width:240px;background:#fff;color:#1a1f2b;padding:12px 15px;' +
-    'border-radius:14px;' + (position === 'left' ? 'border-bottom-left-radius:4px;' : 'border-bottom-right-radius:4px;') +
-    'box-shadow:0 10px 30px -8px rgba(0,0,0,.25);font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
-    'opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;pointer-events:none;';
+  // Contenido de la burbuja de saludo: texto (tarjeta blanca de siempre) o una imagen propia
+  // (p.ej. una mascota señalando el botón, como en taypi.pe) — ver "clienera:ready" más abajo
+  // y applyTeaser(), que arma el cssText distinto según el tipo cada vez que cambia.
+  var teaserType = 'text';
+  var teaserImageUrl = null;
+  var welcomeMessageText = '';
+  function applyTeaser() {
+    if (teaserType === 'image' && teaserImageUrl) {
+      teaser.innerHTML = '<img src="' + teaserImageUrl + '" alt="" style="display:block;width:180px;max-width:60vw;height:auto;pointer-events:none;" />';
+      teaser.style.cssText =
+        'position:fixed;bottom:14px;' + (position === 'left' ? 'left:74px;' : 'right:74px;') +
+        'z-index:2147482999;background:transparent;padding:0;border:none;box-shadow:none;' +
+        'opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;pointer-events:none;cursor:pointer;';
+    } else {
+      teaser.textContent = welcomeMessageText;
+      teaser.style.cssText =
+        'position:fixed;bottom:30px;' + (position === 'left' ? 'left:90px;' : 'right:90px;') +
+        'z-index:2147482999;max-width:240px;background:#fff;color:#1a1f2b;padding:12px 15px;' +
+        'border-radius:14px;' + (position === 'left' ? 'border-bottom-left-radius:4px;' : 'border-bottom-right-radius:4px;') +
+        'box-shadow:0 10px 30px -8px rgba(0,0,0,.25);font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+        'opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;pointer-events:none;cursor:pointer;';
+    }
+  }
+  applyTeaser();
 
   var frame = document.createElement('iframe');
   frame.title = 'Chat';
@@ -248,14 +266,15 @@
     if (!data || typeof data !== 'object') return;
     if (data.type === 'clienera:ready') {
       reposition(data.position);
-      if (data.color) {
-        paintLauncher(data.color);
-        teaser.style.borderColor = data.color;
-      }
+      if (data.color) paintLauncher(data.color);
       if (data.iconUrl) {
         iconUrl = data.iconUrl;
         renderLauncherFace();
       }
+      teaserType = data.teaserType === 'image' && data.teaserImageUrl ? 'image' : 'text';
+      teaserImageUrl = data.teaserImageUrl || null;
+      welcomeMessageText = data.welcomeMessage || '';
+      applyTeaser();
       // allowMinimize solo llega false si la empresa lo desactivó a propósito — si lo
       // desactivó mientras el visitante estaba minimizado, se restaura.
       minimizeAllowed = data.allowMinimize !== false;
@@ -270,12 +289,12 @@
         // "Instancias → Clienera Chat → Personalizar" → "Abrir automáticamente"). Un pequeño
         // delay para que no se sienta como un popup agresivo apenas carga la página.
         setTimeout(function () { if (!open && !minimized) setOpen(true); }, 700);
-      } else if (data.welcomeMessage && !open && !minimized) {
-        teaser.textContent = data.welcomeMessage;
+      } else if ((teaserType === 'image' || welcomeMessageText) && !open && !minimized) {
         setTimeout(function () {
           if (!open && !minimized) {
             teaser.style.opacity = '1';
             teaser.style.transform = 'translateY(0)';
+            teaser.style.pointerEvents = 'auto';
           }
         }, 1200);
       }
@@ -305,14 +324,8 @@
     else { restoreTab.style.right = '0'; restoreTab.style.left = ''; restoreTab.style.borderRadius = '10px 0 0 10px'; }
     restoreTab.innerHTML = CHEVRON_ICON(position === 'left' ? 'right' : 'left');
 
-    if (position === 'left') {
-      teaser.style.left = '90px'; teaser.style.right = '';
-      teaser.style.borderBottomLeftRadius = '4px'; teaser.style.borderBottomRightRadius = '14px';
-    } else {
-      teaser.style.right = '90px'; teaser.style.left = '';
-      teaser.style.borderBottomRightRadius = '4px'; teaser.style.borderBottomLeftRadius = '14px';
-    }
-
+    // La burbuja de saludo (teaser) no se toca acá: applyTeaser() la arma entera de nuevo
+    // (posición incluida) justo después de esta llamada, en el handler de "clienera:ready".
     applyFrameLayout();
   }
 

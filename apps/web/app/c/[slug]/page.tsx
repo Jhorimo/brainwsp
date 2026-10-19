@@ -40,6 +40,7 @@ function formatRecordTime(seconds: number) {
 type Bootstrap = {
   widgetPublicKey: string; companyName: string; welcomeMessage: string; color: string; buttonText: string;
   autoOpen: boolean; position: 'left' | 'right'; hasIcon: boolean; iconVersion?: string; allowMinimize: boolean;
+  teaserType: 'text' | 'image'; hasTeaserImage: boolean; teaserImageVersion?: string;
 };
 type WidgetMessage = {
   id: string; direction: 'INBOUND' | 'OUTBOUND'; type: string; status: string; body?: string | null;
@@ -134,7 +135,8 @@ export default function PublicChatPage() {
         setBootstrap(data);
         if (embedded) {
           const iconUrl = data.hasIcon ? `${API_URL}/widget/${data.widgetPublicKey}/icon?v=${encodeURIComponent(data.iconVersion || '')}` : null;
-          window.parent.postMessage({ type: 'clienera:ready', ...data, iconUrl }, '*');
+          const teaserImageUrl = data.hasTeaserImage ? `${API_URL}/widget/${data.widgetPublicKey}/teaser-image?v=${encodeURIComponent(data.teaserImageVersion || '')}` : null;
+          window.parent.postMessage({ type: 'clienera:ready', ...data, iconUrl, teaserImageUrl }, '*');
         }
 
         const storedToken = localStorage.getItem(storageKey(data.widgetPublicKey, 'token'));

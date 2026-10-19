@@ -74,4 +74,9 @@ export class UpdateWidgetConfigDto {
   @IsOptional()
   @IsBoolean()
   allowMinimize?: boolean;
+
+  @ApiPropertyOptional({ enum: ['text', 'image'], description: 'Tipo de burbuja de saludo flotante: texto (welcomeMessage) o una imagen propia subida con /widget-teaser-image' })
+  @IsOptional()
+  @IsIn(['text', 'image'])
+  teaserType?: 'text' | 'image';
 }

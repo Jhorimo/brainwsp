@@ -44,6 +44,15 @@ export class WidgetController {
     pipeToResponse(stream, res);
   }
 
+  @Get(':widgetPublicKey/teaser-image')
+  async teaserImage(@Param('widgetPublicKey') widgetPublicKey: string, @Res() res: Response) {
+    const { objectName, mimeType } = await this.service.resolveTeaserImage(widgetPublicKey);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    const stream = await this.storage.getObjectStream(objectName);
+    pipeToResponse(stream, res);
+  }
+
   @Post(':widgetPublicKey/session')
   startSession(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: StartWidgetSessionDto) {
     this.guardRateLimit(req);
