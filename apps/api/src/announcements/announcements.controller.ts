@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -27,6 +27,18 @@ export class AnnouncementsController {
   @Roles(UserRole.SUPERADMIN)
   create(@CurrentUser() user: JwtUser, @Body() dto: CreateAnnouncementDto) {
     return this.service.create(user.sub, dto.text);
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.SUPERADMIN)
+  update(@Param('id') id: string, @Body() dto: CreateAnnouncementDto) {
+    return this.service.update(id, dto.text);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.SUPERADMIN)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 
   @Post(':id/read')

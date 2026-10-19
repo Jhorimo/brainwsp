@@ -149,6 +149,24 @@ function sortConversations(list: Conversation[]) {
 function isGroupContact(contact: Contact) {
   return contact.waId.endsWith('@g.us');
 }
+
+// "Sin responder": el último mensaje del chat es del cliente (entrante) y lleva al menos
+// AWAITING_AMBER_HOURS sin que nadie del equipo conteste. Se excluyen los grupos (siempre
+// tendrían un mensaje entrante reciente) y los chats resueltos/cerrados. Limitación conocida:
+// solo mira el ÚLTIMO mensaje, así que si contestó un bot/automatización el chat deja de
+// contar como pendiente aunque ningún agente haya hablado con el cliente.
+const AWAITING_AMBER_HOURS = 24;
+const AWAITING_RED_HOURS = 72;
+function awaitingReply(conversation: Conversation): { level: 'amber' | 'red'; label: string } | null {
+  const last = conversation.messages[0];
+  if (!last || last.direction !== 'INBOUND') return null;
+  if (conversation.status === 'RESOLVED' || conversation.status === 'CLOSED') return null;
+  if (isGroupContact(conversation.contact)) return null;
+  const hours = (Date.now() - new Date(conversation.lastMessageAt).getTime()) / 3_600_000;
+  if (hours < AWAITING_AMBER_HOURS) return null;
+  const days = Math.floor(hours / 24);
+  return { level: hours >= AWAITING_RED_HOURS ? 'red' : 'amber', label: `${days} ${days === 1 ? 'día' : 'días'} sin responder` };
+}
 function displayName(contact: Contact) {
   return contact.name || contact.pushName || contact.phone || contact.waId.split('@')[0] || 'Cliente';
 }
@@ -218,6 +236,34 @@ function statusIcon(status: string) {
     : <Clock size={10} />;
   return <span title={labels[status] || status}>{icon}</span>;
 }
+// Fechas estilo WhatsApp. Los días se comparan por fecha calendario LOCAL (no por 24 h
+// transcurridas), así "Ayer" es el día anterior aunque hayan pasado menos de 24 horas.
+const DAY_MS = 86_400_000;
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+const daysAgo = (date: Date) => Math.round((startOfDay(new Date()) - startOfDay(date)) / DAY_MS);
+const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+const clockTime = (iso: string) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+const fullDateTime = (iso: string) => capitalize(new Date(iso).toLocaleString('es-PE', { dateStyle: 'full', timeStyle: 'short' }));
+// Lista de chats: Hoy / Ayer / día de la semana (últimos 6 días) / dd/mm/aaaa.
+function chatListDayLabel(iso: string) {
+  const date = new Date(iso);
+  const diff = daysAgo(date);
+  if (diff <= 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  if (diff < 7) return capitalize(date.toLocaleDateString('es-PE', { weekday: 'long' }));
+  return date.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+// Separador dentro del chat: igual, pero con la fecha escrita; el año solo si no es el actual.
+function daySeparatorLabel(iso: string) {
+  const date = new Date(iso);
+  const diff = daysAgo(date);
+  if (diff <= 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  if (diff < 7) return capitalize(date.toLocaleDateString('es-PE', { weekday: 'long' }));
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString('es-PE', sameYear ? { day: 'numeric', month: 'long' } : { day: 'numeric', month: 'long', year: 'numeric' });
+}
+const isSameDay = (a: string, b: string) => startOfDay(new Date(a)) === startOfDay(new Date(b));
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
   const s = Math.floor(seconds % 60).toString().padStart(2, '0');
@@ -313,6 +359,9 @@ function parseVCard(vcard?: string) {
     .filter(Boolean);
   return { name, phones };
 }
+// Adjuntos pendientes del compositor: se acumulan (arrastrar/pegar/elegir) y se envían juntos.
+type PendingAttachment = { id: string; file: File; previewUrl: string | null };
+const MAX_PENDING_FILES = 10;
 function isImageFile(file: File) { return file.type.startsWith('image/'); }
 function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 
@@ -342,6 +391,12 @@ export default function ConversationsPage() {
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<DatePreset>('all');
   const [quickFilter, setQuickFilter] = useState<string>('all');
+  // Re-evalúa "sin responder" (depende de la hora actual) sin esperar a que llegue un mensaje.
+  const [, setAwaitingTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setAwaitingTick((n) => n + 1), 5 * 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
@@ -378,8 +433,9 @@ export default function ConversationsPage() {
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [identity, setIdentity] = useState({ id: '', role: '' });
 
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
+  // Espejo del estado para poder liberar las URLs locales y contar el cupo sin esperar al render.
+  const pendingFilesRef = useRef<PendingAttachment[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const dragCounterRef = useRef(0);
   // The four composer actions (adjuntar/emoji/stickers/respuestas rápidas) used to be four
@@ -894,7 +950,7 @@ export default function ConversationsPage() {
     mentionListRef.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
   }, [mentionIndex, mentionItems]);
 
-  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); mentionsRef.current = []; resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); }, [selectedId]);
+  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); mentionsRef.current = []; resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); clearPendingFiles(); }, [selectedId]);
 
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
@@ -1019,8 +1075,9 @@ export default function ConversationsPage() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [quickMenuOpen, chatHeaderMenuOpen, tagMenuOpen, openMessageMenuId, reactionMessageId, showComposerMenu, showEmoji, showStickerTray, showQuickReplyTray, forwardMessageId, bulkForwardOpen, shareContactOpen, lightboxUrl, incidentModal, appointmentModal, newChatModal, aiPromptModal, replyToMessage, selectMode]);
 
-  // Revoke the local object URL used for the attach preview once it's no longer shown.
-  useEffect(() => () => { if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl); }, [pendingPreviewUrl]);
+  // Revoke the local object URLs used for the attach previews when the chat view unmounts.
+  useEffect(() => { pendingFilesRef.current = pendingFiles; }, [pendingFiles]);
+  useEffect(() => () => { pendingFilesRef.current.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); }); }, []);
   useEffect(() => () => { streamRef.current?.getTracks().forEach((track) => track.stop()); if (timerRef.current) clearInterval(timerRef.current); }, []);
 
   const selected = conversations.find((item) => item.id === selectedId) || null;
@@ -1052,14 +1109,16 @@ export default function ConversationsPage() {
   const pinnedTabCount = useMemo(() => baseFiltered.filter((item) => item.pinned).length, [baseFiltered]);
   const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
   const aiTabCount = useMemo(() => baseFiltered.filter((item) => item.aiEnabled).length, [baseFiltered]);
+  const awaitingTabCount = baseFiltered.filter((item) => awaitingReply(item)).length;
   const filtered = useMemo(() => baseFiltered.filter((item) => {
     if (quickFilter === 'unread') return item.unreadCount > 0;
     if (quickFilter === 'pinned') return item.pinned;
     if (quickFilter === 'groups') return isGroupContact(item.contact);
     if (quickFilter === 'ai') return item.aiEnabled;
+    if (quickFilter === 'awaiting') return !!awaitingReply(item);
     if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
     return true;
-  }), [baseFiltered, quickFilter]);
+  }).sort((a, b) => quickFilter === 'awaiting' ? new Date(a.lastMessageAt).getTime() - new Date(b.lastMessageAt).getTime() : 0), [baseFiltered, quickFilter]);
   const hasActiveFilters = !!(filterAgent || filterDept.length || filterProject.length || filterStage.length || filterTags.length || dateFilter !== 'all');
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
@@ -1091,22 +1150,39 @@ export default function ConversationsPage() {
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
+    attachFiles(files);
+  };
+
+  const removePendingFile = (id: string) => {
+    const item = pendingFilesRef.current.find((entry) => entry.id === id);
+    if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    pendingFilesRef.current = pendingFilesRef.current.filter((entry) => entry.id !== id);
+    setPendingFiles((current) => current.filter((entry) => entry.id !== id));
+  };
+
+  const clearPendingFiles = () => {
+    pendingFilesRef.current.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+    pendingFilesRef.current = [];
+    setPendingFiles([]);
+  };
+
+  // Acumula adjuntos (ya no reemplaza el anterior): arrastrar, pegar o elegir más archivos los
+  // suma a la lista, hasta MAX_PENDING_FILES por envío.
+  const attachFiles = (files: File[]) => {
     if (files.length === 0) return;
-    if (files.length === 1) { attachFile(files[0]); return; }
-    void sendFiles(files);
+    const room = Math.max(MAX_PENDING_FILES - pendingFilesRef.current.length, 0);
+    const accepted = files.slice(0, room);
+    if (accepted.length < files.length) setError(`Máximo ${MAX_PENDING_FILES} archivos por envío`);
+    if (accepted.length === 0) return;
+    const added = accepted.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      previewUrl: isImageFile(file) || isVideoFile(file) ? URL.createObjectURL(file) : null,
+    }));
+    pendingFilesRef.current = [...pendingFilesRef.current, ...added];
+    setPendingFiles((current) => [...current, ...added]);
   };
-
-  const removePendingFile = () => {
-    if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
-    setPendingFile(null);
-    setPendingPreviewUrl(null);
-  };
-
-  const attachFile = (file: File) => {
-    if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
-    setPendingFile(file);
-    setPendingPreviewUrl(isImageFile(file) || isVideoFile(file) ? URL.createObjectURL(file) : null);
-  };
+  const attachFile = (file: File) => attachFiles([file]);
 
   // Lets agents drop an image/video/document straight onto the open chat to attach it,
   // same as WhatsApp Web. dragCounterRef tracks enter/leave depth because those events also
@@ -1132,9 +1208,7 @@ export default function ConversationsPage() {
     dragCounterRef.current = 0;
     setDragActive(false);
     const files = Array.from(e.dataTransfer.files || []);
-    if (files.length === 0) return;
-    if (files.length === 1) { attachFile(files[0]); return; }
-    void sendFiles(files);
+    attachFiles(files);
   };
 
   // Lets agents paste a screenshot (Ctrl+V) straight into the composer, same as WhatsApp Web.
@@ -1173,7 +1247,6 @@ export default function ConversationsPage() {
       const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
       setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
       void loadConversations();
-      removePendingFile();
       setText('');
       setReplyToMessage(null);
     } catch (err) {
@@ -1181,23 +1254,37 @@ export default function ConversationsPage() {
     } finally { setSending(false); }
   };
 
-  // Dropping/picking more than one file at once skips the single-attachment preview
-  // (there's no UI for captioning several files individually) and sends each one as
-  // its own message right away, same as WhatsApp Web does for a multi-file drop.
-  const sendFiles = async (files: File[]) => {
-    if (!selectedId || sending || files.length === 0) return;
+  // Envía los adjuntos pendientes uno tras otro, cada uno como mensaje propio. El texto del
+  // compositor y la cita ("Responder") viajan solo con el primero. Si alguno falla, los demás
+  // siguen y el que falló se queda en la lista para reintentar, con el motivo en el aviso.
+  const sendPendingFiles = async () => {
+    const items = [...pendingFilesRef.current];
+    if (!selectedId || sending || items.length === 0) return;
     setSending(true);
+    let caption = expandirRespuestasRapidas(text).texto.trim();
+    let quotedMessageId = replyToMessage?.id;
+    const failed: string[] = [];
+    let firstError = '';
     try {
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('ptt', 'false');
-        const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
-        setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
+      for (const item of items) {
+        try {
+          const formData = new FormData();
+          formData.append('file', item.file);
+          if (caption) formData.append('caption', caption);
+          formData.append('ptt', 'false');
+          if (quotedMessageId) formData.append('quotedMessageId', quotedMessageId);
+          const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
+          setMessages((current) => current.some((entry) => entry.id === created.id) ? current : [...current, created]);
+          removePendingFile(item.id);
+          if (caption) { caption = ''; setText(''); }
+          if (quotedMessageId) { quotedMessageId = undefined; setReplyToMessage(null); }
+        } catch (err) {
+          failed.push(item.file.name);
+          if (!firstError) firstError = err instanceof Error ? err.message : 'error desconocido';
+        }
       }
       void loadConversations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudieron enviar los archivos');
+      if (failed.length) setError(`No se pudo enviar ${failed.join(', ')}: ${firstError}`);
     } finally { setSending(false); }
   };
 
@@ -1230,7 +1317,7 @@ export default function ConversationsPage() {
   const send = async () => {
     if (!selectedId || sending) return;
     stopTyping();
-    if (pendingFile) { await sendMediaFile(pendingFile, { caption: expandirRespuestasRapidas(text).texto.trim() || undefined }); return; }
+    if (pendingFiles.length > 0) { await sendPendingFiles(); return; }
     if (!text.trim()) return;
     const { texto: expandido, conMedia } = expandirRespuestasRapidas(text);
     if (conMedia) {
@@ -2216,6 +2303,7 @@ export default function ConversationsPage() {
               <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>
               <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
+              <button className={`chat-quick-tab chat-quick-tab-awaiting ${quickFilter === 'awaiting' ? 'active' : ''} ${awaitingTabCount > 0 ? 'has-items' : ''}`} onClick={() => setQuickFilter('awaiting')} title="Clientes que escribieron y llevan 1 día o más sin respuesta (el más atrasado primero)">Sin responder{awaitingTabCount > 0 && ` ${awaitingTabCount}`}</button>
               <div className="chat-quick-more">
                 <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
               </div>
@@ -2290,9 +2378,10 @@ export default function ConversationsPage() {
                       {conversation.assignedUser ? conversation.assignedUser.name : 'Sin asignar'}
                     </span>
                   )}
+                  {(() => { const waiting = awaitingReply(conversation); return waiting ? <span className={`chat-awaiting ${waiting.level}`}>⏰ {waiting.label}</span> : null; })()}
                 </div>
                 <div>
-                  <div className="chat-time">{new Date(conversation.lastMessageAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</div>
+                  <div className={`chat-time ${awaitingReply(conversation) ? `awaiting-${awaitingReply(conversation)!.level}` : ''}`} title={fullDateTime(conversation.lastMessageAt)}><span className="chat-time-day">{chatListDayLabel(conversation.lastMessageAt)}</span><span>{clockTime(conversation.lastMessageAt)}</span></div>
                   {conversation.unreadCount > 0 && <div className="chat-unread">{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</div>}
                 </div>
                 <span
@@ -2375,12 +2464,23 @@ export default function ConversationsPage() {
               }}
             >
               <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
-                {messages.map((message) => (
+                {messages.map((message, index) => (
+                  <Fragment key={message.id}>
+                  {(index === 0 || !isSameDay(messages[index - 1].createdAt, message.createdAt)) && (
+                    <div className="day-separator" title={fullDateTime(message.createdAt)}><span>{daySeparatorLabel(message.createdAt)}</span></div>
+                  )}
                   <div
                     id={`msg-${message.id}`}
                     className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''} ${highlightMessageId === message.id ? 'highlight' : ''} ${selectedMessageIds.has(message.id) ? 'selected' : ''}`}
-                    key={message.id}
                     onClick={() => { if (selectMode) toggleMessageSelected(message.id); }}
+                    onDoubleClick={(e) => {
+                      // Doble clic en la burbuja = "Responder". Se ignora sobre lo que ya hace algo
+                      // con el clic (botones, enlaces, media, la cita) y en modo selección.
+                      if (selectMode) return;
+                      if ((e.target as HTMLElement).closest('button, a, input, video, audio, img, textarea, select')) return;
+                      window.getSelection()?.removeAllRanges();
+                      startReply(message);
+                    }}
                   >
                     {selectMode && (
                       <input
@@ -2408,7 +2508,7 @@ export default function ConversationsPage() {
                     {message.reactions && message.reactions.length > 0 && (
                       <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
                     )}
-                    <div className="message-time">
+                    <div className="message-time" title={fullDateTime(message.createdAt)}>
                       {message.pinned && <Pin size={10} className="message-badge-pin" />}
                       {message.starred && <Star size={10} className="message-badge-star" />}
                       {/* No se muestra el texto original, igual que hace WhatsApp: solo un
@@ -2419,10 +2519,11 @@ export default function ConversationsPage() {
                           <Pencil size={10} /> editado
                         </span>
                       )}
-                      {new Date(message.createdAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
+                      {clockTime(message.createdAt)}
                       {message.direction === 'OUTBOUND' && statusIcon(message.status)}
                     </div>
                   </div>
+                  </Fragment>
                 ))}
               </div>
             </div>
@@ -2448,12 +2549,18 @@ export default function ConversationsPage() {
                 <button className="icon-button ghost" onClick={cancelReply}><X size={14} /></button>
               </div>
             )}
-            {pendingFile && (
-              <div className="composer-preview">
-                {pendingPreviewUrl && isImageFile(pendingFile) && <img src={pendingPreviewUrl} alt="preview" />}
-                {pendingPreviewUrl && isVideoFile(pendingFile) && <video src={pendingPreviewUrl} muted />}
-                {!pendingPreviewUrl && <span className="composer-preview-name">📎 {pendingFile.name}</span>}
-                <button className="icon-button ghost" onClick={removePendingFile}><X size={14} /></button>
+            {pendingFiles.length > 0 && (
+              <div className="composer-attachments">
+                {pendingFiles.map((item) => (
+                  <div className="composer-attachment" key={item.id} title={item.file.name}>
+                    {item.previewUrl && isImageFile(item.file) && <img src={item.previewUrl} alt={item.file.name} />}
+                    {item.previewUrl && isVideoFile(item.file) && <video src={item.previewUrl} muted />}
+                    {!item.previewUrl && <span className="composer-attachment-name">📎 {item.file.name}</span>}
+                    <button className="composer-attachment-remove" onClick={() => removePendingFile(item.id)} disabled={sending} title="Quitar" aria-label={`Quitar ${item.file.name}`}><X size={12} /></button>
+                  </div>
+                ))}
+                {pendingFiles.length < MAX_PENDING_FILES && <button className="composer-attachment-add" onClick={pickFile} disabled={sending} title="Agregar más archivos"><Plus size={18} /></button>}
+                {pendingFiles.length > 1 && <button className="composer-attachments-clear" onClick={clearPendingFiles} disabled={sending}>Quitar todos</button>}
               </div>
             )}
 
@@ -2506,7 +2613,7 @@ export default function ConversationsPage() {
                   <textarea
                     ref={textareaRef}
                     rows={1}
-                    placeholder={pendingFile ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje... ("/" respuestas rápidas, "@" mencionar)'}
+                    placeholder={pendingFiles.length > 1 ? 'Mensaje para el primer archivo (opcional)...' : pendingFiles.length === 1 ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje... ("/" respuestas rápidas, "@" mencionar)'}
                     value={text}
                     onChange={onComposerTextChange}
                     onSelect={(e) => { const t = e.currentTarget; syncMention(t.value, t.selectionStart ?? t.value.length); }}
@@ -2530,7 +2637,7 @@ export default function ConversationsPage() {
                   />
                 </>
               )}
-              {!recording && !text.trim() && !pendingFile ? (
+              {!recording && !text.trim() && pendingFiles.length === 0 ? (
                 <button className="send-button" onClick={() => void startRecording()} title="Grabar nota de voz"><Mic size={17} /></button>
               ) : recording ? (
                 <button className="send-button" onClick={() => stopRecording(true)} title="Enviar nota de voz"><Square size={15} /></button>

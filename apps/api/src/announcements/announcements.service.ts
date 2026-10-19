@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -35,6 +35,22 @@ export class AnnouncementsService {
       data: { text, createdByUserId: userId },
       select: { id: true, text: true, createdAt: true },
     });
+  }
+
+  // Editar no reinicia las lecturas: quien ya lo leyo no lo vuelve a ver como pendiente, asi
+  // corregir una errata no vuelve a abrir el popup a todos los usuarios.
+  async update(id: string, text: string) {
+    const existing = await this.prisma.announcement.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Anuncio no encontrado');
+    return this.prisma.announcement.update({ where: { id }, data: { text }, select: { id: true, text: true, createdAt: true } });
+  }
+
+  // Las lecturas (AnnouncementRead) se borran en cascada, ver el schema.
+  async remove(id: string) {
+    const existing = await this.prisma.announcement.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Anuncio no encontrado');
+    await this.prisma.announcement.delete({ where: { id } });
+    return { ok: true };
   }
 
   // Idempotente: si el usuario ya lo habia marcado, no hace nada raro (unique constraint).
