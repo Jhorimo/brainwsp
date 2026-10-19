@@ -320,9 +320,63 @@ export class WidgetService {
       where: { conversationId: conversation.id },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, direction: true, type: true, status: true, body: true, caption: true, fileName: true, mimeType: true, fileSize: true, createdAt: true },
+      select: { id: true, direction: true, type: true, status: true, body: true, caption: true, fileName: true, mimeType: true, fileSize: true, createdAt: true, deleted: true, metadata: true },
     });
     return { conversationId: conversation.id, messages };
+  }
+
+  // Edición propia del visitante — a diferencia de WhatsApp (donde la edición llega por el
+  // protocolo Baileys y la procesa SessionManager.persistEdit en el worker), este canal no
+  // tiene contraparte externa: es solo una fila en la tabla, así que se edita directo acá.
+  // Mismo patrón de metadata que persistEdit (edited + originalBody solo la primera vez) para
+  // que el panel de agentes (que ya sabe leer esos campos) lo muestre igual sin cambios ahí.
+  async editMessage(widgetPublicKey: string, token: string, messageId: string, text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) throw new BadRequestException('El mensaje no puede estar vacío');
+
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const session = await this.requireSession(instance.companyId, token);
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, companyId: instance.companyId, contactId: session.contactId, direction: MessageDirection.INBOUND },
+    });
+    if (!message) throw new NotFoundException('Mensaje no encontrado');
+    if (message.deleted) throw new BadRequestException('No se puede editar un mensaje eliminado');
+    if (message.type !== MessageType.TEXT) throw new BadRequestException('Solo se pueden editar mensajes de texto');
+
+    const existingMetadata = (message.metadata as Record<string, unknown> | null) || {};
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        body: trimmed,
+        metadata: { ...existingMetadata, edited: true, originalBody: (existingMetadata.originalBody as string | undefined) ?? message.body },
+      },
+    });
+    await this.publishUpdate(instance.companyId, message.conversationId, updated);
+    return updated;
+  }
+
+  // "Eliminar" (delete for everyone), mismo criterio que WhatsApp Web: solo el autor del
+  // mensaje puede borrarlo, y es un borrado lógico (ver Message.deleted en el schema) — el
+  // panel de agentes ya sabe pintar el placeholder "Se eliminó este mensaje" para esto.
+  async deleteMessage(widgetPublicKey: string, token: string, messageId: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const session = await this.requireSession(instance.companyId, token);
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, companyId: instance.companyId, contactId: session.contactId, direction: MessageDirection.INBOUND },
+    });
+    if (!message) throw new NotFoundException('Mensaje no encontrado');
+    if (message.deleted) return { success: true };
+
+    const updated = await this.prisma.message.update({ where: { id: messageId }, data: { deleted: true } });
+    await this.publishUpdate(instance.companyId, message.conversationId, updated);
+    return { success: true };
+  }
+
+  // Mismo ruteo que publishInbound (sala conversation:{id} para el visitante + sala de
+  // departamento para los agentes), pero como parche parcial en vez de un mensaje nuevo.
+  private async publishUpdate(companyId: string, conversationId: string, message: unknown) {
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { departmentId: true } });
+    void this.realtime.publish(companyId, 'message.updated', message, conversation?.departmentId, conversationId);
   }
 
   // Igual que MediaController, pero con el token de VisitorSession en vez de JWT: solo deja

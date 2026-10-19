@@ -63,6 +63,25 @@
 
 .cc-status-pending { opacity: 0.65; }
 
+/* Editar/Eliminar el propio mensaje del visitante (igual que WhatsApp) */
+.cc-msg-col { position: relative; }
+.cc-msg-actions { position: absolute; top: -4px; left: -34px; }
+.cc-msg-actions-trigger { width: 24px; height: 24px; color: #9298a8; }
+.cc-msg-menu { position: absolute; top: 26px; left: 0; z-index: 6; min-width: 140px; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.3); padding: 4px; display: flex; flex-direction: column; }
+.cc-msg-menu button { display: flex; align-items: center; gap: 8px; border: none; background: transparent; padding: 7px 10px; border-radius: 7px; font-size: 12.5px; color: #353b4d; cursor: pointer; text-align: left; }
+.cc-msg-menu button:hover { background: #f0f1f6; }
+.cc-msg-menu button.danger { color: #c0392b; }
+
+.cc-bubble-deleted { display: flex; align-items: center; gap: 6px; background: #eceef3 !important; color: #7a8294 !important; font-style: italic; }
+.cc-edited-tag { margin-left: 6px; font-size: 10.5px; opacity: 0.75; font-style: italic; }
+
+.cc-bubble-edit { display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
+.cc-edit-input { background: rgba(255, 255, 255, 0.18); border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 10px; color: inherit; font: inherit; padding: 6px 8px; resize: none; outline: none; min-height: 44px; }
+.cc-edit-actions { display: flex; justify-content: flex-end; gap: 4px; }
+.cc-bubble-edit .cc-icon-btn { width: 26px; height: 26px; color: #fff; background: rgba(255, 255, 255, 0.18); }
+.cc-bubble-edit .cc-icon-btn:hover { background: rgba(255, 255, 255, 0.3); }
+.cc-bubble-edit .cc-icon-btn:disabled { opacity: 0.5; }
+
 @keyframes cc-fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 /* Imágenes y archivos adjuntos */

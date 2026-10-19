@@ -1,10 +1,10 @@
-import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Param, Post, Query, Req, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Patch, Post, Query, Req, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { pipeToResponse } from '../common/pipe-stream';
 import { StorageService } from '../storage/storage.service';
-import { SendWidgetMessageDto, StartWidgetSessionDto } from './widget.dto';
+import { EditWidgetMessageDto, SendWidgetMessageDto, StartWidgetSessionDto } from './widget.dto';
 import { checkWidgetRateLimit } from './widget-rate-limit';
 import { WidgetService } from './widget.service';
 
@@ -60,6 +60,23 @@ export class WidgetController {
   history(@Param('widgetPublicKey') widgetPublicKey: string, @Query('token') token: string) {
     if (!token) throw new BadRequestException('token requerido');
     return this.service.history(widgetPublicKey, token);
+  }
+
+  @Patch(':widgetPublicKey/messages/:messageId')
+  editMessage(
+    @Param('widgetPublicKey') widgetPublicKey: string,
+    @Param('messageId') messageId: string,
+    @Req() req: Request,
+    @Body() dto: EditWidgetMessageDto,
+  ) {
+    this.guardRateLimit(req, dto.token);
+    return this.service.editMessage(widgetPublicKey, dto.token, messageId, dto.text);
+  }
+
+  @Delete(':widgetPublicKey/messages/:messageId')
+  deleteMessage(@Param('widgetPublicKey') widgetPublicKey: string, @Param('messageId') messageId: string, @Query('token') token: string) {
+    if (!token) throw new BadRequestException('token requerido');
+    return this.service.deleteMessage(widgetPublicKey, token, messageId);
   }
 
   @Post(':widgetPublicKey/media')

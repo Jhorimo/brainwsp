@@ -25,3 +25,15 @@ export class SendWidgetMessageDto {
   @MaxLength(4000)
   text!: string;
 }
+
+export class EditWidgetMessageDto {
+  @ApiProperty({ description: 'Token de VisitorSession devuelto por /widget/:key/session' })
+  @IsString()
+  token!: string;
+
+  @ApiProperty({ example: 'Hola, perdón, quise decir otra cosa' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  text!: string;
+}

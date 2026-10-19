@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
-import { FileText, Mic, MessageCircle, Paperclip, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
+import { Ban, Check, FileText, Mic, MessageCircle, MoreVertical, Paperclip, Pencil, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
 import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { ClieneraMark } from '@/components/brand-mark';
+import { useConfirm } from '@/components/confirm-provider';
 import './chat.css';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -43,6 +44,7 @@ type Bootstrap = {
 type WidgetMessage = {
   id: string; direction: 'INBOUND' | 'OUTBOUND'; type: string; status: string; body?: string | null;
   caption?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; createdAt: string;
+  deleted?: boolean; metadata?: { edited?: boolean } | null;
 };
 
 // Página pública del canal Clienera Chat — "clienera.com/<slug>" del punto 11 del brief.
@@ -103,10 +105,16 @@ export default function PublicChatPage() {
   const [dragActive, setDragActive] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [menuMessageId, setMenuMessageId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const confirm = useConfirm();
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiBoxRef = useRef<HTMLDivElement>(null);
+  const msgMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -198,6 +206,67 @@ export default function PublicChatPage() {
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, [showEmoji]);
+
+  // Cierra el menú de "Editar/Eliminar" de un mensaje propio al tocar fuera de él.
+  useEffect(() => {
+    if (!menuMessageId) return;
+    const onClick = (e: MouseEvent) => { if (msgMenuRef.current && !msgMenuRef.current.contains(e.target as Node)) setMenuMessageId(null); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [menuMessageId]);
+
+  // Edición propia del visitante (solo mensajes de texto, como WhatsApp) — reemplaza la
+  // burbuja por un formulario inline en vez de reusar el composer, para no perder lo que el
+  // visitante esté escribiendo como mensaje nuevo.
+  const startEdit = useCallback((message: WidgetMessage) => {
+    setMenuMessageId(null);
+    setEditingId(message.id);
+    setEditingText(message.body || '');
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditingText('');
+  }, []);
+
+  const saveEdit = useCallback(async () => {
+    const text = editingText.trim();
+    if (!text || !bootstrap || !token || !editingId || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      const updated = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/messages/${editingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, text }),
+      }).then((r) => {
+        if (!r.ok) throw new Error('edit failed');
+        return r.json() as Promise<WidgetMessage>;
+      });
+      setMessages((current) => current.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
+      setEditingId(null);
+      setEditingText('');
+    } catch {
+      setUploadError('No se pudo editar el mensaje');
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [editingText, bootstrap, token, editingId, savingEdit]);
+
+  // "Eliminar" (delete for everyone), igual que WhatsApp: solo el propio mensaje del
+  // visitante, borrado lógico reflejado también en vivo para el agente que lo esté viendo.
+  const removeMessage = useCallback(async (message: WidgetMessage) => {
+    setMenuMessageId(null);
+    if (!bootstrap || !token) return;
+    if (!(await confirm('¿Eliminar este mensaje? Esta acción no se puede deshacer.', { confirmText: 'Eliminar' }))) return;
+    setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, deleted: true } : m)));
+    try {
+      const result = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/messages/${message.id}?token=${encodeURIComponent(token)}`, { method: 'DELETE' });
+      if (!result.ok) throw new Error('delete failed');
+    } catch {
+      setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, deleted: false } : m)));
+      setUploadError('No se pudo eliminar el mensaje');
+    }
+  }, [bootstrap, token, confirm]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -378,11 +447,41 @@ export default function PublicChatPage() {
         {messages.map((message) => {
           const isVisitor = message.direction === 'INBOUND';
           const bubbleStyle = !isVisitor ? undefined : { background: gradient };
+          const canManage = isVisitor && !message.deleted && editingId !== message.id;
           return (
             <div key={message.id} className={`cc-row ${isVisitor ? 'cc-row-visitor' : 'cc-row-agent'}`}>
               {!isVisitor && <div className="cc-bubble-avatar" style={{ background: bootstrap.color }}>{initials(bootstrap.companyName)}</div>}
-              <div>
-                {message.type === 'IMAGE' ? (
+              <div className="cc-msg-col">
+                {canManage && (
+                  <div className="cc-msg-actions" ref={menuMessageId === message.id ? msgMenuRef : undefined}>
+                    <button className="cc-icon-btn cc-msg-actions-trigger" aria-label="Opciones del mensaje" onClick={() => setMenuMessageId((current) => (current === message.id ? null : message.id))}>
+                      <MoreVertical size={14} />
+                    </button>
+                    {menuMessageId === message.id && (
+                      <div className="cc-msg-menu">
+                        {message.type === 'TEXT' && <button onClick={() => startEdit(message)}><Pencil size={13} />Editar</button>}
+                        <button className="danger" onClick={() => void removeMessage(message)}><Trash2 size={13} />Eliminar</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {message.deleted ? (
+                  <div className="cc-bubble cc-bubble-deleted"><Ban size={13} />Se eliminó este mensaje</div>
+                ) : editingId === message.id ? (
+                  <div className="cc-bubble cc-bubble-edit" style={bubbleStyle}>
+                    <textarea
+                      className="cc-edit-input"
+                      value={editingText}
+                      autoFocus
+                      onChange={(e) => setEditingText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit(); } else if (e.key === 'Escape') cancelEdit(); }}
+                    />
+                    <div className="cc-edit-actions">
+                      <button className="cc-icon-btn" aria-label="Cancelar edición" onClick={cancelEdit}><X size={14} /></button>
+                      <button className="cc-icon-btn" aria-label="Guardar edición" disabled={savingEdit || !editingText.trim()} onClick={() => void saveEdit()}><Check size={14} /></button>
+                    </div>
+                  </div>
+                ) : message.type === 'IMAGE' ? (
                   <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
                     <img className="cc-image" src={mediaSrc(message.id)} alt={message.caption || 'Imagen'} loading="lazy" />
                     {message.caption && <div className="cc-caption">{message.caption}</div>}
@@ -407,6 +506,7 @@ export default function PublicChatPage() {
                 ) : (
                   <div className={`cc-bubble ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
                     {message.body}
+                    {message.metadata?.edited && <span className="cc-edited-tag">editado</span>}
                   </div>
                 )}
                 <div className="cc-time">{formatTime(message.createdAt)}</div>

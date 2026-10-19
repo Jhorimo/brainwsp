@@ -42,6 +42,14 @@
   var iconUrl = null; // URL del ícono/mascota propia, si la empresa subió una (ver clienera:ready)
   var minimizeAllowed = true; // confirmado por el bootstrap (allowMinimize); ver clienera:ready
 
+  // Pantalla chica (celular en cualquier orientación, el "lado corto" del viewport) — el
+  // panel flotante de 368x540 no entra ahí sin dejar franjas de la página anfitriona a la
+  // vista (ver AGENTS.md: así se veía roto en gastromaq.erp.brainpos.pe). En vez de eso el
+  // panel pasa a ocupar toda la pantalla mientras está abierto, como cualquier chat nativo
+  // de celular. Tablet/laptop/desktop siguen con la tarjeta flotante de siempre.
+  function computeMobile() { return Math.min(window.innerWidth, window.innerHeight) <= 640; }
+  var mobile = computeMobile();
+
   // Mismo degradé + sombra de color que el header del panel (ver chat.css `shade()`),
   // reimplementado acá porque widget.js es un script estático, sin acceso a ese módulo.
   function shade(hex, amount) {
@@ -136,19 +144,44 @@
   frame.title = 'Chat';
   frame.src = origin + '/c/' + encodeURIComponent(slug) + '?embed=1' + (pageUrl ? '&pageUrl=' + encodeURIComponent(pageUrl) : '');
   frame.style.cssText =
-    'position:fixed;bottom:88px;' + side +
-    'width:368px;height:540px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 120px);' +
-    'border:none;border-radius:18px;box-shadow:0 20px 50px -12px rgba(0,0,0,.35);' +
+    'position:fixed;border:none;box-shadow:0 20px 50px -12px rgba(0,0,0,.35);' +
     'z-index:2147483000;background:#fff;display:none;opacity:0;transform:translateY(12px);' +
     'transition:opacity .2s ease,transform .2s ease;';
+
+  // Tamaño/posición del iframe según el viewport actual — separado del resto del cssText de
+  // arriba porque esto sí cambia en caliente (al abrir/cerrar en celular, o al rotar la
+  // pantalla mientras el chat está abierto), ver listener de "resize" más abajo.
+  function applyFrameLayout() {
+    if (mobile && open) {
+      frame.style.top = '0'; frame.style.bottom = '0'; frame.style.left = '0'; frame.style.right = '0';
+      frame.style.width = '100%'; frame.style.height = '100%';
+      frame.style.maxWidth = 'none'; frame.style.maxHeight = 'none';
+      frame.style.borderRadius = '0';
+    } else {
+      frame.style.top = '';
+      frame.style.bottom = '88px';
+      if (position === 'left') { frame.style.left = '20px'; frame.style.right = ''; }
+      else { frame.style.right = '20px'; frame.style.left = ''; }
+      frame.style.width = '368px';
+      frame.style.height = '540px';
+      frame.style.maxWidth = 'calc(100vw - 32px)';
+      frame.style.maxHeight = 'calc(100dvh - 120px)';
+      frame.style.borderRadius = '18px';
+    }
+  }
+  applyFrameLayout();
 
   var open = false;
   function setOpen(next) {
     open = next;
+    applyFrameLayout();
     if (open) {
       teaser.style.opacity = '0';
       teaser.style.pointerEvents = 'none';
       frame.style.display = 'block';
+      // En celular el panel ocupa toda la pantalla: el botón flotante (y su badge de
+      // minimizar) estorbarían encima sin aportar nada, el propio X del panel ya cierra.
+      if (mobile) { launcher.style.display = 'none'; minimizeBadge.style.display = 'none'; }
       requestAnimationFrame(function () {
         frame.style.opacity = '1';
         frame.style.transform = 'translateY(0)';
@@ -159,9 +192,25 @@
       frame.style.transform = 'translateY(12px)';
       setTimeout(function () { if (!open) frame.style.display = 'none'; }, 180);
       launcher.setAttribute('aria-label', 'Abrir chat');
+      if (!minimized) {
+        launcher.style.display = 'flex';
+        minimizeBadge.style.display = minimizeAllowed ? 'flex' : 'none';
+      }
     }
     renderLauncherFace();
   }
+
+  // Si el visitante rota la pantalla (o redimensiona la ventana en desktop) mientras el chat
+  // está abierto, se recalcula si ahora toca modo pantalla completa o tarjeta flotante.
+  window.addEventListener('resize', function () {
+    var next = computeMobile();
+    if (next === mobile) return;
+    mobile = next;
+    applyFrameLayout();
+    if (!open) return;
+    if (mobile) { launcher.style.display = 'none'; minimizeBadge.style.display = 'none'; }
+    else { launcher.style.display = 'flex'; minimizeBadge.style.display = minimizeAllowed ? 'flex' : 'none'; }
+  });
 
   // Minimiza/restaura la burbuja completa (botón + teaser + panel), independiente de
   // abrir/cerrar el chat. El estado se recuerda en este navegador (ver minimizedStorageKey).
@@ -264,8 +313,7 @@
       teaser.style.borderBottomRightRadius = '4px'; teaser.style.borderBottomLeftRadius = '14px';
     }
 
-    if (position === 'left') { frame.style.left = '20px'; frame.style.right = ''; }
-    else { frame.style.right = '20px'; frame.style.left = ''; }
+    applyFrameLayout();
   }
 
   teaser.addEventListener('click', function () { setOpen(true); });
