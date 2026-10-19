@@ -1153,12 +1153,12 @@ tr:last-child td { border-bottom: 0; }
 .message-stream-inner.select-mode .message-bubble { cursor: pointer; }
 .message-bubble.selected { background: var(--surface-info-5); border-color: var(--border-info-5); }
 .message-reactions { position: absolute; bottom: -9px; right: 6px; background: var(--surface); border: 1px solid var(--border-neutral-10); border-radius: 999px; padding: 1px 5px; font-size: 11px; line-height: 1.4; box-shadow: 0 1px 3px var(--shadow-info-11); }
-.message-actions-menu { position: fixed; z-index: 200; background: var(--surface); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow-info-6); padding: 6px; min-width: 200px; display: flex; flex-direction: column; }
-.message-actions-menu button { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 0; background: none; text-align: left; border-radius: 7px; font-size: 12px; color: var(--text); }
-.message-actions-menu button:hover:not(:disabled) { background: var(--surface-2); }
-.message-actions-menu button:disabled { color: var(--text-neutral-8); cursor: not-allowed; }
-.message-actions-menu button.danger { color: var(--danger-text); }
-.message-actions-menu button.danger:hover:not(:disabled) { background: var(--danger-soft); }
+.message-actions-menu, .row-actions-menu { position: fixed; z-index: 200; background: var(--surface); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow-info-6); padding: 6px; min-width: 200px; display: flex; flex-direction: column; }
+.message-actions-menu button, .row-actions-menu button { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 0; background: none; text-align: left; border-radius: 7px; font-size: 12px; color: var(--text); }
+.message-actions-menu button:hover:not(:disabled), .row-actions-menu button:hover:not(:disabled) { background: var(--surface-2); }
+.message-actions-menu button:disabled, .row-actions-menu button:disabled { color: var(--text-neutral-8); cursor: not-allowed; }
+.message-actions-menu button.danger, .row-actions-menu button.danger { color: var(--danger-text); }
+.message-actions-menu button.danger:hover:not(:disabled), .row-actions-menu button.danger:hover:not(:disabled) { background: var(--danger-soft); }
 .message-deleted { display: flex; align-items: center; gap: 6px; font-size: 12px; font-style: italic; color: var(--muted); }
 .forward-modal { background: var(--surface); border-radius: 14px; padding: 18px; width: min(380px, 100%); max-height: 70vh; display: flex; flex-direction: column; gap: 12px; cursor: default; }
 .forward-modal h3 { margin: 0; font-size: 14px; }
