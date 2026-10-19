@@ -619,6 +619,7 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .nav-item.muted { opacity: .58; cursor: default; }
 .nav-badge { margin-left: auto; background: var(--fixed-success-1); color: var(--fixed-success-2); border: 1px solid var(--fixed-success-3); padding: 2px 7px; font-size: 9px; border-radius: 999px; text-transform: uppercase; font-weight: 800; letter-spacing: .6px; }
 .sidebar-footer { margin-top: auto; border-top: 1px solid var(--fixed-info-6); padding-top: 14px; }
+.sidebar-version { margin-top: 8px; text-align: center; font-size: 10px; color: var(--text-neutral-9); opacity: .7; }
 .account-button { background: transparent; border: 0; color: var(--on-color); width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 10px; text-align: left; }
 .account-button:hover { background: var(--fixed-neutral-4); }
 .avatar { width: 35px; height: 35px; border-radius: 10px; display: grid; place-items: center; background: var(--fixed-info-7); font-weight: 800; font-size: 12px; }

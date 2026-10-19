@@ -13,6 +13,9 @@ export class HealthController {
     return {
       ok: true,
       service: 'brainwsp-api',
+      // Commit + fecha del build que generó esta imagen (ver docker-compose.yml/deploy.sh) —
+      // "dev" fuera de Docker (npm run dev), donde no hay build que lo haya inyectado.
+      version: process.env.APP_VERSION || 'dev',
       timestamp: new Date().toISOString(),
     };
   }

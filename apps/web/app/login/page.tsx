@@ -7,6 +7,7 @@ import { Eye, EyeOff, LockKeyhole, MessageSquareText, Radio, Sparkles } from 'lu
 import { API_URL, apiFetch, clearAuthSession, getToken, setAuthSession } from '@/lib/api';
 import { GoogleIcon } from '@/components/google-icon';
 import { BrandIcon } from '@/components/brand-mark';
+import { APP_VERSION } from '@/lib/version';
 
 export default function LoginPage() {
   return (
@@ -142,7 +143,7 @@ function LoginForm() {
             <div className="login-feature"><Sparkles size={15} /> IA Ready</div>
           </div>
         </div>
-        <div style={{position:'relative',zIndex:1,color:'#7797c5',fontSize:10}}>Brain Tech Perú · Plataforma privada de comunicaciones</div>
+        <div style={{position:'relative',zIndex:1,color:'#7797c5',fontSize:10}}>Brain Tech Perú · Plataforma privada de comunicaciones · v{APP_VERSION}</div>
       </section>
 
       <section className="login-form-wrap">

@@ -11,7 +11,9 @@ RUN npm run db:generate && npm run build -w @brainwsp/api
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
+ARG APP_VERSION
 ENV NODE_ENV=production
+ENV APP_VERSION=$APP_VERSION
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json

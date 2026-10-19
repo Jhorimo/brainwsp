@@ -76,6 +76,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        # Mismo valor que NEXT_PUBLIC_APP_VERSION del servicio "web" — ver GET /api/health.
+        APP_VERSION: ${APP_VERSION:-dev}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://brainwsp:brainwsp@postgres:5432/brainwsp?schema=public
@@ -136,6 +139,10 @@ services:
         NEXT_PUBLIC_API_URL: http://localhost:4000/api
         NEXT_PUBLIC_SOCKET_URL: http://localhost:4000
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
+        # Identifica qué commit quedó desplegado (login y sidebar, ver lib/version.ts) — la
+        # exporta deploy.sh antes de buildear; en local (npm run dev / docker compose sin
+        # pasarla) cae a "dev".
+        NEXT_PUBLIC_APP_VERSION: ${APP_VERSION:-dev}
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4000/api
       NEXT_PUBLIC_SOCKET_URL: http://localhost:4000

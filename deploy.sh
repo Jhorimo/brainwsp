@@ -236,6 +236,12 @@ services:
 EOF
 
 # ===== BUILD Y ARRANQUE =====
+# Commit + fecha de ESTE deploy — ver NEXT_PUBLIC_APP_VERSION/APP_VERSION en
+# docker-compose.yml. Se calcula recién acá (después del git pull de arriba) para que
+# siempre refleje lo que de verdad se está construyendo, y se exporta (no se guarda en
+# .env) porque cambia en cada deploy, a diferencia del resto de las variables.
+export APP_VERSION="$(git -C "$REPO_DIR" rev-parse --short HEAD)-$(date +%Y%m%d)"
+echo "Versión de este deploy: $APP_VERSION"
 echo "Construyendo y levantando contenedores (puede tardar varios minutos la primera vez)"
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 

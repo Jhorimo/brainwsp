@@ -41,6 +41,7 @@ import { Protected } from './protected';
 import { WhatsAppStatusToast } from './whatsapp-status-toast';
 import { API_URL, apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
 import { ALL_MODULE_KEYS, MODULE_TREE } from '@/lib/modules';
+import { APP_VERSION } from '@/lib/version';
 
 type MasterCredential = {
   id: string;
@@ -437,6 +438,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
               <ChevronDown size={16} />
             </button>
             <button className="logout-button" onClick={logout} type="button"><LogOut size={17} /><span>Cerrar sesión</span></button>
+            <div className="sidebar-version" title="Commit desplegado actualmente">v{APP_VERSION}</div>
           </div>
         </aside>
 
