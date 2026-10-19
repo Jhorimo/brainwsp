@@ -174,6 +174,11 @@
 
   var frame = document.createElement('iframe');
   frame.title = 'Chat';
+  // Sin esto, un iframe de otro origen (cualquier web de cliente embebiendo este script)
+  // bloquea getUserMedia por Permissions Policy aunque el visitante dé permiso en el
+  // navegador — el micrófono queda delegado explícitamente al iframe. Mismo motivo para
+  // autoplay: si no, el <audio autoPlay> del audio remoto de la llamada puede quedar mudo.
+  frame.setAttribute('allow', 'microphone; autoplay');
   frame.src = origin + '/c/' + encodeURIComponent(slug) + '?embed=1' + (pageUrl ? '&pageUrl=' + encodeURIComponent(pageUrl) : '');
   frame.style.cssText =
     'position:fixed;border:none;box-shadow:0 20px 50px -12px rgba(0,0,0,.35);' +
