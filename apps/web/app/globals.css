@@ -1081,7 +1081,16 @@ tr:last-child td { border-bottom: 0; }
 .chat-copy span { display: block; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 5px; }
 .chat-copy span.chat-row-agent { display: flex; align-items: center; gap: 3px; margin-top: 4px; font-size: 9px; font-weight: 600; color: var(--text-neutral-9); }
 .chat-copy span.chat-row-agent.unassigned { color: var(--warning-text); }
-.chat-time { color: var(--text-neutral-9); font-size: 9px; }
+.chat-time { color: var(--text-neutral-9); font-size: 9px; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.3; white-space: nowrap; }
+.chat-time-day { font-weight: 600; }
+.chat-time.awaiting-amber, .chat-time.awaiting-amber .chat-time-day { color: var(--warning-text); }
+.chat-time.awaiting-red, .chat-time.awaiting-red .chat-time-day { color: var(--danger-text); }
+/* .chat-copy span (más arriba) fija color/tamaño/margen de cualquier span de la fila: por eso el prefijo. */
+.chat-copy .chat-awaiting { display: block; margin-top: 4px; padding: 1px 8px; border-radius: 999px; font-size: 9px; font-weight: 700; width: fit-content; max-width: 100%; border: 1px solid transparent; }
+.chat-copy .chat-awaiting.amber { background: var(--warning-soft); color: var(--warning-text); border-color: var(--warning-text); }
+.chat-copy .chat-awaiting.red { background: var(--danger-soft); color: var(--danger-text); border-color: var(--danger); }
+.chat-quick-tab-awaiting.has-items:not(.active) { color: var(--danger-text); border-color: var(--danger); }
+.day-separator { align-self: center; margin: 8px 0 2px; padding: 3px 13px; border-radius: 999px; background: var(--surface-neutral-22); border: 1px solid var(--border-neutral-10); color: var(--text-neutral-10); font-size: 10px; font-weight: 600; }
 .chat-unread { margin-top: 8px; margin-left: auto; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: var(--on-color); font-size: 9px; font-weight: 800; }
 .chat-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface-neutral-20); }
 .chat-drop-overlay { position: absolute; inset: 0; z-index: 50; background: var(--surface-info-4); backdrop-filter: blur(1px); display: flex; align-items: center; justify-content: center; pointer-events: none; }

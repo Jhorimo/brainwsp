@@ -149,6 +149,24 @@ function sortConversations(list: Conversation[]) {
 function isGroupContact(contact: Contact) {
   return contact.waId.endsWith('@g.us');
 }
+
+// "Sin responder": el último mensaje del chat es del cliente (entrante) y lleva al menos
+// AWAITING_AMBER_HOURS sin que nadie del equipo conteste. Se excluyen los grupos (siempre
+// tendrían un mensaje entrante reciente) y los chats resueltos/cerrados. Limitación conocida:
+// solo mira el ÚLTIMO mensaje, así que si contestó un bot/automatización el chat deja de
+// contar como pendiente aunque ningún agente haya hablado con el cliente.
+const AWAITING_AMBER_HOURS = 24;
+const AWAITING_RED_HOURS = 72;
+function awaitingReply(conversation: Conversation): { level: 'amber' | 'red'; label: string } | null {
+  const last = conversation.messages[0];
+  if (!last || last.direction !== 'INBOUND') return null;
+  if (conversation.status === 'RESOLVED' || conversation.status === 'CLOSED') return null;
+  if (isGroupContact(conversation.contact)) return null;
+  const hours = (Date.now() - new Date(conversation.lastMessageAt).getTime()) / 3_600_000;
+  if (hours < AWAITING_AMBER_HOURS) return null;
+  const days = Math.floor(hours / 24);
+  return { level: hours >= AWAITING_RED_HOURS ? 'red' : 'amber', label: `${days} ${days === 1 ? 'día' : 'días'} sin responder` };
+}
 function displayName(contact: Contact) {
   return contact.name || contact.pushName || contact.phone || contact.waId.split('@')[0] || 'Cliente';
 }
@@ -218,6 +236,34 @@ function statusIcon(status: string) {
     : <Clock size={10} />;
   return <span title={labels[status] || status}>{icon}</span>;
 }
+// Fechas estilo WhatsApp. Los días se comparan por fecha calendario LOCAL (no por 24 h
+// transcurridas), así "Ayer" es el día anterior aunque hayan pasado menos de 24 horas.
+const DAY_MS = 86_400_000;
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+const daysAgo = (date: Date) => Math.round((startOfDay(new Date()) - startOfDay(date)) / DAY_MS);
+const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+const clockTime = (iso: string) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+const fullDateTime = (iso: string) => capitalize(new Date(iso).toLocaleString('es-PE', { dateStyle: 'full', timeStyle: 'short' }));
+// Lista de chats: Hoy / Ayer / día de la semana (últimos 6 días) / dd/mm/aaaa.
+function chatListDayLabel(iso: string) {
+  const date = new Date(iso);
+  const diff = daysAgo(date);
+  if (diff <= 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  if (diff < 7) return capitalize(date.toLocaleDateString('es-PE', { weekday: 'long' }));
+  return date.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+// Separador dentro del chat: igual, pero con la fecha escrita; el año solo si no es el actual.
+function daySeparatorLabel(iso: string) {
+  const date = new Date(iso);
+  const diff = daysAgo(date);
+  if (diff <= 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  if (diff < 7) return capitalize(date.toLocaleDateString('es-PE', { weekday: 'long' }));
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString('es-PE', sameYear ? { day: 'numeric', month: 'long' } : { day: 'numeric', month: 'long', year: 'numeric' });
+}
+const isSameDay = (a: string, b: string) => startOfDay(new Date(a)) === startOfDay(new Date(b));
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
   const s = Math.floor(seconds % 60).toString().padStart(2, '0');
@@ -342,6 +388,12 @@ export default function ConversationsPage() {
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<DatePreset>('all');
   const [quickFilter, setQuickFilter] = useState<string>('all');
+  // Re-evalúa "sin responder" (depende de la hora actual) sin esperar a que llegue un mensaje.
+  const [, setAwaitingTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setAwaitingTick((n) => n + 1), 5 * 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
@@ -995,14 +1047,16 @@ export default function ConversationsPage() {
   const pinnedTabCount = useMemo(() => baseFiltered.filter((item) => item.pinned).length, [baseFiltered]);
   const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
   const aiTabCount = useMemo(() => baseFiltered.filter((item) => item.aiEnabled).length, [baseFiltered]);
+  const awaitingTabCount = baseFiltered.filter((item) => awaitingReply(item)).length;
   const filtered = useMemo(() => baseFiltered.filter((item) => {
     if (quickFilter === 'unread') return item.unreadCount > 0;
     if (quickFilter === 'pinned') return item.pinned;
     if (quickFilter === 'groups') return isGroupContact(item.contact);
     if (quickFilter === 'ai') return item.aiEnabled;
+    if (quickFilter === 'awaiting') return !!awaitingReply(item);
     if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
     return true;
-  }), [baseFiltered, quickFilter]);
+  }).sort((a, b) => quickFilter === 'awaiting' ? new Date(a.lastMessageAt).getTime() - new Date(b.lastMessageAt).getTime() : 0), [baseFiltered, quickFilter]);
   const hasActiveFilters = !!(filterAgent || filterDept.length || filterProject.length || filterStage.length || filterTags.length || dateFilter !== 'all');
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
@@ -2157,6 +2211,7 @@ export default function ConversationsPage() {
               <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>
               <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
+              <button className={`chat-quick-tab chat-quick-tab-awaiting ${quickFilter === 'awaiting' ? 'active' : ''} ${awaitingTabCount > 0 ? 'has-items' : ''}`} onClick={() => setQuickFilter('awaiting')} title="Clientes que escribieron y llevan 1 día o más sin respuesta (el más atrasado primero)">Sin responder{awaitingTabCount > 0 && ` ${awaitingTabCount}`}</button>
               <div className="chat-quick-more">
                 <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
               </div>
@@ -2229,9 +2284,10 @@ export default function ConversationsPage() {
                       {conversation.assignedUser ? conversation.assignedUser.name : 'Sin asignar'}
                     </span>
                   )}
+                  {(() => { const waiting = awaitingReply(conversation); return waiting ? <span className={`chat-awaiting ${waiting.level}`}>⏰ {waiting.label}</span> : null; })()}
                 </div>
                 <div>
-                  <div className="chat-time">{new Date(conversation.lastMessageAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</div>
+                  <div className={`chat-time ${awaitingReply(conversation) ? `awaiting-${awaitingReply(conversation)!.level}` : ''}`} title={fullDateTime(conversation.lastMessageAt)}><span className="chat-time-day">{chatListDayLabel(conversation.lastMessageAt)}</span><span>{clockTime(conversation.lastMessageAt)}</span></div>
                   {conversation.unreadCount > 0 && <div className="chat-unread">{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</div>}
                 </div>
                 <span
@@ -2312,11 +2368,14 @@ export default function ConversationsPage() {
               }}
             >
               <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
-                {messages.map((message) => (
+                {messages.map((message, index) => (
+                  <Fragment key={message.id}>
+                  {(index === 0 || !isSameDay(messages[index - 1].createdAt, message.createdAt)) && (
+                    <div className="day-separator" title={fullDateTime(message.createdAt)}><span>{daySeparatorLabel(message.createdAt)}</span></div>
+                  )}
                   <div
                     id={`msg-${message.id}`}
                     className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''} ${highlightMessageId === message.id ? 'highlight' : ''} ${selectedMessageIds.has(message.id) ? 'selected' : ''}`}
-                    key={message.id}
                     onClick={() => { if (selectMode) toggleMessageSelected(message.id); }}
                   >
                     {selectMode && (
@@ -2345,7 +2404,7 @@ export default function ConversationsPage() {
                     {message.reactions && message.reactions.length > 0 && (
                       <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
                     )}
-                    <div className="message-time">
+                    <div className="message-time" title={fullDateTime(message.createdAt)}>
                       {message.pinned && <Pin size={10} className="message-badge-pin" />}
                       {message.starred && <Star size={10} className="message-badge-star" />}
                       {/* No se muestra el texto original, igual que hace WhatsApp: solo un
@@ -2356,10 +2415,11 @@ export default function ConversationsPage() {
                           <Pencil size={10} /> editado
                         </span>
                       )}
-                      {new Date(message.createdAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
+                      {clockTime(message.createdAt)}
                       {message.direction === 'OUTBOUND' && statusIcon(message.status)}
                     </div>
                   </div>
+                  </Fragment>
                 ))}
               </div>
             </div>
