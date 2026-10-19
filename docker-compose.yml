@@ -28,6 +28,35 @@ services:
       timeout: 3s
       retries: 20
 
+  # Servidor TURN propio para las llamadas de voz del widget (ver WidgetService.getIceServers
+  # y AGENTS.md) — sin esto, dos navegadores en redes distintas (el caso normal: agente y
+  # visitante casi nunca comparten red) muchas veces no logran armar una ruta de audio
+  # directa aunque STUN sí les deje intercambiar la señalización (oferta/respuesta): la
+  # llamada se ve "conectada" pero no se escucha nada. `network_mode: host` en vez de
+  # "ports:" porque TURN negocia puertos de relay dinámicos dentro de --min-port/--max-port;
+  # con el NAT normal de Docker esos puertos no se pueden mapear uno por uno. Esto ata coturn
+  # directo a la red del host — solo tiene sentido en Linux (el servidor de producción), no
+  # hace falta levantarlo en desarrollo local (STUN solo alcanza para probar en la misma red).
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_USERNAME: ${TURN_USERNAME:-brainwsp}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-change-this-turn-password}
+      # IP pública del servidor — necesaria solo si el host vive detrás de un NAT (raro en un
+      # VPS normal, que ya tiene IP pública propia); si no se setea, coturn la detecta solo.
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+    # entrypoint+command explícitos (en vez de dejar el ENTRYPOINT propio de la imagen) para
+    # no depender de cómo ese script decida envolver los argumentos — así el shell siempre
+    # resuelve la expansión condicional de TURN_EXTERNAL_IP de abajo.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        turnserver -n --log-file=stdout --fingerprint --lt-cred-mech --realm=brainwsp
+        --user=$$TURN_USERNAME:$$TURN_CREDENTIAL --min-port=49160 --max-port=49200
+        $${TURN_EXTERNAL_IP:+--external-ip=$$TURN_EXTERNAL_IP}
+
   minio:
     # minio/minio en Docker Hub deja de estar disponible ("pull access denied") desde el
     # 2026-09-11 — MinIO restringio su distribucion gratuita ahi. quay.io es su propio

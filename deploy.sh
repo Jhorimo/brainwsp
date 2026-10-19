@@ -119,6 +119,7 @@ if [ ! -f .env ]; then
     MINIO_PASSWORD=$(gen_secret 24)
     ADMIN_PASSWORD=$(gen_secret 12)
     SUPERADMIN_PASSWORD=$(gen_secret 12)
+    TURN_CREDENTIAL=$(gen_secret 24)
 
     read -p "Nombre de la empresa (para el usuario administrador inicial): " company_name
     company_name=${company_name:-'Mi Empresa'}
@@ -138,6 +139,13 @@ if [ ! -f .env ]; then
     sed -i "s#^SEED_ADMIN_PASSWORD=.*#SEED_ADMIN_PASSWORD=$ADMIN_PASSWORD#" .env
     sed -i "s#^SEED_SUPERADMIN_EMAIL=.*#SEED_SUPERADMIN_EMAIL=superadmin@$HOST#" .env
     sed -i "s#^SEED_SUPERADMIN_PASSWORD=.*#SEED_SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD#" .env
+    # TURN propio (ver servicio "coturn" en docker-compose.yml) — sin esto las llamadas de
+    # voz del widget se conectan pero no se escucha nada en cuanto agente y visitante están
+    # en redes distintas (el caso normal). TURN_EXTERNAL_IP se deja vacío: un VPS normal ya
+    # tiene IP pública propia y coturn la detecta solo.
+    sed -i "s#^TURN_USERNAME=.*#TURN_USERNAME=brainwsp#" .env
+    sed -i "s#^TURN_CREDENTIAL=.*#TURN_CREDENTIAL=$TURN_CREDENTIAL#" .env
+    sed -i "s#^TURN_URLS=.*#TURN_URLS=turn:$HOST:3478,turn:$HOST:3478?transport=tcp#" .env
 
     cat << EOF >> .env
 
@@ -172,6 +180,18 @@ else
     if ! grep -q "^NEXT_PUBLIC_SITE_URL=" .env; then
         echo "Agregando NEXT_PUBLIC_SITE_URL (variable nueva) a .env existente"
         echo "NEXT_PUBLIC_SITE_URL=https://$HOST" >> .env
+    fi
+    # TURN propio (ver servicio "coturn" en docker-compose.yml) — mismo motivo que arriba.
+    # Solo completa lo que falte: si ya habías puesto tu propio TURN_URLS a mano, no lo toca.
+    if ! grep -q "^TURN_URLS=.\+" .env; then
+        echo "Agregando TURN_USERNAME/TURN_CREDENTIAL/TURN_URLS (servidor TURN propio) a .env existente"
+        sed -i "/^TURN_USERNAME=/d;/^TURN_CREDENTIAL=/d;/^TURN_URLS=/d;/^TURN_EXTERNAL_IP=/d" .env
+        cat << EOF >> .env
+TURN_USERNAME=brainwsp
+TURN_CREDENTIAL=$(gen_secret 24)
+TURN_URLS=turn:$HOST:3478,turn:$HOST:3478?transport=tcp
+TURN_EXTERNAL_IP=
+EOF
     fi
 fi
 
@@ -260,6 +280,15 @@ API / Swagger:     https://$API_HOST/docs
 ------------------------------------------------------------
 Usuario admin:     $(grep '^SEED_ADMIN_EMAIL=' .env | cut -d= -f2)
 Contraseña admin:  $(grep '^SEED_ADMIN_PASSWORD=' .env | cut -d= -f2)
+------------------------------------------------------------
+IMPORTANTE — llamadas de voz del widget (servidor TURN "coturn"):
+abre en el firewall del servidor (y en el security group del proveedor
+cloud, si aplica) estos puertos hacia afuera, o las llamadas se van a
+conectar pero no se va a escuchar nada:
+  3478/udp y 3478/tcp           (señalización TURN)
+  49160-49200/udp               (relay de audio)
+Ejemplo con ufw:
+  ufw allow 3478 && ufw allow 49160:49200/udp
 ------------------------------------------------------------
 Para actualizar en el futuro, vuelve a correr:
   cd $PATH_INSTALL && ./deploy.sh $HOST $API_HOST
