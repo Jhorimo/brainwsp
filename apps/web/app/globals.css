@@ -1079,6 +1079,7 @@ tr:last-child td { border-bottom: 0; }
 .channel-badge { flex-shrink: 0; font-size: 10px; line-height: 1; }
 .chat-copy strong { display: block; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-copy span { display: block; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 5px; }
+.chat-copy span.chat-row-typing { color: var(--brand-text); font-weight: 600; }
 .chat-copy span.chat-row-agent { display: flex; align-items: center; gap: 3px; margin-top: 4px; font-size: 9px; font-weight: 600; color: var(--text-neutral-9); }
 .chat-copy span.chat-row-agent.unassigned { color: var(--warning-text); }
 .chat-time { color: var(--text-neutral-9); font-size: 9px; }

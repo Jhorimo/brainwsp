@@ -245,8 +245,25 @@ export class ConversationsService {
   // llega un mensaje a la conversación que el agente ya tiene abierta. `getOwned` valida
   // la pertenencia a la empresa antes de escribir.
   async markRead(user: JwtUser, conversationId: string) {
-    await this.getOwned(user, conversationId);
+    const conversation = await this.getOwned(user, conversationId);
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
+
+    // ✓✓ azul estilo WhatsApp Web del lado del visitante, solo para Clienera Chat: en
+    // WhatsApp real no existe un acuse de lectura genuino del agente hacia el contacto
+    // (el ✓✓ azul de WhatsApp lo da el teléfono del contacto, no nuestro panel), así que no
+    // se fabrica uno ahí — acá sí es real, "un agente abrió esta conversación".
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: conversation.instanceId }, select: { provider: true } });
+    if (instance?.provider === 'CLIENERA_CHAT') {
+      const unread = await this.prisma.message.findMany({
+        where: { conversationId, direction: MessageDirection.INBOUND, status: { in: [MessageStatus.RECEIVED, MessageStatus.DELIVERED] } },
+        select: { id: true },
+      });
+      if (unread.length) {
+        const ids = unread.map((m) => m.id);
+        await this.prisma.message.updateMany({ where: { id: { in: ids } }, data: { status: MessageStatus.READ } });
+        void this.realtime.publish(user.companyId, 'message.status', { conversationId, ids, status: 'READ' }, conversation.departmentId, conversationId);
+      }
+    }
     return { ok: true };
   }
 

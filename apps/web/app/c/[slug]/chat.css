@@ -65,8 +65,10 @@
 .cc-row-agent .cc-bubble { background: #fff; color: #23283a; border-bottom-left-radius: 4px; }
 .cc-row-visitor .cc-bubble { color: #fff; border-bottom-right-radius: 4px; }
 
-.cc-time { font-size: 10px; color: #a7adbb; margin-top: 3px; padding: 0 3px; }
-.cc-row-visitor .cc-time { text-align: right; }
+.cc-time { display: flex; align-items: center; gap: 3px; font-size: 10px; color: #a7adbb; margin-top: 3px; padding: 0 3px; }
+.cc-row-visitor .cc-time { justify-content: flex-end; }
+.cc-ticks { display: inline-flex; color: #a7adbb; }
+.cc-ticks .cc-status-read { color: #53bdeb; }
 
 .cc-status-pending { opacity: 0.65; }
 

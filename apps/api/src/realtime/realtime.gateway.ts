@@ -9,7 +9,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { UserRole } from '@prisma/client';
+import { MessageDirection, MessageStatus, UserRole } from '@prisma/client';
 import type { Server, Socket } from 'socket.io';
 import { createCorsOriginValidator } from '../common/cors-origin';
 import { AgentAccessService } from '../common/services/agent-access.service';
@@ -94,14 +94,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (!session) return client.disconnect(true);
       const conversation = await this.prisma.conversation.findFirst({
         where: { id: conversationId, contactId: session.contactId },
-        select: { id: true },
+        select: { id: true, companyId: true, departmentId: true },
       });
       if (!conversation) return client.disconnect(true);
       client.data.visitorContactId = session.contactId;
-      // Guardado para "call:invite", que no manda payload propio — la conversación a
-      // llamar sale del socket, nunca de algo que mande el cliente (mismo principio que el
-      // resto de este gateway).
+      // Guardado para "call:invite" y para escritura/acuses de entrega-lectura (typing,
+      // message:delivered, message:read), que no mandan payload propio — la conversación
+      // (y a quién avisarle) sale del socket, nunca de algo que mande el cliente (mismo
+      // principio que el resto de este gateway).
       client.data.conversationId = conversationId;
+      client.data.companyId = conversation.companyId;
+      client.data.departmentId = conversation.departmentId;
       await client.join(`conversation:${conversationId}`);
     } catch {
       client.disconnect(true);
@@ -292,5 +295,83 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   private emitToInviteTargets(targets: CallInviteTargets, event: string, payload: unknown) {
     const destinations = 'socketIds' in targets ? targets.socketIds : targets.rooms;
     destinations.forEach((destination) => this.server.to(destination).emit(event, payload));
+  }
+
+  // ---- "Escribiendo..." y acuses de entrega/lectura (Clienera Chat) ----
+  // Mismo principio que las llamadas: esto es puro ruteo en tiempo real, sin pasar por
+  // RealtimeBus/Redis (solo funciona con una instancia de API, ver nota de escalado en
+  // CallsService) — nada de esto se persiste salvo el cambio de `Message.status`, que sí
+  // necesita sobrevivir un refresh de la página.
+
+  @SubscribeMessage('typing')
+  async handleTyping(@ConnectedSocket() client: Socket, @MessageBody() data: { conversationId?: string; typing?: boolean }) {
+    const typing = Boolean(data?.typing);
+    if (client.data.visitorContactId) {
+      const conversationId = client.data.conversationId as string | undefined;
+      const companyId = client.data.companyId as string | undefined;
+      const departmentId = (client.data.departmentId ?? null) as string | null;
+      if (conversationId && companyId) this.emitScoped(companyId, 'contact.typing', { conversationId, typing }, departmentId);
+      return;
+    }
+    const user = client.data.user as JwtUser | undefined;
+    if (!user || !data?.conversationId) return;
+    // El agente puede tener varias conversaciones en pestañas: a diferencia del visitante,
+    // acá sí hace falta el conversationId que manda el cliente, verificado contra su propia
+    // empresa antes de reenviarlo (nunca se confía en el company/departmentId del cliente).
+    const conversation = await this.prisma.conversation.findFirst({ where: { id: data.conversationId, companyId: user.companyId }, select: { id: true } });
+    if (!conversation) return;
+    this.server.to(`conversation:${data.conversationId}`).emit('agent:typing', { typing });
+  }
+
+  // Sube el status de un lote de mensajes de una conversación (nunca lo baja: ver el filtro
+  // `in: from`) y devuelve los ids realmente tocados, para que el caller decida a quién
+  // avisar del cambio — distinto según sea el visitante o un agente quien confirma.
+  private async bumpMessageStatus(conversationId: string, direction: MessageDirection, from: MessageStatus[], to: MessageStatus): Promise<string[]> {
+    const rows = await this.prisma.message.findMany({ where: { conversationId, direction, status: { in: from } }, select: { id: true } });
+    if (!rows.length) return [];
+    const ids = rows.map((row) => row.id);
+    await this.prisma.message.updateMany({ where: { id: { in: ids } }, data: { status: to } });
+    return ids;
+  }
+
+  // El visitante confirma que su navegador recibió en vivo la(s) respuesta(s) del agente
+  // (✓✓ gris) — se emite apenas llega "message.created" y también al cargar el historial
+  // (ver widget page.tsx), así que es intencionalmente idempotente (el filtro `from` evita
+  // volver a tocar lo que ya avanzó).
+  @SubscribeMessage('message:delivered')
+  async handleMessageDelivered(@ConnectedSocket() client: Socket, @MessageBody() data: { conversationId?: string }) {
+    if (client.data.visitorContactId) {
+      const conversationId = client.data.conversationId as string | undefined;
+      const companyId = client.data.companyId as string | undefined;
+      const departmentId = (client.data.departmentId ?? null) as string | null;
+      if (!conversationId || !companyId) return;
+      const ids = await this.bumpMessageStatus(conversationId, MessageDirection.OUTBOUND, [MessageStatus.SENT], MessageStatus.DELIVERED);
+      if (ids.length) this.emitScoped(companyId, 'message.status', { conversationId, ids, status: 'DELIVERED' }, departmentId, conversationId);
+      return;
+    }
+    // Un agente confirma que el mensaje del visitante "llegó a la bandeja" (✓✓ gris en el
+    // widget) — se emite al recibir "message.created" en el panel, sin importar si esa
+    // conversación está abierta o no. El "leído" (✓✓ azul) de este lado llega aparte, por
+    // ConversationsService.markRead (POST /conversations/:id/read), que es la acción real
+    // de abrir/seleccionar la conversación.
+    const user = client.data.user as JwtUser | undefined;
+    if (!user || !data?.conversationId) return;
+    const conversation = await this.prisma.conversation.findFirst({ where: { id: data.conversationId, companyId: user.companyId }, select: { id: true } });
+    if (!conversation) return;
+    const ids = await this.bumpMessageStatus(data.conversationId, MessageDirection.INBOUND, [MessageStatus.RECEIVED], MessageStatus.DELIVERED);
+    if (ids.length) this.server.to(`conversation:${data.conversationId}`).emit('message.status', { conversationId: data.conversationId, ids, status: 'DELIVERED' });
+  }
+
+  // Solo el visitante marca lectura por socket (ve la respuesta del agente con el chat
+  // abierto) — la lectura del lado del agente ya la cubre la ruta REST de arriba.
+  @SubscribeMessage('message:read')
+  async handleMessageRead(@ConnectedSocket() client: Socket) {
+    if (!client.data.visitorContactId) return;
+    const conversationId = client.data.conversationId as string | undefined;
+    const companyId = client.data.companyId as string | undefined;
+    const departmentId = (client.data.departmentId ?? null) as string | null;
+    if (!conversationId || !companyId) return;
+    const ids = await this.bumpMessageStatus(conversationId, MessageDirection.OUTBOUND, [MessageStatus.SENT, MessageStatus.DELIVERED], MessageStatus.READ);
+    if (ids.length) this.emitScoped(companyId, 'message.status', { conversationId, ids, status: 'READ' }, departmentId, conversationId);
   }
 }

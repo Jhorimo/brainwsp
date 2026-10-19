@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
-import { Ban, Check, FileText, Mic, MicOff, MessageCircle, MoreVertical, Paperclip, Pencil, Phone, PhoneOff, Send, Smile, Square, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
+import { Ban, Check, CheckCheck, FileText, Mic, MicOff, MessageCircle, MoreVertical, Paperclip, Pencil, Phone, PhoneOff, Send, Smile, Square, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
 import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
@@ -108,6 +108,16 @@ function callLabel(metadata?: { callStatus?: string; durationSeconds?: number } 
   }
 }
 
+// Ticks de los propios mensajes del visitante, estilo WhatsApp Web — ver RealtimeGateway
+// 'message:delivered'/'message:read' y ConversationsService.markRead (lado agente).
+// RECEIVED = llegó al servidor (✓), DELIVERED = un agente lo recibió en vivo (✓✓ gris),
+// READ = un agente abrió la conversación (✓✓ azul).
+function ticksIcon(status: string) {
+  if (status === 'READ') return <CheckCheck size={12} className="cc-status-read" />;
+  if (status === 'DELIVERED') return <CheckCheck size={12} />;
+  return <Check size={12} />;
+}
+
 export default function PublicChatPage() {
   const params = useParams<{ slug: string }>();
   const searchParams = useSearchParams();
@@ -136,6 +146,8 @@ export default function PublicChatPage() {
   // Sonido al llegar un mensaje del agente — activado por defecto, el visitante lo puede
   // silenciar desde el botón del header. Por canal (storageKey), igual que el token/conversación.
   const [soundEnabled, setSoundEnabled] = useState(true);
+  // "Agente escribiendo..." estilo WhatsApp Web — ver RealtimeGateway 'typing'/'agent:typing'.
+  const [agentTyping, setAgentTyping] = useState(false);
   const confirm = useConfirm();
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -159,6 +171,10 @@ export default function PublicChatPage() {
   // conversación (ver efecto 2) y de otro modo leería el valor de cuando se abrió el socket.
   const soundEnabledRef = useRef(true);
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+  // "Escribiendo..." propio (ver notifyTyping/stopTyping) — debounced para no mandar un
+  // evento por cada tecla, igual que en conversations/page.tsx del panel.
+  const typingActiveRef = useRef(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 1. Resuelve el canal por el slug de la empresa y arranca/recupera la sesión del visitante.
   useEffect(() => {
@@ -222,6 +238,33 @@ export default function PublicChatPage() {
     setMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
   }, []);
 
+  // "Escribiendo..." propio del visitante, hacia el/los agente(s) — debounced: un solo
+  // 'typing:true' al empezar, y 'typing:false' recién tras una pausa (o al vaciar/enviar el
+  // input), nunca uno por tecla.
+  const stopTyping = useCallback(() => {
+    if (typingTimeoutRef.current) { clearTimeout(typingTimeoutRef.current); typingTimeoutRef.current = null; }
+    if (typingActiveRef.current) {
+      typingActiveRef.current = false;
+      socketRef.current?.emit('typing', { typing: false });
+    }
+  }, []);
+  const notifyTyping = useCallback(() => {
+    if (!typingActiveRef.current) {
+      typingActiveRef.current = true;
+      socketRef.current?.emit('typing', { typing: true });
+    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(stopTyping, 2500);
+  }, [stopTyping]);
+
+  // Acuses de entrega/lectura (✓✓ gris / ✓✓ azul) de los propios mensajes del visitante —
+  // ver RealtimeGateway 'message:delivered'/'message:read'. Se emiten sin payload: el
+  // servidor ya sabe de qué conversación es este socket.
+  const ackDelivered = useCallback(() => { socketRef.current?.emit('message:delivered'); }, []);
+  const ackRead = useCallback(() => {
+    if (document.visibilityState === 'visible') socketRef.current?.emit('message:read');
+  }, []);
+
   // Corta la llamada de voz en curso del lado del navegador (peer connection + micrófono +
   // timer) sin avisar al servidor — lo usan tanto "colgar" (que sí avisa, ver hangUp) como
   // cualquier evento que llegue del servidor diciendo que ya terminó por su cuenta
@@ -245,15 +288,26 @@ export default function PublicChatPage() {
     if (!token || !conversationId) return;
     const socket = io(SOCKET_URL, { auth: { visitorToken: token, conversationId } });
     socketRef.current = socket;
+    // Al conectar (primera vez, o reconexión tras un corte) confirma de una vez lo que ya
+    // vino en el historial por HTTP — no solo lo que llegue de acá en adelante por socket.
+    socket.on('connect', () => { ackDelivered(); ackRead(); });
     socket.on('message.created', (data: { message: WidgetMessage }) => {
       addMessage(data.message);
       // OUTBOUND = de la empresa al visitante (ver WidgetMessage) — nunca el eco del propio
       // mensaje que el visitante acaba de mandar.
-      if (data.message.direction === 'OUTBOUND' && soundEnabledRef.current) playNotificationSound();
+      if (data.message.direction === 'OUTBOUND') {
+        if (soundEnabledRef.current) playNotificationSound();
+        ackDelivered();
+        ackRead();
+      }
     });
     socket.on('message.updated', (updated: WidgetMessage) => {
       setMessages((current) => current.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
     });
+    socket.on('message.status', (data: { ids: string[]; status: string }) => {
+      setMessages((current) => current.map((m) => (data.ids.includes(m.id) ? { ...m, status: data.status } : m)));
+    });
+    socket.on('agent:typing', (data: { typing: boolean }) => setAgentTyping(data.typing));
     socket.on('call:ringing', (data: { callId: string }) => { callIdRef.current = data.callId; });
     socket.on('call:accepted', (data: { callId: string }) => {
       const pc = pcRef.current;
@@ -275,7 +329,16 @@ export default function PublicChatPage() {
     socket.on('call:end', (data: { callId: string }) => { if (data.callId === callIdRef.current) cleanupCall(); });
     socket.on('call:error', () => { setUploadError('No se pudo iniciar la llamada'); cleanupCall(); });
     return () => { socket.disconnect(); };
-  }, [token, conversationId, addMessage, cleanupCall]);
+  }, [token, conversationId, addMessage, cleanupCall, ackDelivered, ackRead]);
+
+  // Si el agente respondió mientras la pestaña estaba en segundo plano, ackRead() de arriba
+  // ya se salteó el "leído" (solo confirma entrega) — esto lo completa apenas el visitante
+  // vuelve a esta pestaña.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') ackRead(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [ackRead]);
 
   // Espera a que socketRef.current exista Y esté conectado — hace falta porque si todavía no
   // había conversación (visitante que quiere llamar sin haber escrito antes), recién se crea
@@ -450,6 +513,7 @@ export default function PublicChatPage() {
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || !bootstrap || !token || sending) return;
+    stopTyping();
     setSending(true);
     setDraft('');
     try {
@@ -469,7 +533,7 @@ export default function PublicChatPage() {
     } finally {
       setSending(false);
     }
-  }, [draft, bootstrap, token, sending, addMessage]);
+  }, [draft, bootstrap, token, sending, addMessage, stopTyping]);
 
   const sendFile = useCallback(async (file: File) => {
     if (!bootstrap || !token) return;
@@ -606,7 +670,10 @@ export default function PublicChatPage() {
           <div className="cc-header-info">
             <span className="cc-header-name">{bootstrap.companyName}</span>
             <span className="cc-header-status">
-              {callState === 'calling' ? 'Llamando…' : callState === 'active' ? `En llamada · ${formatCallDuration(callSeconds)}` : 'Normalmente responde en minutos'}
+              {callState === 'calling' ? 'Llamando…'
+                : callState === 'active' ? `En llamada · ${formatCallDuration(callSeconds)}`
+                : agentTyping ? 'Escribiendo…'
+                : 'Normalmente responde en minutos'}
             </span>
           </div>
           {bootstrap.allowCalls && token && (
@@ -711,7 +778,10 @@ export default function PublicChatPage() {
                     </div>
                   )}
                 </div>
-                <div className="cc-time">{formatTime(message.createdAt)}</div>
+                <div className="cc-time">
+                  {formatTime(message.createdAt)}
+                  {isVisitor && !message.deleted && <span className="cc-ticks">{ticksIcon(message.status)}</span>}
+                </div>
               </div>
             </div>
           );
@@ -748,7 +818,7 @@ export default function PublicChatPage() {
               style={{ ['--cc-color' as string]: bootstrap.color }}
               placeholder="Escribe un mensaje..."
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => { const value = e.target.value; setDraft(value); if (value.trim()) notifyTyping(); else stopTyping(); }}
               onKeyDown={(e) => { if (e.key === 'Enter') void send(); }}
               onPaste={onInputPaste}
             />

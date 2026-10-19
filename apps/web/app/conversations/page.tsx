@@ -586,6 +586,31 @@ export default function ConversationsPage() {
     });
   }, []);
 
+  // "Escribiendo..." estilo WhatsApp Web (ver RealtimeGateway 'typing'/'contact.typing') —
+  // socketRef guarda la conexión del efecto de abajo para que el composer (otra función,
+  // otro closure) pueda emitir sin tener que levantar un segundo socket.
+  const socketRef = useRef<ReturnType<typeof io> | null>(null);
+  const [typingConversations, setTypingConversations] = useState<Set<string>>(new Set());
+  const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const typingActiveRef = useRef(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopTyping = useCallback(() => {
+    if (typingTimeoutRef.current) { clearTimeout(typingTimeoutRef.current); typingTimeoutRef.current = null; }
+    if (typingActiveRef.current) {
+      typingActiveRef.current = false;
+      socketRef.current?.emit('typing', { conversationId: selectedIdRef.current, typing: false });
+    }
+  }, []);
+  const notifyTyping = useCallback(() => {
+    if (!selectedIdRef.current) return;
+    if (!typingActiveRef.current) {
+      typingActiveRef.current = true;
+      socketRef.current?.emit('typing', { conversationId: selectedIdRef.current, typing: true });
+    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(stopTyping, 2500);
+  }, [stopTyping]);
+
   // Debounced so the search box doesn't fire a request on every keystroke — the server now
   // does the actual matching (contact name/phone AND message content), unlike the instant
   // in-memory filters below.
@@ -623,6 +648,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
+    socketRef.current = socket;
     // A dropped connection (server redeploy, network blip) can miss events while it's down.
     // socket.io reconnects on its own but never replays what it missed, so every (re)connect
     // forces a full refetch to make sure the list can't get stuck showing stale data forever.
@@ -648,7 +674,33 @@ export default function ConversationsPage() {
           void apiFetch(`/conversations/${event.conversation.id}/read`, { method: 'POST' }).catch(() => {});
         }
       }
-      if (event.message.direction === 'INBOUND' && soundEnabledRef.current) playNotificationSound();
+      if (event.message.direction === 'INBOUND') {
+        if (soundEnabledRef.current) playNotificationSound();
+        // "Llegó a la bandeja" (✓✓ gris en el widget) — ver RealtimeGateway
+        // 'message:delivered'. El "leído" (✓✓ azul) real lo dispara el POST .../read de
+        // arriba, no esto.
+        socket.emit('message:delivered', { conversationId: event.conversation.id });
+      }
+    });
+    socket.on('message.status', (data: { ids: string[]; status: string }) => {
+      setMessages((current) => current.map((item) => (data.ids.includes(item.id) ? { ...item, status: data.status } : item)));
+    });
+    socket.on('contact.typing', (data: { conversationId: string; typing: boolean }) => {
+      const timers = typingTimersRef.current;
+      const existing = timers.get(data.conversationId);
+      if (existing) clearTimeout(existing);
+      if (data.typing) {
+        // Red de seguridad si se pierde el 'typing:false' (el visitante se desconecta a
+        // media escritura, etc.) — sin esto "Escribiendo..." podría quedarse pegado.
+        timers.set(data.conversationId, setTimeout(() => {
+          timers.delete(data.conversationId);
+          setTypingConversations((current) => { const next = new Set(current); next.delete(data.conversationId); return next; });
+        }, 6000));
+        setTypingConversations((current) => new Set(current).add(data.conversationId));
+      } else {
+        timers.delete(data.conversationId);
+        setTypingConversations((current) => { const next = new Set(current); next.delete(data.conversationId); return next; });
+      }
     });
     socket.on('conversation.updated', (updated: Conversation) => {
       setConversations((current) => sortConversations(current.map((item) => item.id === updated.id ? { ...item, ...updated } : item)));
@@ -689,7 +741,12 @@ export default function ConversationsPage() {
       : [lead, ...current]);
     socket.on('lead.created', upsertLead);
     socket.on('lead.updated', upsertLead);
-    return () => { socket.disconnect(); };
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      typingTimersRef.current.forEach((timer) => clearTimeout(timer));
+      typingTimersRef.current.clear();
+    };
   }, [loadMessages, loadConversations]);
 
   // Anclar al último mensaje SOLO si el agente ya estaba abajo. Antes se forzaba en cada
@@ -1172,6 +1229,7 @@ export default function ConversationsPage() {
 
   const send = async () => {
     if (!selectedId || sending) return;
+    stopTyping();
     if (pendingFile) { await sendMediaFile(pendingFile, { caption: expandirRespuestasRapidas(text).texto.trim() || undefined }); return; }
     if (!text.trim()) return;
     const { texto: expandido, conMedia } = expandirRespuestasRapidas(text);
@@ -1587,6 +1645,7 @@ export default function ConversationsPage() {
   const onComposerTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setText(value);
+    if (value.trim()) notifyTyping(); else stopTyping();
     const caret = e.target.selectionStart ?? value.length;
     if (syncMention(value, caret)) { setQrAutocompleteOpen(false); return; }
     const token = findSlashToken(value, caret);
@@ -2222,7 +2281,9 @@ export default function ConversationsPage() {
                       </span>
                     )}
                   </div>
-                  <span>{lastText(conversation)}</span>
+                  <span className={typingConversations.has(conversation.id) ? 'chat-row-typing' : undefined}>
+                    {typingConversations.has(conversation.id) ? 'Escribiendo...' : lastText(conversation)}
+                  </span>
                   {teamUsers.length > 1 && (
                     <span className={`chat-row-agent ${conversation.assignedUser ? '' : 'unassigned'}`} title={conversation.assignedUser ? `Asignado a ${conversation.assignedUser.name}` : 'Sin asignar'}>
                       <User size={10} />
@@ -2278,9 +2339,11 @@ export default function ConversationsPage() {
                 <div className="chat-header-meta">
                   <span className="chat-header-phone">{selected.contact.phone || (selected.instance.provider === 'CLIENERA_CHAT' ? 'Visitante web' : selected.contact.waId)}</span>
                   <span className="chat-header-status">
-                    {selected.instance.provider === 'CLIENERA_CHAT'
-                      ? `💬 ${selected.instance.name}`
-                      : selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}
+                    {typingConversations.has(selected.id)
+                      ? 'Escribiendo...'
+                      : selected.instance.provider === 'CLIENERA_CHAT'
+                        ? `💬 ${selected.instance.name}`
+                        : selected.instance.status === 'CONNECTED' ? `● ${selected.instance.name} conectado` : `${selected.instance.name} · ${selected.instance.status}`}
                   </span>
                   {selected.contact.sourceUrl && (
                     <span className="chat-header-source" title={selected.contact.sourceUrl}><Globe size={11} />{hostnameFromUrl(selected.contact.sourceUrl)}</span>
