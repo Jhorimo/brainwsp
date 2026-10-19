@@ -1190,6 +1190,15 @@ tr:last-child td { border-bottom: 0; }
 .composer-preview img, .composer-preview video { width: 52px; height: 52px; object-fit: cover; border-radius: 9px; }
 .composer-preview-name { font-size: 11px; color: var(--text); flex: 1; }
 .composer-preview .icon-button.ghost { margin-left: auto; }
+.composer-attachments { display: flex; align-items: center; gap: 10px; padding: 10px 15px; background: var(--surface-neutral-26); border-top: 1px solid var(--line); flex-shrink: 0; overflow-x: auto; }
+.composer-attachment { position: relative; flex-shrink: 0; width: 72px; height: 72px; border-radius: 10px; background: var(--surface-neutral-22); border: 1px solid var(--line); display: grid; place-items: center; }
+.composer-attachment img, .composer-attachment video { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; }
+.composer-attachment-name { padding: 4px 6px; font-size: 9px; text-align: center; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-all; }
+.composer-attachment-remove { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--overlay); color: var(--on-color); cursor: pointer; }
+.composer-attachment-remove:hover:not(:disabled) { background: var(--danger); }
+.composer-attachment-add { flex-shrink: 0; width: 72px; height: 72px; border-radius: 10px; border: 1px dashed var(--border-neutral-10); background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.composer-attachment-add:hover:not(:disabled) { background: var(--surface-neutral-22); color: var(--text); }
+.composer-attachments-clear { flex-shrink: 0; margin-left: auto; border: 0; background: none; color: var(--muted); font-size: 11px; text-decoration: underline; cursor: pointer; }
 
 .composer-reply-preview { display: flex; align-items: center; gap: 10px; padding: 8px 15px; background: var(--surface-neutral-26); border-top: 1px solid var(--line); flex-shrink: 0; }
 .composer-reply-bar { width: 3px; align-self: stretch; background: var(--brand); border-radius: 2px; flex-shrink: 0; }
