@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, Phone, PhoneOff } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Mic, MicOff, Phone, PhoneOff, Volume2 } from 'lucide-react';
 import { io, type Socket } from 'socket.io-client';
 import { API_URL, getToken, SOCKET_URL } from '@/lib/api';
 
@@ -59,6 +59,7 @@ export function IncomingCallProvider() {
   const [callPhase, setCallPhase] = useState<'idle' | 'ringing' | 'active'>('idle');
   const [muted, setMuted] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [volume, setVolume] = useState(100);
   const socketRef = useRef<Socket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -95,6 +96,8 @@ export function IncomingCallProvider() {
     setCallPhase('idle');
     setMuted(false);
     setSeconds(0);
+    setVolume(100);
+    if (remoteAudioRef.current) remoteAudioRef.current.volume = 1;
   }, [ringtone]);
 
   useEffect(() => {
@@ -203,31 +206,47 @@ export function IncomingCallProvider() {
     setMuted(next);
   }, [muted]);
 
+  // Sube/baja el volumen de REPRODUCCIÓN del audio remoto (el del visitante que llega a
+  // este agente) — no afecta el micrófono propio, eso es toggleMute.
+  const onVolumeChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const next = Number(e.target.value);
+    setVolume(next);
+    if (remoteAudioRef.current) remoteAudioRef.current.volume = next / 100;
+  }, []);
+
   return (
     <>
       <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
       {incoming && callPhase !== 'idle' && (
         <div className="incoming-call-card" role="alert">
-          <div className="incoming-call-info">
-            <Phone size={18} />
-            <div>
-              <strong>{callPhase === 'ringing' ? 'Llamada entrante' : 'En llamada'}</strong>
-              <span>{incoming.contact.name}{callPhase === 'active' ? ` · ${formatDuration(seconds)}` : ''}</span>
+          <div className="incoming-call-row">
+            <div className="incoming-call-info">
+              <Phone size={18} />
+              <div>
+                <strong>{callPhase === 'ringing' ? 'Llamada entrante' : 'En llamada'}</strong>
+                <span>{incoming.contact.name}{callPhase === 'active' ? ` · ${formatDuration(seconds)}` : ''}</span>
+              </div>
+            </div>
+            <div className="incoming-call-actions">
+              {callPhase === 'ringing' ? (
+                <>
+                  <button className="incoming-call-btn decline" aria-label="Rechazar" onClick={declineCall}><PhoneOff size={16} /></button>
+                  <button className="incoming-call-btn accept" aria-label="Aceptar" onClick={() => void acceptCall()}><Phone size={16} /></button>
+                </>
+              ) : (
+                <>
+                  <button className="incoming-call-btn" aria-label={muted ? 'Activar micrófono' : 'Silenciar'} onClick={toggleMute}>{muted ? <MicOff size={16} /> : <Mic size={16} />}</button>
+                  <button className="incoming-call-btn decline" aria-label="Colgar" onClick={hangUp}><PhoneOff size={16} /></button>
+                </>
+              )}
             </div>
           </div>
-          <div className="incoming-call-actions">
-            {callPhase === 'ringing' ? (
-              <>
-                <button className="incoming-call-btn decline" aria-label="Rechazar" onClick={declineCall}><PhoneOff size={16} /></button>
-                <button className="incoming-call-btn accept" aria-label="Aceptar" onClick={() => void acceptCall()}><Phone size={16} /></button>
-              </>
-            ) : (
-              <>
-                <button className="incoming-call-btn" aria-label={muted ? 'Activar micrófono' : 'Silenciar'} onClick={toggleMute}>{muted ? <MicOff size={16} /> : <Mic size={16} />}</button>
-                <button className="incoming-call-btn decline" aria-label="Colgar" onClick={hangUp}><PhoneOff size={16} /></button>
-              </>
-            )}
-          </div>
+          {callPhase === 'active' && (
+            <div className="incoming-call-volume">
+              <Volume2 size={14} />
+              <input type="range" min={0} max={100} value={volume} onChange={onVolumeChange} aria-label="Volumen de la llamada" />
+            </div>
+          )}
         </div>
       )}
     </>

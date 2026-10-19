@@ -2187,7 +2187,8 @@ tr:last-child td { border-bottom: 0; }
 /* Llamada de voz entrante del widget Clienera Chat (ver IncomingCallProvider) — tarjeta fija,
    a propósito NO reusa .modal-backdrop/.modal: no debe cerrarse con click afuera ni tapar
    el resto del panel mientras suena o está en curso. */
-.incoming-call-card { position: fixed; right: 18px; bottom: 18px; z-index: 70; display: flex; align-items: center; gap: 14px; min-width: 260px; max-width: min(340px, calc(100vw - 36px)); padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); color: var(--text); box-shadow: 0 16px 40px var(--shadow-neutral-2); animation: incoming-call-pop .22s ease; }
+.incoming-call-card { position: fixed; right: 18px; bottom: 18px; z-index: 70; display: flex; flex-direction: column; gap: 10px; min-width: 260px; max-width: min(340px, calc(100vw - 36px)); padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); color: var(--text); box-shadow: 0 16px 40px var(--shadow-neutral-2); animation: incoming-call-pop .22s ease; }
+.incoming-call-row { display: flex; align-items: center; gap: 14px; }
 .incoming-call-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .incoming-call-info strong { display: block; font-size: 13px; }
 .incoming-call-info span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2198,6 +2199,8 @@ tr:last-child td { border-bottom: 0; }
 .incoming-call-btn.accept:hover { background: var(--success-text); }
 .incoming-call-btn.decline { background: var(--danger); color: #fff; }
 .incoming-call-btn.decline:hover { background: var(--decoration-danger-3); }
+.incoming-call-volume { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.incoming-call-volume input[type="range"] { flex: 1; accent-color: var(--brand); }
 @keyframes incoming-call-pop { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
 /* Keep keyboard focus visible even on controls whose base rule resets outline. */

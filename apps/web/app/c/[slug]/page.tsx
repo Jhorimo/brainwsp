@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
@@ -142,6 +142,7 @@ export default function PublicChatPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [callState, setCallState] = useState<'idle' | 'calling' | 'active'>('idle');
   const [callMuted, setCallMuted] = useState(false);
+  const [callVolume, setCallVolume] = useState(100);
   const [callSeconds, setCallSeconds] = useState(0);
   // Sonido al llegar un mensaje del agente — activado por defecto, el visitante lo puede
   // silenciar desde el botón del header. Por canal (storageKey), igual que el token/conversación.
@@ -288,6 +289,8 @@ export default function PublicChatPage() {
     setCallState('idle');
     setCallSeconds(0);
     setCallMuted(false);
+    setCallVolume(100);
+    if (remoteAudioRef.current) remoteAudioRef.current.volume = 1;
   }, []);
 
   // 2. En cuanto se conoce la conversación, abre el socket para recibir respuestas del
@@ -457,6 +460,14 @@ export default function PublicChatPage() {
     stream.getAudioTracks().forEach((track) => { track.enabled = !next; });
     setCallMuted(next);
   }, [callMuted]);
+
+  // Sube/baja el volumen de REPRODUCCIÓN del audio del agente — no afecta el micrófono
+  // propio, eso es toggleCallMute.
+  const onCallVolumeChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const next = Number(e.target.value);
+    setCallVolume(next);
+    if (remoteAudioRef.current) remoteAudioRef.current.volume = next / 100;
+  }, []);
 
   // Si el visitante cierra/navega fuera a mitad de una llamada, libera el micrófono y avisa
   // al servidor en vez de dejarla "colgada" hasta que el socket se desconecte solo.
@@ -725,6 +736,12 @@ export default function PublicChatPage() {
             {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
           </button>
         </div>
+        {callState === 'active' && (
+          <div className="cc-call-volume">
+            <Volume2 size={13} />
+            <input type="range" min={0} max={100} value={callVolume} onChange={onCallVolumeChange} aria-label="Volumen de la llamada" />
+          </div>
+        )}
         {embedded && (
           <button className="cc-close" aria-label="Cerrar chat" onClick={() => window.parent.postMessage({ type: 'clienera:close' }, '*')}>
             <X size={15} />

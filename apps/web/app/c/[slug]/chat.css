@@ -44,6 +44,8 @@
 .cc-call-btn-end { background: rgba(224, 54, 54, 0.85); }
 .cc-call-btn-end:hover { background: rgba(224, 54, 54, 1); }
 .cc-call-bubble { display: flex; align-items: center; gap: 6px; font-style: italic; }
+.cc-call-volume { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: rgba(255, 255, 255, 0.85); }
+.cc-call-volume input[type="range"] { flex: 1; accent-color: #fff; }
 
 /* Body */
 .cc-body { flex: 1; overflow-y: auto; padding: 18px 14px; display: flex; flex-direction: column; gap: 10px; background: #f5f6fa; scroll-behavior: smooth; }
