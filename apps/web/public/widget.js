@@ -5,6 +5,16 @@
   if (!slug) return;
   var origin = script.src.replace(/\/widget\.js.*$/, '');
   var position = script.getAttribute('data-position') === 'left' ? 'left' : 'right';
+  // La posición confirmada por el servidor en la carga anterior (ver "clienera:ready" más
+  // abajo) pesa más que la adivinanza del atributo data-position: si el <script> pegado en la
+  // web del cliente quedó desactualizado (p.ej. se cambió la posición en el panel después de
+  // copiarlo), esto evita repetir el salto derecha->izquierda en cada F5 una vez que ya se
+  // confirmó una vez en este navegador.
+  var positionStorageKey = 'clienera_chat_position_' + slug;
+  try {
+    var cachedPosition = localStorage.getItem(positionStorageKey);
+    if (cachedPosition === 'left' || cachedPosition === 'right') position = cachedPosition;
+  } catch (e) {}
   // Dominio + ruta de la página donde vive este script (ej. el ERP de un cliente,
   // "gastromaq.erp.brainpos.pe/venta/orden/37") — se la pasamos a /c/[slug] para que la
   // guarde en el contacto y soporte sepa de qué cliente se trata sin preguntar. Sin query
@@ -232,6 +242,7 @@
   // reposiciona todo al lado correcto en vez de quedarse pegado al valor adivinado.
   function reposition(newPosition) {
     if (newPosition !== 'left' && newPosition !== 'right') return;
+    try { localStorage.setItem(positionStorageKey, newPosition); } catch (e) {}
     if (newPosition === position) return;
     position = newPosition;
 
