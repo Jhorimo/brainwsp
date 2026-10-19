@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Chang
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, Volume2, VolumeX, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { Theme as EmojiTheme, type EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
@@ -13,7 +13,12 @@ import { useTheme } from '@/components/theme-provider';
 import { AppShell } from '@/components/app-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { MultiSelectFilter } from '@/components/multi-select-filter';
+import { playNotificationSound, readSoundPref, writeSoundPref } from '@/lib/notification-sound';
 import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
+
+// Preferencia de sonido del panel de agentes — global para todo el navegador (a diferencia
+// del widget, que la guarda por canal), ver notification-sound.ts.
+const NOTIFICATION_SOUND_KEY = 'brainwsp_conversations_sound';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 // El JSON de categorías tipa `category` como `string` plano — EmojiData lo quiere como el
@@ -567,6 +572,20 @@ export default function ConversationsPage() {
   const selectedIdRef = useRef<string | null>(null);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
 
+  // Sonido al llegar un mensaje entrante — activado por defecto, el agente lo puede
+  // silenciar desde el botón junto al buscador. Global al navegador, no por conversación.
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  useEffect(() => { setSoundEnabled(readSoundPref(NOTIFICATION_SOUND_KEY, true)); }, []);
+  const soundEnabledRef = useRef(true);
+  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+  const toggleSound = useCallback(() => {
+    setSoundEnabled((prev) => {
+      const next = !prev;
+      writeSoundPref(NOTIFICATION_SOUND_KEY, next);
+      return next;
+    });
+  }, []);
+
   // Debounced so the search box doesn't fire a request on every keystroke — the server now
   // does the actual matching (contact name/phone AND message content), unlike the instant
   // in-memory filters below.
@@ -629,6 +648,7 @@ export default function ConversationsPage() {
           void apiFetch(`/conversations/${event.conversation.id}/read`, { method: 'POST' }).catch(() => {});
         }
       }
+      if (event.message.direction === 'INBOUND' && soundEnabledRef.current) playNotificationSound();
     });
     socket.on('conversation.updated', (updated: Conversation) => {
       setConversations((current) => sortConversations(current.map((item) => item.id === updated.id ? { ...item, ...updated } : item)));
@@ -2129,6 +2149,9 @@ export default function ConversationsPage() {
                 {search && <button className="searchbox-clear" onClick={() => setSearch('')} title="Limpiar búsqueda"><X size={14} /></button>}
               </div>
               <button className={`icon-button ${hasActiveFilters ? 'filters-active' : ''}`} onClick={() => setFiltersOpen((v) => !v)} title="Filtrar por agente, departamento o proyecto"><SlidersHorizontal size={16} /></button>
+              <button className="icon-button" onClick={toggleSound} title={soundEnabled ? 'Silenciar sonido de notificaciones' : 'Activar sonido de notificaciones'}>
+                {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+              </button>
             </div>
             <div className="chat-quick-filters">
               <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>

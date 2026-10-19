@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
-import { Ban, Check, FileText, Mic, MicOff, MessageCircle, MoreVertical, Paperclip, Pencil, Phone, PhoneOff, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
+import { Ban, Check, FileText, Mic, MicOff, MessageCircle, MoreVertical, Paperclip, Pencil, Phone, PhoneOff, Send, Smile, Square, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
 import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { ClieneraMark } from '@/components/brand-mark';
 import { useConfirm } from '@/components/confirm-provider';
+import { playNotificationSound, readSoundPref, writeSoundPref } from '@/lib/notification-sound';
 import './chat.css';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -132,6 +133,9 @@ export default function PublicChatPage() {
   const [callState, setCallState] = useState<'idle' | 'calling' | 'active'>('idle');
   const [callMuted, setCallMuted] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
+  // Sonido al llegar un mensaje del agente — activado por defecto, el visitante lo puede
+  // silenciar desde el botón del header. Por canal (storageKey), igual que el token/conversación.
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const confirm = useConfirm();
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -151,6 +155,10 @@ export default function PublicChatPage() {
   const callIdRef = useRef<string | null>(null);
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iceServersRef = useRef<RTCIceServer[]>([{ urls: 'stun:stun.l.google.com:19302' }]);
+  // Espejo en ref de `soundEnabled` — el listener de socket se registra una sola vez por
+  // conversación (ver efecto 2) y de otro modo leería el valor de cuando se abrió el socket.
+  const soundEnabledRef = useRef(true);
+  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
 
   // 1. Resuelve el canal por el slug de la empresa y arranca/recupera la sesión del visitante.
   useEffect(() => {
@@ -163,6 +171,7 @@ export default function PublicChatPage() {
         });
         if (cancelled) return;
         setBootstrap(data);
+        setSoundEnabled(readSoundPref(storageKey(data.widgetPublicKey, 'sound'), true));
         fetch(`${API_URL}/widget/ice-servers`)
           .then((r) => r.json() as Promise<{ iceServers: RTCIceServer[] }>)
           .then((ice) => { if (!cancelled && ice.iceServers?.length) iceServersRef.current = ice.iceServers; })
@@ -236,7 +245,12 @@ export default function PublicChatPage() {
     if (!token || !conversationId) return;
     const socket = io(SOCKET_URL, { auth: { visitorToken: token, conversationId } });
     socketRef.current = socket;
-    socket.on('message.created', (data: { message: WidgetMessage }) => addMessage(data.message));
+    socket.on('message.created', (data: { message: WidgetMessage }) => {
+      addMessage(data.message);
+      // OUTBOUND = de la empresa al visitante (ver WidgetMessage) — nunca el eco del propio
+      // mensaje que el visitante acaba de mandar.
+      if (data.message.direction === 'OUTBOUND' && soundEnabledRef.current) playNotificationSound();
+    });
     socket.on('message.updated', (updated: WidgetMessage) => {
       setMessages((current) => current.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
     });
@@ -328,6 +342,15 @@ export default function PublicChatPage() {
     if (callIdRef.current) socketRef.current?.emit('call:end', { callId: callIdRef.current });
     cleanupCall();
   }, [cleanupCall]);
+
+  const toggleSound = useCallback(() => {
+    if (!bootstrap) return;
+    setSoundEnabled((prev) => {
+      const next = !prev;
+      writeSoundPref(storageKey(bootstrap.widgetPublicKey, 'sound'), next);
+      return next;
+    });
+  }, [bootstrap]);
 
   const toggleCallMute = useCallback(() => {
     const stream = callStreamRef.current;
@@ -596,6 +619,9 @@ export default function PublicChatPage() {
               </>
             )
           )}
+          <button className="cc-call-btn" aria-label={soundEnabled ? 'Silenciar notificaciones' : 'Activar sonido'} title={soundEnabled ? 'Silenciar notificaciones' : 'Activar sonido'} onClick={toggleSound}>
+            {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          </button>
         </div>
         {embedded && (
           <button className="cc-close" aria-label="Cerrar chat" onClick={() => window.parent.postMessage({ type: 'clienera:close' }, '*')}>
