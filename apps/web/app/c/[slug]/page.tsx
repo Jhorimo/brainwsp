@@ -454,63 +454,65 @@ export default function PublicChatPage() {
             <div key={message.id} className={`cc-row ${isVisitor ? 'cc-row-visitor' : 'cc-row-agent'}`}>
               {!isVisitor && <div className="cc-bubble-avatar" style={{ background: bootstrap.color }}>{initials(bootstrap.companyName)}</div>}
               <div className="cc-msg-col">
-                {canManage && (
-                  <div className="cc-msg-actions" ref={menuMessageId === message.id ? msgMenuRef : undefined}>
-                    <button className="cc-icon-btn cc-msg-actions-trigger" aria-label="Opciones del mensaje" onClick={() => setMenuMessageId((current) => (current === message.id ? null : message.id))}>
-                      <MoreVertical size={14} />
-                    </button>
-                    {menuMessageId === message.id && (
-                      <div className="cc-msg-menu">
-                        {message.type === 'TEXT' && <button onClick={() => startEdit(message)}><Pencil size={13} />Editar</button>}
-                        <button className="danger" onClick={() => void removeMessage(message)}><Trash2 size={13} />Eliminar</button>
+                <div className="cc-msg-row">
+                  {message.deleted ? (
+                    <div className="cc-bubble cc-bubble-deleted"><Ban size={13} />Se eliminó este mensaje</div>
+                  ) : editingId === message.id ? (
+                    <div className="cc-bubble cc-bubble-edit" style={bubbleStyle}>
+                      <textarea
+                        className="cc-edit-input"
+                        value={editingText}
+                        autoFocus
+                        onChange={(e) => setEditingText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit(); } else if (e.key === 'Escape') cancelEdit(); }}
+                      />
+                      <div className="cc-edit-actions">
+                        <button className="cc-icon-btn" aria-label="Cancelar edición" onClick={cancelEdit}><X size={14} /></button>
+                        <button className="cc-icon-btn" aria-label="Guardar edición" disabled={savingEdit || !editingText.trim()} onClick={() => void saveEdit()}><Check size={14} /></button>
                       </div>
-                    )}
-                  </div>
-                )}
-                {message.deleted ? (
-                  <div className="cc-bubble cc-bubble-deleted"><Ban size={13} />Se eliminó este mensaje</div>
-                ) : editingId === message.id ? (
-                  <div className="cc-bubble cc-bubble-edit" style={bubbleStyle}>
-                    <textarea
-                      className="cc-edit-input"
-                      value={editingText}
-                      autoFocus
-                      onChange={(e) => setEditingText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit(); } else if (e.key === 'Escape') cancelEdit(); }}
-                    />
-                    <div className="cc-edit-actions">
-                      <button className="cc-icon-btn" aria-label="Cancelar edición" onClick={cancelEdit}><X size={14} /></button>
-                      <button className="cc-icon-btn" aria-label="Guardar edición" disabled={savingEdit || !editingText.trim()} onClick={() => void saveEdit()}><Check size={14} /></button>
                     </div>
-                  </div>
-                ) : message.type === 'IMAGE' ? (
-                  <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
-                    <img className="cc-image" src={mediaSrc(message.id)} alt={message.caption || 'Imagen'} loading="lazy" />
-                    {message.caption && <div className="cc-caption">{message.caption}</div>}
-                  </div>
-                ) : message.type === 'VIDEO' ? (
-                  <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
-                    <video className="cc-video" controls src={mediaSrc(message.id)} />
-                    {message.caption && <div className="cc-caption">{message.caption}</div>}
-                  </div>
-                ) : message.type === 'AUDIO' ? (
-                  <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
-                    <audio className="cc-audio" controls src={mediaSrc(message.id)} />
-                  </div>
-                ) : message.type === 'DOCUMENT' ? (
-                  <a className={`cc-bubble cc-file ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle} href={mediaSrc(message.id)} target="_blank" rel="noreferrer">
-                    <FileText size={22} />
-                    <div className="cc-file-info">
-                      <span className="cc-file-name">{message.fileName || 'Documento'}</span>
-                      <span className="cc-file-size">{formatSize(message.fileSize)}</span>
+                  ) : message.type === 'IMAGE' ? (
+                    <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
+                      <img className="cc-image" src={mediaSrc(message.id)} alt={message.caption || 'Imagen'} loading="lazy" />
+                      {message.caption && <div className="cc-caption">{message.caption}</div>}
                     </div>
-                  </a>
-                ) : (
-                  <div className={`cc-bubble ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
-                    {message.body}
-                    {message.metadata?.edited && <span className="cc-edited-tag">editado</span>}
-                  </div>
-                )}
+                  ) : message.type === 'VIDEO' ? (
+                    <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
+                      <video className="cc-video" controls src={mediaSrc(message.id)} />
+                      {message.caption && <div className="cc-caption">{message.caption}</div>}
+                    </div>
+                  ) : message.type === 'AUDIO' ? (
+                    <div className={`cc-bubble cc-bubble-media ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
+                      <audio className="cc-audio" controls src={mediaSrc(message.id)} />
+                    </div>
+                  ) : message.type === 'DOCUMENT' ? (
+                    <a className={`cc-bubble cc-file ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle} href={mediaSrc(message.id)} target="_blank" rel="noreferrer">
+                      <FileText size={22} />
+                      <div className="cc-file-info">
+                        <span className="cc-file-name">{message.fileName || 'Documento'}</span>
+                        <span className="cc-file-size">{formatSize(message.fileSize)}</span>
+                      </div>
+                    </a>
+                  ) : (
+                    <div className={`cc-bubble ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
+                      {message.body}
+                      {message.metadata?.edited && <span className="cc-edited-tag">editado</span>}
+                    </div>
+                  )}
+                  {canManage && (
+                    <div className="cc-msg-actions" ref={menuMessageId === message.id ? msgMenuRef : undefined}>
+                      <button className="cc-icon-btn cc-msg-actions-trigger" aria-label="Opciones del mensaje" onClick={() => setMenuMessageId((current) => (current === message.id ? null : message.id))}>
+                        <MoreVertical size={14} />
+                      </button>
+                      {menuMessageId === message.id && (
+                        <div className="cc-msg-menu">
+                          {message.type === 'TEXT' && <button onClick={() => startEdit(message)}><Pencil size={13} />Editar</button>}
+                          <button className="danger" onClick={() => void removeMessage(message)}><Trash2 size={13} />Eliminar</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="cc-time">{formatTime(message.createdAt)}</div>
               </div>
             </div>

@@ -39,8 +39,22 @@
   };
 
   var side = position === 'left' ? 'left:20px;' : 'right:20px;';
-  var iconUrl = null; // URL del ícono/mascota propia, si la empresa subió una (ver clienera:ready)
   var minimizeAllowed = true; // confirmado por el bootstrap (allowMinimize); ver clienera:ready
+
+  // Mismo problema que la posición (ver positionStorageKey arriba): color e ícono reales
+  // llegan recién con "clienera:ready", después de dos round-trips HTTP (bootstrap + sesión).
+  // Sin esto el botón arranca azul genérico con el ícono de chat de siempre y recién
+  // después salta al color/mascota configurados — se cachea lo último confirmado para que,
+  // ya en la segunda visita de este navegador, el primer pintado sea el correcto.
+  var colorStorageKey = 'clienera_chat_color_' + slug;
+  var color = '#6b8afd';
+  try {
+    var cachedColor = localStorage.getItem(colorStorageKey);
+    if (cachedColor && /^#[0-9a-f]{6}$/i.test(cachedColor)) color = cachedColor;
+  } catch (e) {}
+  var iconStorageKey = 'clienera_chat_icon_' + slug;
+  var iconUrl = null; // URL del ícono/mascota propia, si la empresa subió una (ver clienera:ready)
+  try { iconUrl = localStorage.getItem(iconStorageKey) || null; } catch (e) {}
 
   // Pantalla chica (celular en cualquier orientación, el "lado corto" del viewport) — el
   // panel flotante de 368x540 no entra ahí sin dejar franjas de la página anfitriona a la
@@ -73,14 +87,14 @@
 
   var launcher = document.createElement('button');
   launcher.setAttribute('aria-label', 'Abrir chat');
-  launcher.innerHTML = CHAT_ICON;
   launcher.style.cssText =
     'position:fixed;bottom:22px;' + side +
     'z-index:2147483000;width:58px;height:58px;border-radius:50%;' +
     'border:1.5px solid rgba(255,255,255,.3);color:#fff;cursor:pointer;display:' + (minimized ? 'none' : 'flex') + ';align-items:center;justify-content:center;' +
     'transform:scale(0);opacity:0;' +
     'transition:transform .22s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease,background .25s ease;';
-  paintLauncher('#6b8afd');
+  paintLauncher(color);
+  renderLauncherFace();
   if (!minimized) {
     requestAnimationFrame(function () {
       requestAnimationFrame(function () { launcher.style.transform = 'scale(1)'; launcher.style.opacity = '1'; });
@@ -266,11 +280,18 @@
     if (!data || typeof data !== 'object') return;
     if (data.type === 'clienera:ready') {
       reposition(data.position);
-      if (data.color) paintLauncher(data.color);
-      if (data.iconUrl) {
-        iconUrl = data.iconUrl;
-        renderLauncherFace();
+      if (data.color) {
+        paintLauncher(data.color);
+        try { localStorage.setItem(colorStorageKey, data.color); } catch (e) {}
       }
+      if (data.iconUrl !== iconUrl) {
+        iconUrl = data.iconUrl || null;
+        try {
+          if (iconUrl) localStorage.setItem(iconStorageKey, iconUrl);
+          else localStorage.removeItem(iconStorageKey);
+        } catch (e) {}
+      }
+      renderLauncherFace();
       teaserType = data.teaserType === 'image' && data.teaserImageUrl ? 'image' : 'text';
       teaserImageUrl = data.teaserImageUrl || null;
       welcomeMessageText = data.welcomeMessage || '';
