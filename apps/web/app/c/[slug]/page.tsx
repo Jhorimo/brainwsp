@@ -167,6 +167,13 @@ export default function PublicChatPage() {
   const callIdRef = useRef<string | null>(null);
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iceServersRef = useRef<RTCIceServer[]>([{ urls: 'stun:stun.l.google.com:19302' }]);
+  // Candidatos ICE que llegan por 'call:signal' antes de que la respuesta del agente haya
+  // terminado de aplicarse con setRemoteDescription — ver el mismo comentario, más largo, en
+  // incoming-call-provider.tsx. Sin este buffer, un candidato que llega "demasiado rápido"
+  // (típico en LAN/localhost, donde los candidatos "host" salen casi al instante) se perdía
+  // en silencio y la llamada quedaba sin audio aunque el cronómetro siguiera corriendo.
+  const remoteDescSetRef = useRef(false);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   // Espejo en ref de `soundEnabled` — el listener de socket se registra una sola vez por
   // conversación (ver efecto 2) y de otro modo leería el valor de cuando se abrió el socket.
   const soundEnabledRef = useRef(true);
@@ -276,6 +283,8 @@ export default function PublicChatPage() {
     callStreamRef.current = null;
     if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
     callIdRef.current = null;
+    remoteDescSetRef.current = false;
+    pendingCandidatesRef.current = [];
     setCallState('idle');
     setCallSeconds(0);
     setCallMuted(false);
@@ -323,8 +332,19 @@ export default function PublicChatPage() {
     socket.on('call:signal', (data: { callId: string; type: string; data: unknown }) => {
       const pc = pcRef.current;
       if (!pc || data.callId !== callIdRef.current) return;
-      if (data.type === 'answer') void pc.setRemoteDescription(data.data as RTCSessionDescriptionInit);
-      else if (data.type === 'ice-candidate') void pc.addIceCandidate(data.data as RTCIceCandidateInit).catch(() => {});
+      if (data.type === 'answer') {
+        void (async () => {
+          await pc.setRemoteDescription(data.data as RTCSessionDescriptionInit);
+          remoteDescSetRef.current = true;
+          const pending = pendingCandidatesRef.current;
+          pendingCandidatesRef.current = [];
+          for (const candidate of pending) await pc.addIceCandidate(candidate).catch(() => {});
+        })();
+      } else if (data.type === 'ice-candidate') {
+        const candidate = data.data as RTCIceCandidateInit;
+        if (remoteDescSetRef.current) void pc.addIceCandidate(candidate).catch(() => {});
+        else pendingCandidatesRef.current.push(candidate);
+      }
     });
     socket.on('call:end', (data: { callId: string }) => { if (data.callId === callIdRef.current) cleanupCall(); });
     socket.on('call:error', () => { setUploadError('No se pudo iniciar la llamada'); cleanupCall(); });
@@ -386,6 +406,8 @@ export default function PublicChatPage() {
       const ready = socketRef.current?.connected || (await waitForSocketConnected());
       if (!ready || !socketRef.current) throw new Error('socket no conectado');
 
+      remoteDescSetRef.current = false;
+      pendingCandidatesRef.current = [];
       const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
       pcRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));

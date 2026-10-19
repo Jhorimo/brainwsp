@@ -70,6 +70,16 @@ export function IncomingCallProvider() {
   // quedarse con el valor viejo; esta ref siempre tiene el último.
   const incomingRef = useRef<IncomingCall | null>(null);
   const ringtone = useRingtone();
+  // Candidatos ICE que llegan por 'call:signal' antes de que la oferta del visitante haya
+  // terminado de aplicarse con setRemoteDescription — sin esto, addIceCandidate() falla
+  // (silenciosamente, por el .catch(() => {}) de abajo) y ese candidato se pierde. En
+  // llamadas locales/LAN los candidatos "host" se generan casi al instante, muchas veces
+  // más rápido que el viaje de ida y vuelta de la propia oferta por el socket, así que la
+  // carrera se perdía seguido: la señalización terminaba "bien" (oferta/respuesta
+  // intercambiadas) pero sin un solo candidato aplicado, o sea sin audio real aunque el
+  // cronómetro de la UI siguiera corriendo.
+  const remoteDescSetRef = useRef(false);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const cleanup = useCallback(() => {
     pcRef.current?.close();
@@ -79,6 +89,8 @@ export function IncomingCallProvider() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     ringtone.stop();
     incomingRef.current = null;
+    remoteDescSetRef.current = false;
+    pendingCandidatesRef.current = [];
     setIncoming(null);
     setCallPhase('idle');
     setMuted(false);
@@ -114,12 +126,18 @@ export function IncomingCallProvider() {
       if (data.type === 'offer') {
         void (async () => {
           await pc.setRemoteDescription(data.data as RTCSessionDescriptionInit);
+          remoteDescSetRef.current = true;
+          const pending = pendingCandidatesRef.current;
+          pendingCandidatesRef.current = [];
+          for (const candidate of pending) await pc.addIceCandidate(candidate).catch(() => {});
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socket.emit('call:signal', { callId: data.callId, type: 'answer', data: answer });
         })();
       } else if (data.type === 'ice-candidate') {
-        void pc.addIceCandidate(data.data as RTCIceCandidateInit).catch(() => {});
+        const candidate = data.data as RTCIceCandidateInit;
+        if (remoteDescSetRef.current) void pc.addIceCandidate(candidate).catch(() => {});
+        else pendingCandidatesRef.current.push(candidate);
       }
     });
     socket.on('call:end', (data: { callId: string }) => {
@@ -138,6 +156,8 @@ export function IncomingCallProvider() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      remoteDescSetRef.current = false;
+      pendingCandidatesRef.current = [];
       const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
       pcRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
