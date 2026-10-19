@@ -27,6 +27,10 @@ export interface WidgetConfiguration {
   // software (ver AGENTS.md: el enlace público/widget es un canal más) y no siempre se quiere
   // ver la burbuja flotando encima de la UI propia. true por defecto.
   allowMinimize?: boolean;
+  // Si el canal acepta llamadas de voz WebRTC entrantes desde el widget (ver CallsService y
+  // WidgetController.iceServers). true por defecto; pensado para apagarlo en canales que no
+  // quieren dar soporte en vivo por voz.
+  allowCalls?: boolean;
   // Burbuja de saludo flotante (la que aparece junto al botón antes de que el visitante
   // haga clic): 'text' usa welcomeMessage de siempre; 'image' la reemplaza por una
   // ilustración propia con el mensaje ya dibujado (p.ej. un personaje señalando el botón,

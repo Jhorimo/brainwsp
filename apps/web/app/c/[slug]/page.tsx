@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, type Socket } from 'socket.io-client';
 import dynamic from 'next/dynamic';
-import { Ban, Check, FileText, Mic, MessageCircle, MoreVertical, Paperclip, Pencil, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
+import { Ban, Check, FileText, Mic, MicOff, MessageCircle, MoreVertical, Paperclip, Pencil, Phone, PhoneOff, Send, Smile, Square, Trash2, Upload, X } from 'lucide-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
 import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
@@ -40,12 +40,12 @@ function formatRecordTime(seconds: number) {
 type Bootstrap = {
   widgetPublicKey: string; companyName: string; welcomeMessage: string; color: string; buttonText: string;
   autoOpen: boolean; position: 'left' | 'right'; hasIcon: boolean; iconVersion?: string; allowMinimize: boolean;
-  teaserType: 'text' | 'image'; hasTeaserImage: boolean; teaserImageVersion?: string;
+  teaserType: 'text' | 'image'; hasTeaserImage: boolean; teaserImageVersion?: string; allowCalls: boolean;
 };
 type WidgetMessage = {
   id: string; direction: 'INBOUND' | 'OUTBOUND'; type: string; status: string; body?: string | null;
   caption?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; createdAt: string;
-  deleted?: boolean; metadata?: { edited?: boolean } | null;
+  deleted?: boolean; metadata?: { edited?: boolean; callStatus?: string; durationSeconds?: number } | null;
 };
 
 // Página pública del canal Clienera Chat — "clienera.com/<slug>" del punto 11 del brief.
@@ -88,6 +88,25 @@ function formatSize(bytes?: number | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatCallDuration(seconds?: number) {
+  const total = seconds || 0;
+  const m = Math.floor(total / 60);
+  const s = Math.floor(total % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+// Mismo texto en ambos lados (panel de agentes y este widget) — ver conversations/page.tsx.
+function callLabel(metadata?: { callStatus?: string; durationSeconds?: number } | null) {
+  switch (metadata?.callStatus) {
+    case 'answered': return `Llamada de voz · ${formatCallDuration(metadata?.durationSeconds)}`;
+    case 'missed': return 'Llamada perdida';
+    case 'declined': return 'Llamada rechazada';
+    case 'cancelled': return 'Llamada cancelada';
+    case 'failed': return 'Llamada fallida';
+    default: return 'Llamada de voz';
+  }
+}
+
 export default function PublicChatPage() {
   const params = useParams<{ slug: string }>();
   const searchParams = useSearchParams();
@@ -110,6 +129,9 @@ export default function PublicChatPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [callState, setCallState] = useState<'idle' | 'calling' | 'active'>('idle');
+  const [callMuted, setCallMuted] = useState(false);
+  const [callSeconds, setCallSeconds] = useState(0);
   const confirm = useConfirm();
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -121,6 +143,14 @@ export default function PublicChatPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Llamada de voz WebRTC (ver RealtimeGateway call:* y CallsService) — reusa el mismo
+  // socket ya abierto para el chat (socketRef), nunca una segunda conexión.
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const callStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const callIdRef = useRef<string | null>(null);
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const iceServersRef = useRef<RTCIceServer[]>([{ urls: 'stun:stun.l.google.com:19302' }]);
 
   // 1. Resuelve el canal por el slug de la empresa y arranca/recupera la sesión del visitante.
   useEffect(() => {
@@ -133,6 +163,10 @@ export default function PublicChatPage() {
         });
         if (cancelled) return;
         setBootstrap(data);
+        fetch(`${API_URL}/widget/ice-servers`)
+          .then((r) => r.json() as Promise<{ iceServers: RTCIceServer[] }>)
+          .then((ice) => { if (!cancelled && ice.iceServers?.length) iceServersRef.current = ice.iceServers; })
+          .catch(() => {});
         if (embedded) {
           const iconUrl = data.hasIcon ? `${API_URL}/widget/${data.widgetPublicKey}/icon?v=${encodeURIComponent(data.iconVersion || '')}` : null;
           const teaserImageUrl = data.hasTeaserImage ? `${API_URL}/widget/${data.widgetPublicKey}/teaser-image?v=${encodeURIComponent(data.teaserImageVersion || '')}` : null;
@@ -179,8 +213,25 @@ export default function PublicChatPage() {
     setMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
   }, []);
 
+  // Corta la llamada de voz en curso del lado del navegador (peer connection + micrófono +
+  // timer) sin avisar al servidor — lo usan tanto "colgar" (que sí avisa, ver hangUp) como
+  // cualquier evento que llegue del servidor diciendo que ya terminó por su cuenta
+  // (call:end, call:error, ring timeout, etc.).
+  const cleanupCall = useCallback(() => {
+    pcRef.current?.close();
+    pcRef.current = null;
+    callStreamRef.current?.getTracks().forEach((track) => track.stop());
+    callStreamRef.current = null;
+    if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
+    callIdRef.current = null;
+    setCallState('idle');
+    setCallSeconds(0);
+    setCallMuted(false);
+  }, []);
+
   // 2. En cuanto se conoce la conversación, abre el socket para recibir respuestas del
-  // agente (y el eco del propio mensaje) en vivo.
+  // agente (y el eco del propio mensaje) en vivo — el mismo socket se reusa para la
+  // señalización de la llamada de voz (call:*), nunca una segunda conexión.
   useEffect(() => {
     if (!token || !conversationId) return;
     const socket = io(SOCKET_URL, { auth: { visitorToken: token, conversationId } });
@@ -189,8 +240,111 @@ export default function PublicChatPage() {
     socket.on('message.updated', (updated: WidgetMessage) => {
       setMessages((current) => current.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
     });
+    socket.on('call:ringing', (data: { callId: string }) => { callIdRef.current = data.callId; });
+    socket.on('call:accepted', (data: { callId: string }) => {
+      const pc = pcRef.current;
+      if (!pc || data.callId !== callIdRef.current) return;
+      (async () => {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('call:signal', { callId: data.callId, type: 'offer', data: offer });
+        setCallState('active');
+        callTimerRef.current = setInterval(() => setCallSeconds((s) => s + 1), 1000);
+      })();
+    });
+    socket.on('call:signal', (data: { callId: string; type: string; data: unknown }) => {
+      const pc = pcRef.current;
+      if (!pc || data.callId !== callIdRef.current) return;
+      if (data.type === 'answer') void pc.setRemoteDescription(data.data as RTCSessionDescriptionInit);
+      else if (data.type === 'ice-candidate') void pc.addIceCandidate(data.data as RTCIceCandidateInit).catch(() => {});
+    });
+    socket.on('call:end', (data: { callId: string }) => { if (data.callId === callIdRef.current) cleanupCall(); });
+    socket.on('call:error', () => { setUploadError('No se pudo iniciar la llamada'); cleanupCall(); });
     return () => { socket.disconnect(); };
-  }, [token, conversationId, addMessage]);
+  }, [token, conversationId, addMessage, cleanupCall]);
+
+  // Espera a que socketRef.current exista Y esté conectado — hace falta porque si todavía no
+  // había conversación (visitante que quiere llamar sin haber escrito antes), recién se crea
+  // dentro de startCall y el socket se abre después, en el otro efecto, cuando conversationId
+  // cambie (un ciclo de render más tarde) — no sirve asumir que ya está listo acá mismo.
+  const waitForSocketConnected = useCallback((timeoutMs = 8000): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        if (socketRef.current?.connected) return resolve(true);
+        if (Date.now() - start > timeoutMs) return resolve(false);
+        setTimeout(tick, 100);
+      };
+      tick();
+    });
+  }, []);
+
+  // Llamada de voz saliente. Si el visitante todavía no escribió nada no hay conversación
+  // (se crea recién al mandar un mensaje/media) — sin ella el socket no tiene a qué sala
+  // unirse, así que primero se crea vía /calls (sin contar como mensaje no leído) y recién
+  // ahí se abre el socket. Pide el micrófono antes que nada: si lo niega, no se llega a crear
+  // ni conversación ni nada.
+  const startCall = useCallback(async () => {
+    if (!bootstrap?.allowCalls || !token || callState !== 'idle') return;
+    setUploadError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      callStreamRef.current = stream;
+
+      let convId = conversationId;
+      if (!convId) {
+        const result = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/calls`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        }).then((r) => {
+          if (!r.ok) throw new Error('no se pudo iniciar la conversación');
+          return r.json() as Promise<{ conversationId: string }>;
+        });
+        convId = result.conversationId;
+        localStorage.setItem(storageKey(bootstrap.widgetPublicKey, 'conversation'), convId);
+        setConversationId(convId);
+      }
+
+      const ready = socketRef.current?.connected || (await waitForSocketConnected());
+      if (!ready || !socketRef.current) throw new Error('socket no conectado');
+
+      const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
+      pcRef.current = pc;
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      pc.onicecandidate = (e) => {
+        if (e.candidate && callIdRef.current) socketRef.current?.emit('call:signal', { callId: callIdRef.current, type: 'ice-candidate', data: e.candidate });
+      };
+      pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
+      setCallState('calling');
+      socketRef.current.emit('call:invite');
+    } catch {
+      setUploadError('No se pudo iniciar la llamada');
+      cleanupCall();
+    }
+  }, [bootstrap, token, conversationId, callState, cleanupCall, waitForSocketConnected]);
+
+  const hangUp = useCallback(() => {
+    if (callIdRef.current) socketRef.current?.emit('call:end', { callId: callIdRef.current });
+    cleanupCall();
+  }, [cleanupCall]);
+
+  const toggleCallMute = useCallback(() => {
+    const stream = callStreamRef.current;
+    if (!stream) return;
+    const next = !callMuted;
+    stream.getAudioTracks().forEach((track) => { track.enabled = !next; });
+    setCallMuted(next);
+  }, [callMuted]);
+
+  // Si el visitante cierra/navega fuera a mitad de una llamada, libera el micrófono y avisa
+  // al servidor en vez de dejarla "colgada" hasta que el socket se desconecte solo.
+  useEffect(() => () => {
+    if (callIdRef.current) socketRef.current?.emit('call:end', { callId: callIdRef.current });
+    pcRef.current?.close();
+    callStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (callTimerRef.current) clearInterval(callTimerRef.current);
+  }, []);
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [messages]);
 
@@ -428,8 +582,20 @@ export default function PublicChatPage() {
           <div className="cc-avatar">{initials(bootstrap.companyName)}</div>
           <div className="cc-header-info">
             <span className="cc-header-name">{bootstrap.companyName}</span>
-            <span className="cc-header-status">Normalmente responde en minutos</span>
+            <span className="cc-header-status">
+              {callState === 'calling' ? 'Llamando…' : callState === 'active' ? `En llamada · ${formatCallDuration(callSeconds)}` : 'Normalmente responde en minutos'}
+            </span>
           </div>
+          {bootstrap.allowCalls && token && (
+            callState === 'idle' ? (
+              <button className="cc-call-btn" aria-label="Llamar" title="Llamar" onClick={() => void startCall()}><Phone size={16} /></button>
+            ) : (
+              <>
+                <button className="cc-call-btn" aria-label={callMuted ? 'Activar micrófono' : 'Silenciar'} onClick={toggleCallMute}>{callMuted ? <MicOff size={16} /> : <Mic size={16} />}</button>
+                <button className="cc-call-btn cc-call-btn-end" aria-label="Colgar" onClick={hangUp}><PhoneOff size={16} /></button>
+              </>
+            )
+          )}
         </div>
         {embedded && (
           <button className="cc-close" aria-label="Cerrar chat" onClick={() => window.parent.postMessage({ type: 'clienera:close' }, '*')}>
@@ -437,6 +603,7 @@ export default function PublicChatPage() {
           </button>
         )}
       </header>
+      <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
 
       <div className="cc-body" ref={scrollRef}>
         {messages.length === 0 && (
@@ -493,6 +660,11 @@ export default function PublicChatPage() {
                         <span className="cc-file-size">{formatSize(message.fileSize)}</span>
                       </div>
                     </a>
+                  ) : message.type === 'CALL' ? (
+                    <div className="cc-bubble cc-call-bubble" style={bubbleStyle}>
+                      <Phone size={14} />
+                      {callLabel(message.metadata)}
+                    </div>
                   ) : (
                     <div className={`cc-bubble ${message.status === 'QUEUED' ? 'cc-status-pending' : ''}`} style={bubbleStyle}>
                       {message.body}

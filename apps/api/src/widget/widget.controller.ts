@@ -4,7 +4,7 @@ import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { pipeToResponse } from '../common/pipe-stream';
 import { StorageService } from '../storage/storage.service';
-import { EditWidgetMessageDto, SendWidgetMessageDto, StartWidgetSessionDto } from './widget.dto';
+import { EditWidgetMessageDto, SendWidgetMessageDto, StartCallDto, StartWidgetSessionDto } from './widget.dto';
 import { checkWidgetRateLimit } from './widget-rate-limit';
 import { WidgetService } from './widget.service';
 
@@ -28,6 +28,13 @@ export class WidgetController {
   @Get('by-slug/:slug')
   bootstrapBySlug(@Param('slug') slug: string) {
     return this.service.getBootstrapBySlug(slug);
+  }
+
+  // Un solo valor por despliegue (no por canal/empresa) — lo consumen tanto el widget
+  // público como el panel de agentes (que no tiene widgetPublicKey). Ver CallsService.
+  @Get('ice-servers')
+  iceServers() {
+    return this.service.getIceServers();
   }
 
   @Get(':widgetPublicKey/bootstrap')
@@ -57,6 +64,15 @@ export class WidgetController {
   startSession(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: StartWidgetSessionDto) {
     this.guardRateLimit(req);
     return this.service.startSession(widgetPublicKey, dto.token, dto.pageUrl);
+  }
+
+  // El visitante puede querer llamar sin haber escrito antes — esto le da un conversationId
+  // (creándola si hace falta, sin contar como mensaje no leído) para que el widget pueda
+  // abrir el socket y recién ahí invitar la llamada. Ver WidgetService.startCallConversation.
+  @Post(':widgetPublicKey/calls')
+  startCall(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: StartCallDto) {
+    this.guardRateLimit(req, dto.token);
+    return this.service.startCallConversation(widgetPublicKey, dto.token);
   }
 
   @Post(':widgetPublicKey/messages')

@@ -81,6 +81,7 @@ export class WidgetService {
       hasIcon: Boolean(config.iconObjectName),
       iconVersion: config.iconObjectName || undefined,
       allowMinimize: config.allowMinimize ?? true,
+      allowCalls: config.allowCalls ?? true,
       // Burbuja de saludo: si quedó marcada "image" pero el archivo se borró después, cae a
       // texto en vez de no mostrar nada (ver WidgetConfiguration.teaserType).
       teaserType: config.teaserType === 'image' && config.teaserImageObjectName ? 'image' : 'text',
@@ -91,6 +92,21 @@ export class WidgetService {
 
   async getBootstrap(widgetPublicKey: string) {
     return this.branding(await this.resolveChannel(widgetPublicKey));
+  }
+
+  // Servidores ICE para las llamadas de voz WebRTC (CallsService) — pública y sin companyId
+  // porque STUN no es secreto y el panel de agentes no tiene un widgetPublicKey a mano; un
+  // solo valor por despliegue, no por canal. STUN_URLS/TURN_URLS/TURN_USERNAME/
+  // TURN_CREDENTIAL son opcionales: sin TURN configurado, solo se devuelve STUN público. Sumar
+  // TURN después es solo setear esas 3 variables de entorno, sin tocar código.
+  getIceServers() {
+    const stunUrls = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302').split(',').map((s) => s.trim()).filter(Boolean);
+    const iceServers: Array<{ urls: string[]; username?: string; credential?: string }> = stunUrls.length ? [{ urls: stunUrls }] : [];
+    const turnUrls = (process.env.TURN_URLS || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (turnUrls.length) {
+      iceServers.push({ urls: turnUrls, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
+    }
+    return { iceServers };
   }
 
   // Sirve el ícono propio del botón flotante sin auth (mismo nivel de exposición que el
@@ -192,11 +208,21 @@ export class WidgetService {
   // (ver SessionManager.persistIncoming) — se replican aquí porque el widget no pasa por el
   // worker, que es quien las aplica para los mensajes entrantes de Baileys. Compartido por
   // sendMessage y sendMedia: ambos son "el visitante mandó algo", solo cambia el tipo.
-  private async ensureConversation(instance: Awaited<ReturnType<WidgetService['resolveChannel']>>, session: VisitorSession): Promise<Conversation> {
+  // `bumpUnread` en false es para startCallConversation: el visitante solo abrió el panel
+  // de llamada, todavía no pasó nada que el agente deba ver como "no leído" — eso lo marca
+  // recién CallsService.persistCallMessage cuando la llamada termina de verdad (o nunca, si
+  // cancela antes de invitar). sendMessage/sendMedia siguen bumpeando como siempre (default).
+  private async ensureConversation(
+    instance: Awaited<ReturnType<WidgetService['resolveChannel']>>,
+    session: VisitorSession,
+    options?: { bumpUnread?: boolean },
+  ): Promise<Conversation> {
+    const bumpUnread = options?.bumpUnread ?? true;
     const existingConversation = await this.prisma.conversation.findUnique({
       where: { instanceId_contactId: { instanceId: instance.id, contactId: session.contactId } },
     });
     if (existingConversation) {
+      if (!bumpUnread) return existingConversation;
       return this.prisma.conversation.update({
         where: { id: existingConversation.id },
         data: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
@@ -218,7 +244,7 @@ export class WidgetService {
         companyId: instance.companyId,
         instanceId: instance.id,
         contactId: session.contactId,
-        unreadCount: 1,
+        unreadCount: bumpUnread ? 1 : 0,
         lastMessageAt: new Date(),
         departmentId: defaultDepartmentId,
         assignedUserId: defaultAgentId,
@@ -254,6 +280,17 @@ export class WidgetService {
       hydrated?.departmentId ?? conversation.departmentId,
       conversation.id,
     );
+  }
+
+  // Para cuando el visitante quiere llamar sin haber escrito antes — no hay conversación
+  // todavía (se crea recién al mandar un mensaje/media, ver ensureConversation) y sin ella el
+  // socket no puede unirse a su sala (handleVisitorConnection exige conversationId). Esto le
+  // da al widget un conversationId para abrir el socket y recién ahí emitir "call:invite".
+  async startCallConversation(widgetPublicKey: string, token: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const session = await this.requireSession(instance.companyId, token);
+    const conversation = await this.ensureConversation(instance, session, { bumpUnread: false });
+    return { conversationId: conversation.id };
   }
 
   async sendMessage(widgetPublicKey: string, token: string, text: string) {

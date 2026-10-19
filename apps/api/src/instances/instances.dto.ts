@@ -79,4 +79,9 @@ export class UpdateWidgetConfigDto {
   @IsOptional()
   @IsIn(['text', 'image'])
   teaserType?: 'text' | 'image';
+
+  @ApiPropertyOptional({ description: 'Si el canal acepta llamadas de voz entrantes desde el widget. true por defecto' })
+  @IsOptional()
+  @IsBoolean()
+  allowCalls?: boolean;
 }

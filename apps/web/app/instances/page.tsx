@@ -10,7 +10,7 @@ import { API_URL, apiFetch, getStoredCompany, getToken, SOCKET_URL, updateStored
 
 type WidgetConfig = {
   displayName?: string; welcomeMessage?: string; color?: string; position?: 'left' | 'right'; buttonText?: string;
-  autoOpen?: boolean; allowMinimize?: boolean; iconObjectName?: string | null;
+  autoOpen?: boolean; allowMinimize?: boolean; allowCalls?: boolean; iconObjectName?: string | null;
   teaserType?: 'text' | 'image'; teaserImageObjectName?: string | null;
 };
 type Instance = {
@@ -177,11 +177,11 @@ export default function InstancesPage() {
     // resto de la configuración guardada) pero los maneja su propio endpoint dedicado de
     // subir/quitar imagen, no este; UpdateWidgetConfigDto los rechaza (forbidNonWhitelisted)
     // si se reenvían acá.
-    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, teaserType } = widgetConfigDraft;
+    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, allowCalls, teaserType } = widgetConfigDraft;
     try {
       await apiFetch(`/instances/${clieneraChannel.id}/widget-config`, {
         method: 'PATCH',
-        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, teaserType }),
+        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, allowCalls, teaserType }),
       });
       setWidgetConfigOpen(false);
       await load();
@@ -461,6 +461,14 @@ export default function InstancesPage() {
               </label>
               <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
                 Útil si el widget queda embebido dentro de otro software: el visitante puede ocultar la burbuja con un clic y queda recordado en su navegador.
+              </p>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={widgetConfigDraft.allowCalls !== false} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, allowCalls: e.target.checked }))} />
+                Permitir llamadas de voz desde el chat
+              </label>
+              <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
+                El visitante puede iniciar una llamada de voz en vivo (sin WhatsApp, directo en el navegador) que suena en el panel de los agentes.
               </p>
             </div>
             <div className="modal-actions">

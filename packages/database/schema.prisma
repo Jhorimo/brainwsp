@@ -65,6 +65,10 @@ enum MessageType {
   LOCATION
   CONTACT
   STICKER
+  // Llamada de voz WebRTC terminada (Clienera Chat) — nunca se envía/recibe como contenido
+  // real, solo se crea una vez al colgar/perderse la llamada, con los detalles en
+  // metadata (callType, callStatus, durationSeconds, callId). Ver CallsService.
+  CALL
   UNKNOWN
 }
 

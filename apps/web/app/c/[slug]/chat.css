@@ -29,14 +29,21 @@
 .cc-center { display: flex; align-items: center; justify-content: center; height: 100dvh; font-family: 'Inter', system-ui, sans-serif; color: #7a8294; font-size: 14px; }
 
 /* Header */
-.cc-header { position: relative; padding: 18px 18px 16px; color: #fff; flex-shrink: 0; }
-.cc-header-row { display: flex; align-items: center; gap: 12px; }
+.cc-header { position: relative; padding: 18px 54px 16px 18px; color: #fff; flex-shrink: 0; }
+.cc-header-row { display: flex; align-items: center; gap: 10px; }
 .cc-avatar { width: 42px; height: 42px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; border: 2px solid rgba(255, 255, 255, 0.35); }
-.cc-header-info { min-width: 0; }
+.cc-header-info { min-width: 0; flex: 1; }
 .cc-header-name { font-size: 15px; font-weight: 700; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cc-header-status { font-size: 12px; opacity: 0.88; margin-top: 2px; display: block; }
+.cc-header-status { font-size: 12px; opacity: 0.88; margin-top: 2px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-close { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.18); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }
 .cc-close:hover { background: rgba(255, 255, 255, 0.32); }
+
+/* Llamada de voz */
+.cc-call-btn { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.18); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }
+.cc-call-btn:hover { background: rgba(255, 255, 255, 0.32); }
+.cc-call-btn-end { background: rgba(224, 54, 54, 0.85); }
+.cc-call-btn-end:hover { background: rgba(224, 54, 54, 1); }
+.cc-call-bubble { display: flex; align-items: center; gap: 6px; font-style: italic; }
 
 /* Body */
 .cc-body { flex: 1; overflow-y: auto; padding: 18px 14px; display: flex; flex-direction: column; gap: 10px; background: #f5f6fa; scroll-behavior: smooth; }

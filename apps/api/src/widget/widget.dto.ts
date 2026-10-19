@@ -26,6 +26,12 @@ export class SendWidgetMessageDto {
   text!: string;
 }
 
+export class StartCallDto {
+  @ApiProperty({ description: 'Token de VisitorSession devuelto por /widget/:key/session' })
+  @IsString()
+  token!: string;
+}
+
 export class EditWidgetMessageDto {
   @ApiProperty({ description: 'Token de VisitorSession devuelto por /widget/:key/session' })
   @IsString()

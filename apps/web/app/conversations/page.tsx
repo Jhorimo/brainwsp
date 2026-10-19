@@ -39,10 +39,10 @@ type Conversation = {
   project?: { id: string; name: string } | null;
   stage?: Stage | null;
   instance: { id: string; name: string; slug: string; status: string; provider: string };
-  messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null }>;
+  messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }> };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
@@ -164,6 +164,25 @@ function avatarContent(contact: Contact, iconSize = 16) {
     <span className="chat-avatar-fallback" style={{ display: 'none' }}>{fallback}</span>
   </>;
 }
+function formatCallDuration(seconds?: number) {
+  const total = seconds || 0;
+  const m = Math.floor(total / 60);
+  const s = Math.floor(total % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+// Mismo texto en ambos lados (panel de agentes y el widget) — ver c/[slug]/page.tsx.
+function callLabel(metadata?: MessageMetadata | null) {
+  switch (metadata?.callStatus) {
+    case 'answered': return `Llamada de voz · ${formatCallDuration(metadata?.durationSeconds)}`;
+    case 'missed': return 'Llamada perdida';
+    case 'declined': return 'Llamada rechazada';
+    case 'cancelled': return 'Llamada cancelada';
+    case 'failed': return 'Llamada fallida';
+    default: return 'Llamada de voz';
+  }
+}
+
 function lastText(conversation: Conversation) {
   const message = conversation.messages[0];
   if (!message) return 'Sin mensajes';
@@ -178,6 +197,7 @@ function lastText(conversation: Conversation) {
     case 'STICKER': return prefix + '😀 Sticker';
     case 'LOCATION': return prefix + '📍 Ubicación';
     case 'CONTACT': return prefix + '👤 Contacto';
+    case 'CALL': return prefix + '📞 ' + callLabel(message.metadata);
     default: return prefix + message.type;
   }
 }
@@ -2066,6 +2086,17 @@ export default function ConversationsPage() {
           </>
         );
       }
+      case 'CALL':
+        return (
+          <div className="doc-card">
+            <div className="doc-card-main">
+              <div className="doc-card-icon"><Phone size={20} /></div>
+              <div className="doc-card-info">
+                <div className="doc-card-name">{callLabel(message.metadata)}</div>
+              </div>
+            </div>
+          </div>
+        );
       default: {
         const texto = message.body || message.caption || message.type;
         const menciones = message.metadata?.mentions;
