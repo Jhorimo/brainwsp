@@ -376,6 +376,13 @@ export default function PublicChatPage() {
     });
   }, []);
 
+  // Declarado antes que startCall porque este la usa (vía oniceconnectionstatechange) para
+  // cortar de verdad si la conexión de audio nunca se arma.
+  const hangUp = useCallback(() => {
+    if (callIdRef.current) socketRef.current?.emit('call:end', { callId: callIdRef.current });
+    cleanupCall();
+  }, [cleanupCall]);
+
   // Llamada de voz saliente. Si el visitante todavía no escribió nada no hay conversación
   // (se crea recién al mandar un mensaje/media) — sin ella el socket no tiene a qué sala
   // unirse, así que primero se crea vía /calls (sin contar como mensaje no leído) y recién
@@ -415,18 +422,24 @@ export default function PublicChatPage() {
         if (e.candidate && callIdRef.current) socketRef.current?.emit('call:signal', { callId: callIdRef.current, type: 'ice-candidate', data: e.candidate });
       };
       pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
+      // Diagnóstico + corte real cuando la ruta de medios nunca se arma (típico sin TURN: la
+      // señalización se completa igual, pero sin un par de candidatos válido no hay audio) —
+      // antes esto quedaba "en llamada" para siempre con el cronómetro corriendo y nada sonando.
+      pc.oniceconnectionstatechange = () => {
+        // eslint-disable-next-line no-console
+        console.log('[call] iceConnectionState:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') {
+          setUploadError('Se perdió la conexión de audio');
+          hangUp();
+        }
+      };
       setCallState('calling');
       socketRef.current.emit('call:invite');
     } catch {
       setUploadError('No se pudo iniciar la llamada');
       cleanupCall();
     }
-  }, [bootstrap, token, conversationId, callState, cleanupCall, waitForSocketConnected]);
-
-  const hangUp = useCallback(() => {
-    if (callIdRef.current) socketRef.current?.emit('call:end', { callId: callIdRef.current });
-    cleanupCall();
-  }, [cleanupCall]);
+  }, [bootstrap, token, conversationId, callState, cleanupCall, waitForSocketConnected, hangUp]);
 
   const toggleSound = useCallback(() => {
     if (!bootstrap) return;

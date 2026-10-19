@@ -97,14 +97,34 @@ export class WidgetService {
   // Servidores ICE para las llamadas de voz WebRTC (CallsService) — pública y sin companyId
   // porque STUN no es secreto y el panel de agentes no tiene un widgetPublicKey a mano; un
   // solo valor por despliegue, no por canal. STUN_URLS/TURN_URLS/TURN_USERNAME/
-  // TURN_CREDENTIAL son opcionales: sin TURN configurado, solo se devuelve STUN público. Sumar
-  // TURN después es solo setear esas 3 variables de entorno, sin tocar código.
+  // TURN_CREDENTIAL son opcionales. Sumar un TURN propio después es solo setear esas 3
+  // variables de entorno, sin tocar código.
+  //
+  // Por qué hace falta TURN y no solo STUN: STUN solo sirve para que cada lado DESCUBRA su
+  // propia IP pública — si agente y visitante están en redes distintas (el caso normal en
+  // producción, nunca localhost) y alguno está detrás de un NAT restrictivo/simétrico (común
+  // en redes móviles y corporativas), los candidatos STUN nunca llegan a formar un par válido:
+  // la señalización (oferta/respuesta) se completa igual, el timbre y el "en llamada" se ven
+  // bien, pero el audio nunca fluye porque no hay una ruta P2P real. Un TURN relay (que si o
+  // si transporta el audio en vez de solo ayudar a descubrirse) es la única forma de que esa
+  // llamada funcione en ese escenario.
   getIceServers() {
     const stunUrls = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302').split(',').map((s) => s.trim()).filter(Boolean);
     const iceServers: Array<{ urls: string[]; username?: string; credential?: string }> = stunUrls.length ? [{ urls: stunUrls }] : [];
     const turnUrls = (process.env.TURN_URLS || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (turnUrls.length) {
       iceServers.push({ urls: turnUrls, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
+    } else {
+      // Sin TURN propio configurado: TURN de prueba público (Open Relay Project / Metered —
+      // credenciales publicadas a propósito para pruebas, sin garantía de uptime ni ancho de
+      // banda). Mejor esto que nada mientras no hay uno propio, pero para producción real hay
+      // que reemplazarlo seteando TURN_URLS/TURN_USERNAME/TURN_CREDENTIAL (p.ej. un coturn
+      // propio) — esta rama deja de usarse apenas esas variables existen.
+      iceServers.push({
+        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      });
     }
     return { iceServers };
   }

@@ -148,6 +148,13 @@ export function IncomingCallProvider() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Declarado antes que acceptCall porque este lo usa (vía oniceconnectionstatechange) para
+  // cortar de verdad si la conexión de audio nunca se arma.
+  const hangUp = useCallback(() => {
+    if (incomingRef.current) socketRef.current?.emit('call:end', { callId: incomingRef.current.callId });
+    cleanup();
+  }, [cleanup]);
+
   // Dentro del propio click de "Aceptar" a propósito: getUserMedia y el autoplay del audio
   // remoto necesitan un gesto de usuario para que el navegador no los bloquee.
   const acceptCall = useCallback(async () => {
@@ -165,6 +172,14 @@ export function IncomingCallProvider() {
         if (e.candidate) socketRef.current?.emit('call:signal', { callId: call.callId, type: 'ice-candidate', data: e.candidate });
       };
       pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
+      // Diagnóstico + corte real cuando la ruta de medios nunca se arma (típico sin TURN: la
+      // señalización se completa igual, pero sin un par de candidatos válido no hay audio) —
+      // antes esto quedaba "en llamada" para siempre con el cronómetro corriendo y nada sonando.
+      pc.oniceconnectionstatechange = () => {
+        // eslint-disable-next-line no-console
+        console.log('[call] iceConnectionState:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') hangUp();
+      };
       ringtone.stop();
       socketRef.current.emit('call:accept', { callId: call.callId });
       setCallPhase('active');
@@ -173,15 +188,10 @@ export function IncomingCallProvider() {
       // Sin permiso de micrófono no se puede contestar — se deja sonando para que otro
       // agente la tome, o termine marcada como perdida.
     }
-  }, [ringtone]);
+  }, [ringtone, hangUp]);
 
   const declineCall = useCallback(() => {
     if (incomingRef.current) socketRef.current?.emit('call:decline', { callId: incomingRef.current.callId });
-    cleanup();
-  }, [cleanup]);
-
-  const hangUp = useCallback(() => {
-    if (incomingRef.current) socketRef.current?.emit('call:end', { callId: incomingRef.current.callId });
     cleanup();
   }, [cleanup]);
 
