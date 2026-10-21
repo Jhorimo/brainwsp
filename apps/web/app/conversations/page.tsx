@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -366,6 +366,151 @@ function isImageFile(file: File) { return file.type.startsWith('image/'); }
 function isVideoFile(file: File) { return file.type.startsWith('video/'); }
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+
+// Lista de mensajes y filas de chats extraídas y memoizadas: escribir en el compositor cambia
+// el estado de la página en cada tecla, y sin esto se redibujaban todas las burbujas y todos los
+// chats en cada pulsación. `api` es estable (delega en la última versión de cada handler), por
+// eso lo que cambia el dibujado se pasa como props (invalidators) y no dentro de `api`.
+type MessageListApi = {
+  renderMessageBody: (message: Message) => ReactNode;
+  toggleMessageSelected: (id: string) => void;
+  startReply: (message: Message) => void;
+  toggleMessageMenu: (e: { currentTarget: HTMLElement }, id: string) => void;
+  toggleReactionMenu: (e: { currentTarget: HTMLElement }, id: string) => void;
+  scrollToMessage: (id: string) => void;
+  quoteSenderLabel: (quoted: { direction: string; author?: Author | null }) => string;
+  quoteSnippet: (quoted: { type: string; body?: string | null; caption?: string | null; fileName?: string | null }) => string;
+};
+const MessageList = memo(function MessageList({ messages, selectMode, selectedMessageIds, highlightMessageId, api }: {
+  messages: Message[];
+  selectMode: boolean;
+  selectedMessageIds: Set<string>;
+  highlightMessageId: string | null;
+  // Solo para invalidar: renderMessageBody / quoteSenderLabel leen estas cosas de la página.
+  savedStickerMsgIds: Set<string>;
+  conversations: Conversation[];
+  selectedId: string | null;
+  api: MessageListApi;
+}) {
+  return (
+    <>
+{messages.map((message, index) => (
+                  <Fragment key={message.id}>
+                  {(index === 0 || !isSameDay(messages[index - 1].createdAt, message.createdAt)) && (
+                    <div className="day-separator" title={fullDateTime(message.createdAt)}><span>{daySeparatorLabel(message.createdAt)}</span></div>
+                  )}
+                  <div
+                    id={`msg-${message.id}`}
+                    className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''} ${highlightMessageId === message.id ? 'highlight' : ''} ${selectedMessageIds.has(message.id) ? 'selected' : ''}`}
+                    onClick={() => { if (selectMode) api.toggleMessageSelected(message.id); }}
+                    onDoubleClick={(e) => {
+                      // Doble clic en la burbuja = "Responder". Se ignora sobre lo que ya hace algo
+                      // con el clic (botones, enlaces, media, la cita) y en modo selección.
+                      if (selectMode) return;
+                      if ((e.target as HTMLElement).closest('button, a, input, video, audio, img, textarea, select')) return;
+                      window.getSelection()?.removeAllRanges();
+                      api.startReply(message);
+                    }}
+                  >
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        className="message-select-checkbox"
+                        checked={selectedMessageIds.has(message.id)}
+                        onChange={() => api.toggleMessageSelected(message.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                    {!selectMode && (
+                      <>
+                        <button className="message-menu-trigger" onClick={(e) => api.toggleMessageMenu(e, message.id)} title="Más opciones"><ChevronDown size={13} /></button>
+                        <button className="message-react-trigger" onClick={(e) => api.toggleReactionMenu(e, message.id)} title="Reaccionar"><Smile size={13} /></button>
+                      </>
+                    )}
+                    {message.direction === 'INBOUND' && authorName(message.author) && <div className="message-author">{authorName(message.author)}</div>}
+                    {message.quotedMessage && (
+                      <button className="message-quote" onClick={(e) => { e.stopPropagation(); api.scrollToMessage(message.quotedMessage!.id); }}>
+                        <strong>{api.quoteSenderLabel(message.quotedMessage)}</strong>
+                        <span>{api.quoteSnippet(message.quotedMessage)}</span>
+                      </button>
+                    )}
+                    {api.renderMessageBody(message)}
+                    {message.reactions && message.reactions.length > 0 && (
+                      <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
+                    )}
+                    <div className="message-time" title={fullDateTime(message.createdAt)}>
+                      {message.pinned && <Pin size={10} className="message-badge-pin" />}
+                      {message.starred && <Star size={10} className="message-badge-star" />}
+                      {/* No se muestra el texto original, igual que hace WhatsApp: solo un
+                          aviso de que este mensaje ya no es el que se envio primero. El
+                          texto viejo se guarda en metadata.originalBody solo para auditoria. */}
+                      {message.metadata?.edited && (
+                        <span className="message-edited" title="Mensaje editado">
+                          <Pencil size={10} /> editado
+                        </span>
+                      )}
+                      {clockTime(message.createdAt)}
+                      {message.direction === 'OUTBOUND' && statusIcon(message.status)}
+                    </div>
+                  </div>
+                  </Fragment>
+                ))}
+    </>
+  );
+});
+
+const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing, onOpen, onTogglePin }: {
+  conversation: Conversation;
+  active: boolean;
+  showAgent: boolean;
+  typing: boolean;
+  onOpen: (id: string) => void;
+  onTogglePin: (e: { stopPropagation: () => void }, conversation: Conversation) => void;
+}) {
+  const waiting = awaitingReply(conversation);
+  return (
+
+              <button className={`chat-row ${active ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} style={{ borderLeftColor: conversation.stage?.color || 'transparent' }} onClick={() => onOpen(conversation.id)}>
+                <div className="chat-avatar">{avatarContent(conversation.contact)}</div>
+                <div className="chat-copy">
+                  <div className="chat-copy-name-row">
+                    <strong>{displayName(conversation.contact)}</strong>
+                    {conversation.instance.provider === 'CLIENERA_CHAT' && (
+                      <span className="channel-badge" title="Clienera Chat">💬</span>
+                    )}
+                    {conversation.contact.tags && conversation.contact.tags.length > 0 && (
+                      <span className="chat-row-tags">
+                        {conversation.contact.tags.slice(0, 4).map(({ tag }) => <span key={tag.id} className="tag-dot" style={{ background: tag.color }} title={tag.name} />)}
+                      </span>
+                    )}
+                  </div>
+                  <span className={typing ? 'chat-row-typing' : undefined}>
+                    {typing ? 'Escribiendo...' : lastText(conversation)}
+                  </span>
+                  {showAgent && (
+                    <span className={`chat-row-agent ${conversation.assignedUser ? '' : 'unassigned'}`} title={conversation.assignedUser ? `Asignado a ${conversation.assignedUser.name}` : 'Sin asignar'}>
+                      <User size={10} />
+                      {conversation.assignedUser ? conversation.assignedUser.name : 'Sin asignar'}
+                    </span>
+                  )}
+                  {waiting && <span className={`chat-awaiting ${waiting.level}`}>⏰ {waiting.label}</span>}
+                </div>
+                <div>
+                  <div className={`chat-time ${waiting ? `awaiting-${waiting.level}` : ''}`} title={fullDateTime(conversation.lastMessageAt)}><span className="chat-time-day">{chatListDayLabel(conversation.lastMessageAt)}</span><span>{clockTime(conversation.lastMessageAt)}</span></div>
+                  {conversation.unreadCount > 0 && <div className="chat-unread">{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</div>}
+                </div>
+                <span
+                  className="chat-pin-toggle"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => void onTogglePin(e, conversation)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void onTogglePin(e, conversation); } }}
+                  title={conversation.pinned ? 'Desfijar chat' : 'Fijar chat'}
+                ><Pin size={13} /></span>
+              </button>
+  );
+});
 
 export default function ConversationsPage() {
   const { theme } = useTheme();
@@ -950,7 +1095,24 @@ export default function ConversationsPage() {
     mentionListRef.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
   }, [mentionIndex, mentionItems]);
 
-  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); mentionsRef.current = []; resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); clearPendingFiles(); }, [selectedId]);
+  // Borrador por chat: lo escrito (y las menciones) queda con la conversación donde se escribió.
+  // Al cambiar de chat se guarda el texto del anterior y se carga el del nuevo (o vacío).
+  const textRef = useRef('');
+  textRef.current = text;
+  const draftsRef = useRef<Map<string, { text: string; mentions: { contactId: string; label: string }[] }>>(new Map());
+  const draftOwnerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = draftOwnerRef.current;
+    if (previous) {
+      if (textRef.current.trim()) draftsRef.current.set(previous, { text: textRef.current, mentions: mentionsRef.current });
+      else draftsRef.current.delete(previous);
+    }
+    draftOwnerRef.current = selectedId;
+    const draft = selectedId ? draftsRef.current.get(selectedId) : undefined;
+    mentionsRef.current = draft ? draft.mentions : [];
+    setText(draft ? draft.text : '');
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); clearPendingFiles(); }, [selectedId]);
 
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
@@ -1234,8 +1396,16 @@ export default function ConversationsPage() {
     });
   };
 
+  // Tras un envío asíncrono el usuario pudo cambiar de chat: solo se toca el compositor y la lista
+  // de mensajes si seguimos en el chat donde se envió; si no, se descarta su borrador guardado.
+  const clearDraftOf = (chatId: string) => {
+    if (selectedIdRef.current === chatId) setText('');
+    else draftsRef.current.delete(chatId);
+  };
+
   const sendMediaFile = async (file: File, opts: { caption?: string; ptt?: boolean } = {}) => {
     if (!selectedId || sending) return;
+    const chatId = selectedId;
     setSending(true);
     const quotedMessageId = replyToMessage?.id;
     try {
@@ -1244,11 +1414,13 @@ export default function ConversationsPage() {
       if (opts.caption) formData.append('caption', opts.caption);
       formData.append('ptt', opts.ptt ? 'true' : 'false');
       if (quotedMessageId) formData.append('quotedMessageId', quotedMessageId);
-      const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
-      setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
+      const created = await apiFetch<Message>(`/conversations/${chatId}/messages/media`, { method: 'POST', body: formData });
+      if (selectedIdRef.current === chatId) {
+        setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
+        setReplyToMessage(null);
+      }
       void loadConversations();
-      setText('');
-      setReplyToMessage(null);
+      clearDraftOf(chatId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo enviar el archivo');
     } finally { setSending(false); }
@@ -1260,6 +1432,7 @@ export default function ConversationsPage() {
   const sendPendingFiles = async () => {
     const items = [...pendingFilesRef.current];
     if (!selectedId || sending || items.length === 0) return;
+    const chatId = selectedId;
     setSending(true);
     let caption = expandirRespuestasRapidas(text).texto.trim();
     let quotedMessageId = replyToMessage?.id;
@@ -1273,11 +1446,13 @@ export default function ConversationsPage() {
           if (caption) formData.append('caption', caption);
           formData.append('ptt', 'false');
           if (quotedMessageId) formData.append('quotedMessageId', quotedMessageId);
-          const created = await apiFetch<Message>(`/conversations/${selectedId}/messages/media`, { method: 'POST', body: formData });
-          setMessages((current) => current.some((entry) => entry.id === created.id) ? current : [...current, created]);
-          removePendingFile(item.id);
-          if (caption) { caption = ''; setText(''); }
-          if (quotedMessageId) { quotedMessageId = undefined; setReplyToMessage(null); }
+          const created = await apiFetch<Message>(`/conversations/${chatId}/messages/media`, { method: 'POST', body: formData });
+          if (selectedIdRef.current === chatId) {
+            setMessages((current) => current.some((entry) => entry.id === created.id) ? current : [...current, created]);
+            removePendingFile(item.id);
+          }
+          if (caption) { caption = ''; clearDraftOf(chatId); }
+          if (quotedMessageId) { quotedMessageId = undefined; if (selectedIdRef.current === chatId) setReplyToMessage(null); }
         } catch (err) {
           failed.push(item.file.name);
           if (!firstError) firstError = err instanceof Error ? err.message : 'error desconocido';
@@ -1334,17 +1509,21 @@ export default function ConversationsPage() {
     const body = expandido.trim();
     const mentions = mentionsRef.current.filter((m) => body.includes(m.label));
     const quotedMessage = replyToMessage;
+    const chatId = selectedId;
     setText('');
     setReplyToMessage(null);
     setSending(true);
     try {
-      const created = await apiFetch<Message>(`/conversations/${selectedId}/messages`, { method: 'POST', body: JSON.stringify({ message: body, quotedMessageId: quotedMessage?.id, ...(mentions.length ? { mentions } : {}) }) });
-      mentionsRef.current = [];
-      setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
+      const created = await apiFetch<Message>(`/conversations/${chatId}/messages`, { method: 'POST', body: JSON.stringify({ message: body, quotedMessageId: quotedMessage?.id, ...(mentions.length ? { mentions } : {}) }) });
+      if (selectedIdRef.current === chatId) {
+        mentionsRef.current = [];
+        setMessages((current) => current.some((item) => item.id === created.id) ? current : [...current, created]);
+      }
       void loadConversations();
     } catch (err) {
-      setText(body);
-      setReplyToMessage(quotedMessage);
+      // Si el usuario ya cambió de chat, el texto fallido vuelve al borrador de SU chat, no al actual.
+      if (selectedIdRef.current === chatId) { setText(body); setReplyToMessage(quotedMessage); }
+      else draftsRef.current.set(chatId, { text: body, mentions: [] });
       setError(err instanceof Error ? err.message : 'No se pudo enviar el mensaje');
     } finally { setSending(false); }
   };
@@ -1760,11 +1939,13 @@ export default function ConversationsPage() {
       // el valor CON el token, porque setText es asincrono — y lo reinsertaba. Con el
       // cursor ya en 0 el resultado era "contenido/330": el comando quedaba al final y
       // habia que borrarlo a mano antes de enviar.
+      const chatAtStart = selectedIdRef.current;
       const sinToken = text.slice(0, start) + text.slice(caret);
       setText(sinToken);
       setQrSendingId(qr.id);
       fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream')
         .then((file) => {
+          if (selectedIdRef.current !== chatAtStart) return;
           attachFile(file);
           if (!qr.content) return;
           const conContenido = sinToken.slice(0, start) + qr.content + sinToken.slice(start);
@@ -2277,6 +2458,23 @@ export default function ConversationsPage() {
     }
   };
 
+  // Handlers estables para los componentes memoizados (MessageList / ChatRow): llaman siempre a
+  // la última versión, así que no quedan con estado viejo y no rompen el memo.
+  const latestHandlers = useRef({ renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin });
+  latestHandlers.current = { renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin };
+  const messageListApi = useMemo<MessageListApi>(() => ({
+    renderMessageBody: (m) => latestHandlers.current.renderMessageBody(m),
+    toggleMessageSelected: (id) => latestHandlers.current.toggleMessageSelected(id),
+    startReply: (m) => latestHandlers.current.startReply(m),
+    toggleMessageMenu: (e, id) => latestHandlers.current.toggleMessageMenu(e, id),
+    toggleReactionMenu: (e, id) => latestHandlers.current.toggleReactionMenu(e, id),
+    scrollToMessage: (id) => latestHandlers.current.scrollToMessage(id),
+    quoteSenderLabel: (q) => latestHandlers.current.quoteSenderLabel(q),
+    quoteSnippet: (q) => latestHandlers.current.quoteSnippet(q),
+  }), []);
+  const openChat = useCallback((id: string) => { setSelectedId(id); setMobileChatOpen(true); }, []);
+  const toggleConversationPinStable = useCallback((e: { stopPropagation: () => void }, conversation: Conversation) => latestHandlers.current.toggleConversationPin(e, conversation), []);
+
   return (
     <>
     <AppShell title="Conversaciones" subtitle="Bandeja en tiempo real para agentes">
@@ -2355,44 +2553,7 @@ export default function ConversationsPage() {
           </div>
           <div className="chat-list-scroll">
             {filtered.map((conversation) => (
-              <button className={`chat-row ${selectedId === conversation.id ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} style={{ borderLeftColor: conversation.stage?.color || 'transparent' }} onClick={() => { setSelectedId(conversation.id); setMobileChatOpen(true); }}>
-                <div className="chat-avatar">{avatarContent(conversation.contact)}</div>
-                <div className="chat-copy">
-                  <div className="chat-copy-name-row">
-                    <strong>{displayName(conversation.contact)}</strong>
-                    {conversation.instance.provider === 'CLIENERA_CHAT' && (
-                      <span className="channel-badge" title="Clienera Chat">💬</span>
-                    )}
-                    {conversation.contact.tags && conversation.contact.tags.length > 0 && (
-                      <span className="chat-row-tags">
-                        {conversation.contact.tags.slice(0, 4).map(({ tag }) => <span key={tag.id} className="tag-dot" style={{ background: tag.color }} title={tag.name} />)}
-                      </span>
-                    )}
-                  </div>
-                  <span className={typingConversations.has(conversation.id) ? 'chat-row-typing' : undefined}>
-                    {typingConversations.has(conversation.id) ? 'Escribiendo...' : lastText(conversation)}
-                  </span>
-                  {teamUsers.length > 1 && (
-                    <span className={`chat-row-agent ${conversation.assignedUser ? '' : 'unassigned'}`} title={conversation.assignedUser ? `Asignado a ${conversation.assignedUser.name}` : 'Sin asignar'}>
-                      <User size={10} />
-                      {conversation.assignedUser ? conversation.assignedUser.name : 'Sin asignar'}
-                    </span>
-                  )}
-                  {(() => { const waiting = awaitingReply(conversation); return waiting ? <span className={`chat-awaiting ${waiting.level}`}>⏰ {waiting.label}</span> : null; })()}
-                </div>
-                <div>
-                  <div className={`chat-time ${awaitingReply(conversation) ? `awaiting-${awaitingReply(conversation)!.level}` : ''}`} title={fullDateTime(conversation.lastMessageAt)}><span className="chat-time-day">{chatListDayLabel(conversation.lastMessageAt)}</span><span>{clockTime(conversation.lastMessageAt)}</span></div>
-                  {conversation.unreadCount > 0 && <div className="chat-unread">{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</div>}
-                </div>
-                <span
-                  className="chat-pin-toggle"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => void toggleConversationPin(e, conversation)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void toggleConversationPin(e, conversation); } }}
-                  title={conversation.pinned ? 'Desfijar chat' : 'Fijar chat'}
-                ><Pin size={13} /></span>
-              </button>
+              <ChatRow key={conversation.id} conversation={conversation} active={selectedId === conversation.id} showAgent={teamUsers.length > 1} typing={typingConversations.has(conversation.id)} onOpen={openChat} onTogglePin={toggleConversationPinStable} />
             ))}
           </div>
         </aside>
@@ -2464,67 +2625,16 @@ export default function ConversationsPage() {
               }}
             >
               <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
-                {messages.map((message, index) => (
-                  <Fragment key={message.id}>
-                  {(index === 0 || !isSameDay(messages[index - 1].createdAt, message.createdAt)) && (
-                    <div className="day-separator" title={fullDateTime(message.createdAt)}><span>{daySeparatorLabel(message.createdAt)}</span></div>
-                  )}
-                  <div
-                    id={`msg-${message.id}`}
-                    className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''} ${highlightMessageId === message.id ? 'highlight' : ''} ${selectedMessageIds.has(message.id) ? 'selected' : ''}`}
-                    onClick={() => { if (selectMode) toggleMessageSelected(message.id); }}
-                    onDoubleClick={(e) => {
-                      // Doble clic en la burbuja = "Responder". Se ignora sobre lo que ya hace algo
-                      // con el clic (botones, enlaces, media, la cita) y en modo selección.
-                      if (selectMode) return;
-                      if ((e.target as HTMLElement).closest('button, a, input, video, audio, img, textarea, select')) return;
-                      window.getSelection()?.removeAllRanges();
-                      startReply(message);
-                    }}
-                  >
-                    {selectMode && (
-                      <input
-                        type="checkbox"
-                        className="message-select-checkbox"
-                        checked={selectedMessageIds.has(message.id)}
-                        onChange={() => toggleMessageSelected(message.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    )}
-                    {!selectMode && (
-                      <>
-                        <button className="message-menu-trigger" onClick={(e) => toggleMessageMenu(e, message.id)} title="Más opciones"><ChevronDown size={13} /></button>
-                        <button className="message-react-trigger" onClick={(e) => toggleReactionMenu(e, message.id)} title="Reaccionar"><Smile size={13} /></button>
-                      </>
-                    )}
-                    {message.direction === 'INBOUND' && authorName(message.author) && <div className="message-author">{authorName(message.author)}</div>}
-                    {message.quotedMessage && (
-                      <button className="message-quote" onClick={(e) => { e.stopPropagation(); scrollToMessage(message.quotedMessage!.id); }}>
-                        <strong>{quoteSenderLabel(message.quotedMessage)}</strong>
-                        <span>{quoteSnippet(message.quotedMessage)}</span>
-                      </button>
-                    )}
-                    {renderMessageBody(message)}
-                    {message.reactions && message.reactions.length > 0 && (
-                      <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
-                    )}
-                    <div className="message-time" title={fullDateTime(message.createdAt)}>
-                      {message.pinned && <Pin size={10} className="message-badge-pin" />}
-                      {message.starred && <Star size={10} className="message-badge-star" />}
-                      {/* No se muestra el texto original, igual que hace WhatsApp: solo un
-                          aviso de que este mensaje ya no es el que se envio primero. El
-                          texto viejo se guarda en metadata.originalBody solo para auditoria. */}
-                      {message.metadata?.edited && (
-                        <span className="message-edited" title="Mensaje editado">
-                          <Pencil size={10} /> editado
-                        </span>
-                      )}
-                      {clockTime(message.createdAt)}
-                      {message.direction === 'OUTBOUND' && statusIcon(message.status)}
-                    </div>
-                  </div>
-                  </Fragment>
-                ))}
+                <MessageList
+                  messages={messages}
+                  selectMode={selectMode}
+                  selectedMessageIds={selectedMessageIds}
+                  highlightMessageId={highlightMessageId}
+                  savedStickerMsgIds={savedStickerMsgIds}
+                  conversations={conversations}
+                  selectedId={selectedId}
+                  api={messageListApi}
+                />
               </div>
             </div>
 

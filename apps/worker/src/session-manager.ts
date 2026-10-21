@@ -32,6 +32,14 @@ import { uploadBuffer } from './storage.js';
 
 const LEASE_TTL_MS = 30_000;
 const LEASE_RENEW_MS = 10_000;
+// Nombre legible del código de cierre de Baileys para los logs y lastError. Hay códigos con
+// dos nombres (408 = connectionLost/timedOut), por eso se juntan en vez de pisarse.
+const DISCONNECT_REASON_NAMES = new Map<number, string>();
+for (const [name, value] of Object.entries(DisconnectReason)) {
+  if (typeof value !== 'number') continue;
+  DISCONNECT_REASON_NAMES.set(value, [DISCONNECT_REASON_NAMES.get(value), name].filter(Boolean).join('/'));
+}
+const disconnectReasonName = (code?: number) => (code === undefined ? 'desconocido' : DISCONNECT_REASON_NAMES.get(code) ?? 'otro');
 // WhatsApp's profile-picture links are signed and expire; contacts.update only fires when the
 // photo itself changes, not when the cached link merely goes stale. A long-lived production
 // connection can go weeks without reconnecting, so backfillAvatars (reconnect-only, gaps-only)
@@ -125,6 +133,7 @@ export class SessionManager {
     // "Conectar" arranque un vínculo limpio sin tener que pasar por "Cerrar sesión".
     let auth = await usePrismaAuthState(this.prisma, instanceId);
     if (instance.status === InstanceStatus.LOGGED_OUT) {
+      this.logger.warn({ instanceId }, 'instance was LOGGED_OUT: clearing stored credentials before connecting');
       await auth.clear();
       auth = await usePrismaAuthState(this.prisma, instanceId);
     }
@@ -195,6 +204,25 @@ export class SessionManager {
         this.sockets.delete(instanceId);
         const statusCode = this.disconnectCode(update.lastDisconnect?.error);
         const manual = this.manualStops.has(instanceId);
+        const leaseWasLost = this.leaseLost.has(instanceId);
+        // Solo para el log: el estado que tenía la línea justo antes de este cierre. Si la
+        // lectura falla no debe afectar al manejo del cierre.
+        const before = await this.prisma.whatsAppInstance
+          .findUnique({ where: { id: instanceId }, select: { status: true, reconnectAttempt: true } })
+          .catch(() => null);
+        const closeInfo = {
+          statusCode,
+          reason: disconnectReasonName(statusCode),
+          errorMessage: update.lastDisconnect?.error?.message,
+          previousStatus: before?.status,
+          reconnectAttempt: before?.reconnectAttempt,
+          manual,
+          leaseLost: leaseWasLost,
+        };
+        // Cierres esperados (manual, o el reinicio que WhatsApp pide tras vincular) en info;
+        // el resto en warn para que se vean al filtrar por nivel.
+        if (manual || statusCode === DisconnectReason.restartRequired) childLogger.info(closeInfo, 'WhatsApp connection closed');
+        else childLogger.warn(closeInfo, 'WhatsApp connection closed');
         if (this.leaseLost.delete(instanceId)) {
           childLogger.warn('socket closed after Redis lease ownership was lost');
           return;
@@ -213,11 +241,12 @@ export class SessionManager {
           // El dispositivo fue desvinculado desde el teléfono: las credenciales ya no sirven.
           // Se borran y se arranca de inmediato un socket nuevo para que el panel reciba un
           // QR fresco, en vez de dejar la instancia muerta hasta que alguien cierre sesión.
+          childLogger.warn({ statusCode, reason: disconnectReasonName(statusCode) }, 'WhatsApp unlinked this device: clearing stored credentials and starting a fresh QR session');
           const auth = await usePrismaAuthState(this.prisma, instanceId);
           await auth.clear();
           await this.setInstanceState(instanceId, InstanceStatus.LOGGED_OUT, {
             qr: null,
-            lastError: 'WhatsApp se desvinculó. Escanea el nuevo código QR para volver a conectar.',
+            lastError: `WhatsApp se desvinculó (${statusCode} ${disconnectReasonName(statusCode)}). Escanea el nuevo código QR para volver a conectar.`,
             lastDisconnectedAt: new Date(),
           });
           await this.releaseLease(instanceId);
@@ -230,7 +259,7 @@ export class SessionManager {
         if (statusCode === DisconnectReason.connectionReplaced) {
           await this.setInstanceState(instanceId, InstanceStatus.ERROR, {
             qr: null,
-            lastError: 'La conexión fue reemplazada por otra sesión activa.',
+            lastError: `La conexión fue reemplazada por otra sesión activa (${statusCode} ${disconnectReasonName(statusCode)}).`,
             lastDisconnectedAt: new Date(),
           });
           await this.releaseLease(instanceId);
@@ -339,6 +368,7 @@ export class SessionManager {
     } catch (error) {
       this.logger.warn({ err: error, instanceId }, 'logout returned an error; local auth will still be cleared');
     }
+    this.logger.warn({ instanceId }, 'manual logout: clearing stored credentials');
     const auth = await usePrismaAuthState(this.prisma, instanceId);
     await auth.clear();
     await this.setInstanceState(instanceId, InstanceStatus.LOGGED_OUT, {
@@ -1104,7 +1134,7 @@ export class SessionManager {
 
     await this.setInstanceState(instanceId, InstanceStatus.RECONNECTING, {
       reconnectAttempt: attempt,
-      lastError: statusCode ? `Conexión cerrada (${statusCode}). Reconectando automáticamente.` : 'Conexión cerrada. Reconectando automáticamente.',
+      lastError: statusCode ? `Conexión cerrada (${statusCode} ${disconnectReasonName(statusCode)}). Reconectando automáticamente.` : 'Conexión cerrada. Reconectando automáticamente.',
       lastDisconnectedAt: new Date(),
     });
 
