@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { AppShell } from '@/components/app-shell';
 import { apiFetch } from '@/lib/api';
-import { Activity, AlertTriangle, Bot, Building2, CircleUserRound, Layers, MessagesSquare, QrCode, Radio, Send, Tag as TagIcon, UserPlus, UserRoundCheck, UserRoundX, UsersRound, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Bot, Building2, CircleUserRound, Layers, Megaphone, MessagesSquare, QrCode, Radio, Send, Tag as TagIcon, UserPlus, UserRoundCheck, UserRoundX, UsersRound, Zap } from 'lucide-react';
 
 type Stats = { connectedInstances: number; openConversations: number; unreadConversations: number; inboundInRange: number; outboundInRange: number; agents: number; aiActiveConversations: number; aiMessagesInRange: number };
 type RankedUser = { id: string; name: string; email: string; role: string; conversations: number };
@@ -16,6 +16,7 @@ type PipelineDept = { id: string; name: string; stages: PipelineStage[]; noStage
 type VolumeDay = { date: string; inbound: number; outbound: number; interactions: number };
 type AgentPerf = { id: string; name: string; email: string; role: string; messagesSent: number; conversationsTouched: number };
 type ContactsDay = { date: string; count: number };
+type AdOrigins = { adChats: number; organicChats: number; convertedChats: number; ads: Array<{ sourceUrl: string | null; title: string | null; chats: number; converted: number }> };
 type PlanUsage = {
   planName: string | null; mode: 'QR' | 'API'; licenseRenewsAt: string | null; daysUntilRenewal: number | null;
   maxMessages: number | null; messagesThisMonth: number; dailyBudget: number | null; messagesToday: number;
@@ -177,6 +178,7 @@ export default function DashboardPage() {
   const [contactsNew, setContactsNew] = useState<ContactsDay[]>([]);
   const [hourly, setHourly] = useState<Array<{ hour: number; count: number }>>([]);
   const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null);
+  const [adOrigins, setAdOrigins] = useState<AdOrigins | null>(null);
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
   const toggleSeries = (key: string) => setHiddenSeries((current) => {
     const next = new Set(current);
@@ -224,6 +226,7 @@ export default function DashboardPage() {
   useEffect(() => { apiFetch<ContactsDay[]>(`/dashboard/contacts-new?${rangeParams}`).then(setContactsNew).catch(() => undefined); }, [rangeParams]);
   useEffect(() => { apiFetch<Array<{ hour: number; count: number }>>(`/dashboard/hourly-distribution?${rangeParams}`).then(setHourly).catch(() => undefined); }, [rangeParams]);
   useEffect(() => { apiFetch<PlanUsage>('/dashboard/plan-usage').then(setPlanUsage).catch(() => undefined); }, []);
+  useEffect(() => { apiFetch<AdOrigins>(`/dashboard/ad-origins?${rangeParams}`).then(setAdOrigins).catch(() => undefined); }, [rangeParams]);
 
   const rangeLabel = preset === 'custom'
     ? (fromDate === toDate ? formatShortDate(fromDate) : `${formatShortDate(fromDate)} – ${formatShortDate(toDate)}`)
@@ -263,6 +266,9 @@ export default function DashboardPage() {
       subtitle="Vista general de la operación de WhatsApp"
       actions={<Link href="/instances" className="button primary small"><QrCode size={15} />Gestionar QR</Link>}
     >
+      {/* Un solo espaciado para toda la página (.dashboard-page usa gap y anula los márgenes de
+          cada bloque): antes cada pieza traía su propio margen y unas quedaban pegadas. */}
+      <div className="dashboard-page">
       {planUsage && planUrgent && (
         <div className="plan-alert-banner">
           <div className="plan-alert-icon"><AlertTriangle size={18} /></div>
@@ -311,7 +317,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid-stats">
+      <div className="grid-stats dashboard-kpis">
         {cards.map((item) => {
           const Icon = item.icon;
           return <div className="stat-card" key={item.label}><div className="stat-icon"><Icon size={19} /></div><div className="stat-label">{item.label}</div><div className="stat-value">{item.value}</div><div className="stat-meta">{item.meta}</div></div>;
@@ -402,7 +408,7 @@ export default function DashboardPage() {
           </div>
         </section>
         <section className="card">
-          <div className="card-header"><div><h2>Resumen del periodo</h2><p>{rangeLabel}</p></div></div>
+          <div className="card-header"><div><h2>Totales de mensajes</h2><p>{rangeLabel}</p></div></div>
           <div className="card-body activity-list dashboard-fill">
             <div className="activity-row"><div className="activity-icon"><CircleUserRound size={16} /></div><div className="activity-copy"><strong>Mensajes recibidos</strong><span>Volumen entrante — clave para medir campañas de ads</span></div><span className="activity-time">{stats.inboundInRange}</span></div>
             <div className="activity-row"><div className="activity-icon"><Send size={16} /></div><div className="activity-copy"><strong>Mensajes enviados</strong><span>Total saliente — humanos + IA + API</span></div><span className="activity-time">{stats.outboundInRange}</span></div>
@@ -494,6 +500,52 @@ export default function DashboardPage() {
           />
         </section>
       </div>
+      {adOrigins && adOrigins.adChats > 0 && (
+        <section className="card">
+          <div className="card-header"><div><h2>Anuncios</h2><p>Chats que llegaron desde anuncios de Facebook e Instagram — {rangeLabel.toLowerCase()}</p></div></div>
+          <div className="card-body">
+            <div className="ad-origin-kpis">
+              <div className="ad-origin-kpi">
+                <span>Chats de anuncios</span>
+                <strong>{adOrigins.adChats}</strong>
+                <small>{percent(adOrigins.adChats, adOrigins.adChats + adOrigins.organicChats)} del total</small>
+              </div>
+              <div className="ad-origin-kpi">
+                <span>Chats nuevos orgánicos</span>
+                <strong>{adOrigins.organicChats}</strong>
+                <small>Sin anuncio</small>
+              </div>
+              <div className="ad-origin-kpi">
+                <span>Llegaron a trato</span>
+                <strong>{adOrigins.convertedChats}</strong>
+                <small>{percent(adOrigins.convertedChats, adOrigins.adChats)} de los chats de anuncio</small>
+              </div>
+            </div>
+          </div>
+          <RankList
+            icon={Megaphone}
+            emptyLabel="Sin chats de anuncios en este periodo"
+            items={adOrigins.ads.map((ad, index) => ({
+              id: ad.sourceUrl || `${ad.title}-${index}`,
+              label: adLabel(ad),
+              sub: ad.converted ? `${ad.converted} llegaron a trato` : 'Ninguno llegó a trato todavía',
+              count: ad.chats,
+            }))}
+          />
+        </section>
+      )}
+      </div>
     </AppShell>
   );
+}
+
+function percent(part: number, total: number) {
+  return total ? `${Math.round((part / total) * 100)}%` : '0%';
+}
+
+// Muchos anuncios comparten título ("Chatea con nosotros"); el código del enlace corto
+// (fb.me/XXXX) es lo que los distingue.
+function adLabel(ad: { sourceUrl: string | null; title: string | null }) {
+  const code = ad.sourceUrl?.replace(/[?#].*$/, '').split('/').filter(Boolean).pop();
+  return `${ad.title || 'Anuncio'}${code ? ` (${code})` : ''}`;
 }

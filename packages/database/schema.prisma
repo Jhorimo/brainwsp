@@ -338,6 +338,11 @@ model SystemSettings {
   id                 Int      @id @default(1)
   mediaRetentionDays Int      @default(7)
   maxMediaSizeBytes  Int      @default(67108864)
+  // "Subida grande temporal": mientras tempMaxMediaSizeUntil esté en el futuro, el envío
+  // saliente (panel, respuestas rápidas, automatizaciones, widget) usa tempMaxMediaSizeBytes;
+  // al vencer vuelve solo a maxMediaSizeBytes. No afecta a lo que se recibe por WhatsApp.
+  tempMaxMediaSizeBytes Int?
+  tempMaxMediaSizeUntil DateTime?
   updatedAt          DateTime @updatedAt
 }
 
@@ -596,6 +601,13 @@ model Conversation {
   pinned         Boolean            @default(false)
   // Espejo del "archivado" de WhatsApp: se sincroniza en ambos sentidos (ver SessionManager.setChatArchived y el evento chats.update).
   archived       Boolean            @default(false)
+  // Anuncio de Click-to-WhatsApp por el que entró el cliente (el último, si hizo clic en varios).
+  // Lo pone el worker desde contextInfo.externalAdReply; los chats viejos se rellenan con
+  // packages/database/backfill-ad-origin.sql. adAt = cuándo llegó ese mensaje de anuncio.
+  adSourceUrl    String?
+  adSourceId     String?
+  adTitle        String?
+  adAt           DateTime?
   unreadCount    Int                @default(0)
   lastMessageAt  DateTime           @default(now())
   createdAt      DateTime           @default(now())
@@ -618,6 +630,7 @@ model Conversation {
   @@index([companyId, status, lastMessageAt])
   @@index([assignedUserId, status])
   @@index([companyId, departmentId])
+  @@index([companyId, adAt])
 }
 
 model Message {

@@ -25,7 +25,7 @@ import { config } from './config.js';
 import { usePrismaAuthState } from './auth-state.js';
 import { maybeReplyWithAi } from './ai-agent.js';
 import { maybeRunFlow } from './automation-engine.js';
-import { extensionFromMime, extractMessage, jidToPhone } from './message-utils.js';
+import { extensionFromMime, extractMessage, jidToPhone, type AdContext } from './message-utils.js';
 import { aBuffer, descifrarEdicion, sinDispositivo } from './secret-edit.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
@@ -645,8 +645,16 @@ export class SessionManager {
     // history predates this deployment), so it's left unquoted rather than failing the whole
     // inbound message.
     // Mensaje que llega de un anuncio: se registra para poder verificar el origen en producción.
-    if (content.metadata?.ad) {
-      this.logger.info({ instanceId, waMessageId: message.key.id, ad: content.metadata.ad }, 'mensaje con origen de anuncio');
+    // Además queda como origen del chat (Conversation.ad*), que es lo que agrupa el dashboard.
+    const ad = content.metadata?.ad as AdContext | undefined;
+    if (ad) {
+      this.logger.info({ instanceId, waMessageId: message.key.id, ad }, 'mensaje con origen de anuncio');
+      if (ad.sourceType === 'ad' || ad.sourceUrl) {
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { adSourceUrl: ad.sourceUrl ?? null, adSourceId: ad.sourceId ?? null, adTitle: ad.title?.slice(0, 200) ?? null, adAt: new Date() },
+        });
+      }
     }
 
     let quotedMessageId: string | undefined;

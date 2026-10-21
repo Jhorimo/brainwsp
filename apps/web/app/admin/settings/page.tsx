@@ -6,7 +6,18 @@ import { AdminShell } from '@/components/admin-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch } from '@/lib/api';
 
-type SystemSettings = { mediaRetentionDays: number; maxMediaSizeBytes: number };
+type SystemSettings = {
+  mediaRetentionDays: number;
+  maxMediaSizeBytes: number;
+  tempMaxMediaSizeBytes: number | null;
+  tempMaxMediaSizeUntil: string | null;
+  effectiveMaxMediaSizeBytes: number;
+  // Techo del proxy (UPLOAD_PROXY_LIMIT_MB en el .env de la API); null si no se declaró.
+  proxyLimitBytes: number | null;
+};
+
+const MB = 1024 * 1024;
+const TEMP_HOURS = [1, 4, 24];
 
 type HeavyFile = {
   id: string;
@@ -31,13 +42,18 @@ export default function AdminSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [heavyFiles, setHeavyFiles] = useState<HeavyFile[]>([]);
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [tempMb, setTempMb] = useState('200');
+  const [tempHours, setTempHours] = useState(4);
+  const [tempSaving, setTempSaving] = useState(false);
   const [error, setError] = useState('');
 
   const loadSettings = () => {
     apiFetch<SystemSettings>('/system-settings')
       .then((s) => {
+        setSettings(s);
         setRetentionDays(String(s.mediaRetentionDays));
-        setMaxSizeMb(String(Math.round(s.maxMediaSizeBytes / (1024 * 1024))));
+        setMaxSizeMb(String(Math.round(s.maxMediaSizeBytes / MB)));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo cargar la configuración'));
   };
@@ -55,13 +71,14 @@ export default function AdminSettingsPage() {
     setSaved(false);
     setError('');
     try {
-      await apiFetch('/system-settings', {
+      const updated = await apiFetch<SystemSettings>('/system-settings', {
         method: 'PATCH',
         body: JSON.stringify({
           mediaRetentionDays: Number(retentionDays),
           maxMediaSizeBytes: Number(maxSizeMb) * 1024 * 1024,
         }),
       });
+      setSettings(updated);
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar');
@@ -69,6 +86,38 @@ export default function AdminSettingsPage() {
       setSaving(false);
     }
   };
+
+  const activateTemporary = async () => {
+    setTempSaving(true);
+    setError('');
+    try {
+      setSettings(await apiFetch<SystemSettings>('/system-settings/temporary-limit', {
+        method: 'POST',
+        body: JSON.stringify({ maxMediaSizeBytes: Number(tempMb) * MB, hours: tempHours }),
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo activar la subida grande');
+    } finally {
+      setTempSaving(false);
+    }
+  };
+
+  const clearTemporary = async () => {
+    setTempSaving(true);
+    setError('');
+    try {
+      setSettings(await apiFetch<SystemSettings>('/system-settings/temporary-limit', { method: 'DELETE' }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo desactivar la subida grande');
+    } finally {
+      setTempSaving(false);
+    }
+  };
+
+  const proxyMb = settings?.proxyLimitBytes ? Math.round(settings.proxyLimitBytes / MB) : null;
+  const tempUntil = settings?.tempMaxMediaSizeUntil ? new Date(settings.tempMaxMediaSizeUntil) : null;
+  const tempActive = !!(settings?.tempMaxMediaSizeBytes && tempUntil && tempUntil.getTime() > Date.now());
+  const overProxy = (mb: number) => proxyMb !== null && mb > proxyMb;
 
   const deleteFile = async (file: HeavyFile) => {
     const ok = await confirm(`¿Borrar "${file.fileName || 'este archivo'}" (${formatMb(file.fileSize)})? El mensaje se conserva, solo se elimina el archivo.`, { danger: true, confirmText: 'Borrar' });
@@ -95,6 +144,7 @@ export default function AdminSettingsPage() {
           <div className="field">
             <label>Tamaño máximo por archivo (MB)</label>
             <input type="number" min={1} max={500} value={maxSizeMb} onChange={(e) => setMaxSizeMb(e.target.value)} />
+            {overProxy(Number(maxSizeMb)) && <span className="settings-warning">Supera el techo del servidor ({proxyMb} MB): los archivos más grandes que eso fallarán con "Failed to fetch".</span>}
           </div>
         </div>
         <p style={{ color: 'var(--muted)', fontSize: 11, margin: '4px 0 14px' }}>
@@ -107,6 +157,60 @@ export default function AdminSettingsPage() {
           </button>
           {saved && <span style={{ color: 'var(--success-text)', fontSize: 11, alignSelf: 'center' }}>Guardado</span>}
         </div>
+      </section>
+
+      <section className="table-card" style={{ padding: 20 }}>
+        <h3 style={{ margin: '0 0 6px' }}>Subida grande temporal</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 11, margin: '0 0 14px' }}>
+          Sube el máximo solo por un tiempo para un envío puntual (un video para una automatización, por ejemplo). Al vencer vuelve
+          solo al tamaño normal. Aplica a lo que se envía (chats, respuestas rápidas, automatizaciones); lo que llega por WhatsApp
+          sigue con el máximo normal.
+        </p>
+        {tempActive ? (
+          <div className="settings-temp-active">
+            <span>
+              Activa: hasta <strong>{Math.round((settings!.tempMaxMediaSizeBytes || 0) / MB)} MB</strong> por archivo, hasta las{' '}
+              <strong>{tempUntil!.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</strong>.
+            </span>
+            <button type="button" className="button small" disabled={tempSaving} onClick={() => void clearTemporary()}>
+              {tempSaving ? 'Desactivando...' : 'Desactivar ahora'}
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="plan-form-grid">
+              <div className="field">
+                <label>Tamaño máximo temporal (MB)</label>
+                <input type="number" min={1} max={500} value={tempMb} onChange={(e) => setTempMb(e.target.value)} />
+                {overProxy(Number(tempMb)) && <span className="settings-warning">Supera el techo del servidor ({proxyMb} MB).</span>}
+              </div>
+              <div className="field">
+                <label>Duración</label>
+                <select value={tempHours} onChange={(e) => setTempHours(Number(e.target.value))}>
+                  {TEMP_HOURS.map((h) => <option key={h} value={h}>{h === 1 ? '1 hora' : `${h} horas`}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="modal-actions" style={{ padding: 0, border: 0, justifyContent: 'flex-start' }}>
+              <button type="button" className="button primary" disabled={tempSaving || !Number(tempMb)} onClick={() => void activateTemporary()}>
+                {tempSaving ? 'Activando...' : 'Activar'}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="table-card" style={{ padding: 20 }}>
+        <h3 style={{ margin: '0 0 10px' }}>Límites que no dependen de esta pantalla</h3>
+        <ul className="settings-limits">
+          <li>
+            <strong>Techo del servidor (proxy):</strong>{' '}
+            {proxyMb ? `${proxyMb} MB. Ningún archivo más grande puede subirse, aunque el máximo de arriba sea mayor.` : 'no declarado. Defínelo con UPLOAD_PROXY_LIMIT_MB en el .env de la API para que esta pantalla avise si lo superas.'}
+          </li>
+          <li><strong>Límite técnico de la API:</strong> 500 MB por archivo.</li>
+          <li><strong>WhatsApp:</strong> un video se envía como video hasta unos 16 MB; más grande llega como documento (hasta 2 GB). Para automatizaciones conviene comprimirlo (720p suele quedar en 30–60 MB).</li>
+          <li><strong>Memoria:</strong> la API carga el archivo completo en memoria al recibirlo; varios archivos de cientos de MB a la vez pueden saturar el servidor.</li>
+        </ul>
       </section>
 
       <section className="table-card">

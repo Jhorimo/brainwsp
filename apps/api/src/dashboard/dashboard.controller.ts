@@ -268,6 +268,43 @@ export class DashboardController {
   // salientes contados desde el 1 del mes en curso) y cuándo vence la licencia, para el banner
   // y las barras de uso del dashboard. La cuota "de hoy" se deriva de la mensual (÷30) en vez
   // de guardarse aparte, para no tener dos límites que se puedan desincronizar.
+  // Origen publicitario de los chats (anuncios de Click-to-WhatsApp, ver Conversation.ad*):
+  // chats que entraron por un anuncio en el rango (por adAt, la fecha del clic) frente a chats
+  // nuevos orgánicos (creados en el rango sin anuncio), y cuántos de los de anuncio llegaron a
+  // trato en el CRM. Agrupado por enlace del anuncio: muchos comparten el mismo título.
+  @Get('ad-origins')
+  async adOrigins(@CurrentUser() user: JwtUser, @Query('from') from?: string, @Query('to') to?: string) {
+    const { start, end } = this.resolveRange(from, to);
+    const [adConversations, organicChats] = await Promise.all([
+      this.prisma.conversation.findMany({
+        where: { companyId: user.companyId, adAt: { gte: start, lt: end } },
+        select: { id: true, adSourceUrl: true, adTitle: true },
+      }),
+      this.prisma.conversation.count({ where: { companyId: user.companyId, createdAt: { gte: start, lt: end }, adAt: null } }),
+    ]);
+    const convertedIds = adConversations.length
+      ? new Set((await this.prisma.lead.findMany({
+          where: { companyId: user.companyId, conversationId: { in: adConversations.map((c) => c.id) }, convertedDealId: { not: null } },
+          select: { conversationId: true },
+        })).map((lead) => lead.conversationId))
+      : new Set<string | null>();
+
+    const byAd = new Map<string, { sourceUrl: string | null; title: string | null; chats: number; converted: number }>();
+    for (const conversation of adConversations) {
+      const key = conversation.adSourceUrl || conversation.adTitle || 'sin-enlace';
+      const entry = byAd.get(key) || { sourceUrl: conversation.adSourceUrl, title: conversation.adTitle, chats: 0, converted: 0 };
+      entry.chats += 1;
+      if (convertedIds.has(conversation.id)) entry.converted += 1;
+      byAd.set(key, entry);
+    }
+    return {
+      adChats: adConversations.length,
+      organicChats,
+      convertedChats: adConversations.filter((c) => convertedIds.has(c.id)).length,
+      ads: [...byAd.values()].sort((a, b) => b.chats - a.chats),
+    };
+  }
+
   @Get('plan-usage')
   async planUsage(@CurrentUser() user: JwtUser) {
     const company = await this.prisma.company.findUniqueOrThrow({

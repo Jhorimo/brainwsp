@@ -18,3 +18,17 @@ export class UpdateSystemSettingsDto {
   @Max(500 * 1024 * 1024)
   maxMediaSizeBytes?: number;
 }
+
+export class TemporaryLimitDto {
+  // Mismo rango que maxMediaSizeBytes: el techo técnico de Multer es 500MB.
+  @IsInt()
+  @Min(1024 * 1024)
+  @Max(500 * 1024 * 1024)
+  maxMediaSizeBytes!: number;
+
+  // 1..72 horas: es para un envío puntual, no para dejarlo subido indefinidamente.
+  @IsInt()
+  @Min(1)
+  @Max(72)
+  hours!: number;
+}

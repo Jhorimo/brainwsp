@@ -36,6 +36,9 @@ type Conversation = {
   status: string;
   pinned: boolean;
   archived?: boolean;
+  // Anuncio de origen guardado en el chat (también en chats viejos, tras el rellenado).
+  adSourceUrl?: string | null;
+  adTitle?: string | null;
   aiEnabled: boolean;
   unreadCount: number;
   lastMessageAt: string;
@@ -468,13 +471,14 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
   );
 });
 
-const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing, onOpen, onTogglePin }: {
+const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing, onOpen, onTogglePin, onToggleArchive }: {
   conversation: Conversation;
   active: boolean;
   showAgent: boolean;
   typing: boolean;
   onOpen: (id: string) => void;
   onTogglePin: (e: { stopPropagation: () => void }, conversation: Conversation) => void;
+  onToggleArchive: (conversation: Conversation) => void;
 }) {
   const waiting = awaitingReply(conversation);
   return (
@@ -508,14 +512,24 @@ const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing,
                   <div className={`chat-time ${waiting ? `awaiting-${waiting.level}` : ''}`} title={fullDateTime(conversation.lastMessageAt)}><span className="chat-time-day">{chatListDayLabel(conversation.lastMessageAt)}</span><span>{clockTime(conversation.lastMessageAt)}</span></div>
                   {conversation.unreadCount > 0 && <div className="chat-unread">{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</div>}
                 </div>
-                <span
-                  className="chat-pin-toggle"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => void onTogglePin(e, conversation)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void onTogglePin(e, conversation); } }}
-                  title={conversation.pinned ? 'Desfijar chat' : 'Fijar chat'}
-                ><Pin size={13} /></span>
+                <span className="chat-row-actions">
+                  <span
+                    className="chat-pin-toggle"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => void onTogglePin(e, conversation)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void onTogglePin(e, conversation); } }}
+                    title={conversation.pinned ? 'Desfijar chat' : 'Fijar chat'}
+                  ><Pin size={13} /></span>
+                  <span
+                    className="chat-archive-toggle"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); onToggleArchive(conversation); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggleArchive(conversation); } }}
+                    title={conversation.archived ? 'Desarchivar chat (también en WhatsApp)' : 'Archivar chat (también en WhatsApp)'}
+                  >{conversation.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}</span>
+                </span>
               </button>
   );
 });
@@ -1274,6 +1288,7 @@ export default function ConversationsPage() {
   // Archivados: espejo del archivo de WhatsApp. Solo se ven en su pestaña; el resto de pestañas y
   // contadores parten de baseFiltered, que ya los excluye.
   const archivedList = useMemo(() => conversations.filter((item) => item.archived && matchesAgentFilter(item)), [conversations, matchesAgentFilter]);
+  const archivedUnreadCount = useMemo(() => archivedList.filter((item) => item.unreadCount > 0).length, [archivedList]);
   // Total across every conversation, not just the currently filtered/visible ones — same as
   // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
   // or filter is open.
@@ -1301,8 +1316,11 @@ export default function ConversationsPage() {
     departments.filter((department) => department.users?.some((item) => item.user.id === identity.id)).map((department) => department.id),
   ), [departments, identity.id]);
   const canManageIncident = useCallback((incident: Incident) => isAdmin || myDepartmentIds.has(incident.department.id), [isAdmin, myDepartmentIds]);
-  // Origen publicitario: lo trae el primer mensaje de la conversación que vino de un anuncio.
-  const adOrigin = useMemo(() => messages.find((m) => m.metadata?.ad)?.metadata?.ad ?? null, [messages]);
+  // Origen publicitario: el que guardó el worker en el chat, o si no, el de un mensaje cargado.
+  const adOrigin = useMemo<AdOrigin | null>(() => {
+    if (selected?.adSourceUrl || selected?.adTitle) return { sourceUrl: selected.adSourceUrl || undefined, title: selected.adTitle || undefined };
+    return messages.find((m) => m.metadata?.ad)?.metadata?.ad ?? null;
+  }, [messages, selected?.adSourceUrl, selected?.adTitle]);
   const conversationIncidents = useMemo(() => incidents.filter((incident) => incident.conversation.id === selectedId), [incidents, selectedId]);
   const conversationAppointments = useMemo(
     () => appointments.filter((a) => a.conversation?.id === selectedId).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
@@ -1746,10 +1764,7 @@ export default function ConversationsPage() {
 
   // Archivar/desarchivar: el API lo guarda y el worker lo replica en WhatsApp. Se actualiza la
   // lista al instante; si WhatsApp lo rechaza, el worker devuelve el valor por socket.
-  const toggleArchive = async () => {
-    if (!selectedId) return;
-    const id = selectedId;
-    const archived = !selected?.archived;
+  const setConversationArchived = async (id: string, archived: boolean) => {
     setConversations((current) => current.map((item) => item.id === id ? { ...item, archived } : item));
     try {
       await apiFetch(`/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) });
@@ -1758,6 +1773,7 @@ export default function ConversationsPage() {
       setError(err instanceof Error ? err.message : 'No se pudo archivar la conversación');
     }
   };
+  const toggleArchive = () => { if (selected) void setConversationArchived(selected.id, !selected.archived); };
 
   const updateAssignment = async (field: 'assignedUserId' | 'departmentId' | 'projectId', value: string) => {
     if (!selectedId) return;
@@ -2488,8 +2504,8 @@ export default function ConversationsPage() {
 
   // Handlers estables para los componentes memoizados (MessageList / ChatRow): llaman siempre a
   // la última versión, así que no quedan con estado viejo y no rompen el memo.
-  const latestHandlers = useRef({ renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin });
-  latestHandlers.current = { renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin };
+  const latestHandlers = useRef({ renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin, setConversationArchived });
+  latestHandlers.current = { renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin, setConversationArchived };
   const messageListApi = useMemo<MessageListApi>(() => ({
     renderMessageBody: (m) => latestHandlers.current.renderMessageBody(m),
     toggleMessageSelected: (id) => latestHandlers.current.toggleMessageSelected(id),
@@ -2501,6 +2517,7 @@ export default function ConversationsPage() {
     quoteSnippet: (q) => latestHandlers.current.quoteSnippet(q),
   }), []);
   const openChat = useCallback((id: string) => { setSelectedId(id); setMobileChatOpen(true); }, []);
+  const toggleConversationArchiveStable = useCallback((conversation: Conversation) => { void latestHandlers.current.setConversationArchived(conversation.id, !conversation.archived); }, []);
   const toggleConversationPinStable = useCallback((e: { stopPropagation: () => void }, conversation: Conversation) => latestHandlers.current.toggleConversationPin(e, conversation), []);
 
   return (
@@ -2531,7 +2548,7 @@ export default function ConversationsPage() {
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
               <button className={`chat-quick-tab chat-quick-tab-awaiting ${quickFilter === 'awaiting' ? 'active' : ''} ${awaitingTabCount > 0 ? 'has-items' : ''}`} onClick={() => setQuickFilter('awaiting')} title="Clientes que escribieron y llevan 1 día o más sin respuesta (el más atrasado primero)">Sin responder{awaitingTabCount > 0 && ` ${awaitingTabCount}`}</button>
               <div className="chat-quick-more">
-                <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter === 'archived' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
+                <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
               </div>
             </div>
             {filtersOpen && (
@@ -2580,8 +2597,23 @@ export default function ConversationsPage() {
             )}
           </div>
           <div className="chat-list-scroll">
+            {/* Igual que WhatsApp: una fila "Archivados" arriba del primer chat (solo si hay alguno)
+                que abre la lista de archivados; ahí la misma fila lleva la flecha para volver. */}
+            {quickFilter === 'archived' ? (
+              <button className="chat-archived-entry open" onClick={() => setQuickFilter('all')} title="Volver a los chats">
+                <ArrowLeft size={16} /><strong>Archivados</strong><span className="chat-archived-count">{archivedList.length}</span>
+              </button>
+            ) : quickFilter === 'all' && archivedList.length > 0 && (
+              <button className="chat-archived-entry" onClick={() => setQuickFilter('archived')} title="Ver chats archivados">
+                <Archive size={16} /><strong>Archivados</strong>
+                {archivedUnreadCount > 0 ? <span className="chat-unread">{archivedUnreadCount > 9 ? '9+' : archivedUnreadCount}</span> : <span className="chat-archived-count">{archivedList.length}</span>}
+              </button>
+            )}
+            {quickFilter === 'archived' && archivedList.length === 0 && (
+              <div className="empty-state"><div><strong>No hay chats archivados</strong>Archiva un chat desde su fila o desde la cabecera del chat.</div></div>
+            )}
             {filtered.map((conversation) => (
-              <ChatRow key={conversation.id} conversation={conversation} active={selectedId === conversation.id} showAgent={teamUsers.length > 1} typing={typingConversations.has(conversation.id)} onOpen={openChat} onTogglePin={toggleConversationPinStable} />
+              <ChatRow key={conversation.id} conversation={conversation} active={selectedId === conversation.id} showAgent={teamUsers.length > 1} typing={typingConversations.has(conversation.id)} onOpen={openChat} onTogglePin={toggleConversationPinStable} onToggleArchive={toggleConversationArchiveStable} />
             ))}
           </div>
         </aside>
@@ -2643,7 +2675,7 @@ export default function ConversationsPage() {
                 <button className="icon-button chat-header-action-extra" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
                 <button className="icon-button chat-header-action-extra" onClick={openAppointmentModal} title="Agendar una cita con este cliente"><CalendarDays size={16} /></button>
                 {selected.contact.phone ? <a className="icon-button chat-header-action-extra" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button chat-header-action-extra" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
-                <button className="icon-button" onClick={() => void toggleArchive()} title={selected.archived ? 'Desarchivar chat (también en WhatsApp)' : 'Archivar chat (también en WhatsApp)'}>{selected.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
+                <button className="icon-button" onClick={toggleArchive} title={selected.archived ? 'Desarchivar chat (también en WhatsApp)' : 'Archivar chat (también en WhatsApp)'}>{selected.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                 <button className="icon-button contact-panel-toggle" onClick={() => setContactPanelOpen(true)} title="Ver etiquetas, notas e incidencias"><Info size={16} /></button>
                 {/* En celular no caben los 7 botones de arriba — .chat-header-action-extra se
                     esconde por CSS a partir de 850px y sus acciones se agrupan acá, ya que este
@@ -3040,7 +3072,6 @@ export default function ConversationsPage() {
       <div ref={quickMenuRef} className="chat-quick-menu" style={{ position: 'fixed', top: quickMenuPos.top, left: quickMenuPos.left, right: 'auto' }}>
         <button className={quickFilter === 'groups' ? 'active' : ''} onClick={() => { setQuickFilter('groups'); setQuickMenuOpen(false); }}><Users size={14} />Grupos{groupTabCount > 0 && <span className="chat-quick-menu-count">{groupTabCount}</span>}</button>
         <button className={quickFilter === 'ai' ? 'active' : ''} onClick={() => { setQuickFilter('ai'); setQuickMenuOpen(false); }}><Bot size={14} />Con IA activa{aiTabCount > 0 && <span className="chat-quick-menu-count">{aiTabCount}</span>}</button>
-        <button className={quickFilter === 'archived' ? 'active' : ''} onClick={() => { setQuickFilter('archived'); setQuickMenuOpen(false); }}><Archive size={14} />Archivados{archivedList.length > 0 && <span className="chat-quick-menu-count">{archivedList.length}</span>}</button>
         {companyTags.length > 0 && <div className="chat-quick-menu-divider" />}
         {companyTags.map((tag) => (
           <button key={tag.id} className={quickFilter === `tag:${tag.id}` ? 'active' : ''} onClick={() => { setQuickFilter(`tag:${tag.id}`); setQuickMenuOpen(false); }}>

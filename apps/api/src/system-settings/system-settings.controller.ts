@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { UpdateSystemSettingsDto } from './system-settings.dto';
+import { TemporaryLimitDto, UpdateSystemSettingsDto } from './system-settings.dto';
 import { SystemSettingsService } from './system-settings.service';
 
 @ApiTags('System Settings')
@@ -17,12 +17,23 @@ export class SystemSettingsController {
 
   @Get()
   get() {
-    return this.service.get();
+    return this.service.getForAdmin();
   }
 
   @Patch()
-  update(@Body() dto: UpdateSystemSettingsDto) {
-    return this.service.update(dto);
+  async update(@Body() dto: UpdateSystemSettingsDto) {
+    await this.service.update(dto);
+    return this.service.getForAdmin();
+  }
+
+  @Post('temporary-limit')
+  setTemporaryLimit(@Body() dto: TemporaryLimitDto) {
+    return this.service.setTemporaryLimit(dto.maxMediaSizeBytes, dto.hours);
+  }
+
+  @Delete('temporary-limit')
+  clearTemporaryLimit() {
+    return this.service.clearTemporaryLimit();
   }
 
   @Get('heaviest-files')
