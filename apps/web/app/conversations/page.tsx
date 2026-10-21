@@ -115,9 +115,11 @@ function conversationsQuery(
   stageIds: string[],
   tagIds: string[],
   contactsOnly?: boolean,
+  archivedOnly?: boolean,
 ) {
   const params = new URLSearchParams();
   if (contactsOnly) params.set('contactsOnly', '1');
+  if (archivedOnly) params.set('archived', 'only');
   if (preset !== 'all') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -491,6 +493,7 @@ const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing,
                     {conversation.instance.provider === 'CLIENERA_CHAT' && (
                       <span className="channel-badge" title="Clienera Chat">💬</span>
                     )}
+                    {conversation.archived && <span className="chat-archived-tag" title="Chat archivado">Archivado</span>}
                     {conversation.contact.tags && conversation.contact.tags.length > 0 && (
                       <span className="chat-row-tags">
                         {conversation.contact.tags.slice(0, 4).map(({ tag }) => <span key={tag.id} className="tag-dot" style={{ background: tag.color }} title={tag.name} />)}
@@ -527,7 +530,7 @@ const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing,
                     tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); onToggleArchive(conversation); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggleArchive(conversation); } }}
-                    title={conversation.archived ? 'Desarchivar chat (también en WhatsApp)' : 'Archivar chat (también en WhatsApp)'}
+                    title={conversation.archived ? 'Desarchivar chat (solo en el panel)' : 'Archivar chat (solo en el panel; no cambia el WhatsApp del teléfono)'}
                   >{conversation.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}</span>
                 </span>
               </button>
@@ -732,7 +735,14 @@ export default function ConversationsPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // La fila "Archivados" se cuenta en el servidor: la bandeja ya no trae los archivados.
+  const [archivedSummary, setArchivedSummary] = useState({ count: 0, unread: 0 });
+  const loadArchivedSummary = useCallback(() => {
+    apiFetch<{ count: number; unread: number }>('/conversations/archived-summary').then(setArchivedSummary).catch(() => undefined);
+  }, []);
+
   const loadConversations = useCallback(async () => {
+    loadArchivedSummary();
     try {
       const data = await apiFetch<Conversation[]>(`/conversations${listQueryRef.current}`);
       setConversations((current) => {
@@ -754,7 +764,7 @@ export default function ConversationsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar las conversaciones');
     }
-  }, []);
+  }, [loadArchivedSummary]);
 
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
@@ -838,6 +848,8 @@ export default function ConversationsPage() {
   // does the actual matching (contact name/phone AND message content), unlike the instant
   // in-memory filters below.
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  // Vista "Archivados" (como WhatsApp): la lista se pide al servidor con archived=only.
+  const archivedView = quickFilter === 'archived';
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
@@ -848,9 +860,9 @@ export default function ConversationsPage() {
   // whatever's currently selected.
   const listQueryRef = useRef('');
   useEffect(() => {
-    listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags);
-  }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags]);
-  useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, loadConversations]);
+    listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, false, archivedView);
+  }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, archivedView]);
+  useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, archivedView, loadConversations]);
 
   // "Compartir contacto" busca su propia lista en el servidor con SOLO el texto tipeado, en
   // vez de reusar `conversations` — ese array ya viene filtrado por lo que esté activo en la
@@ -926,6 +938,7 @@ export default function ConversationsPage() {
       }
     });
     socket.on('conversation.updated', (updated: Conversation) => {
+      if ('archived' in updated) loadArchivedSummary();
       setConversations((current) => sortConversations(current.map((item) => item.id === updated.id ? { ...item, ...updated } : item)));
     });
     // Parchear en memoria en vez de recargar el hilo. Este evento se publica por EMPRESA
@@ -1284,11 +1297,11 @@ export default function ConversationsPage() {
   // client-side sobre la lista ya cargada.
   const matchesAgentFilter = useCallback((item: Conversation) =>
     !filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent), [filterAgent]);
-  const baseFiltered = useMemo(() => conversations.filter((item) => !item.archived && matchesAgentFilter(item)), [conversations, matchesAgentFilter]);
+  // En una búsqueda los archivados también salen (marcados), igual que en el buscador de WhatsApp.
+  const baseFiltered = useMemo(() => conversations.filter((item) => (!item.archived || !!debouncedSearch) && matchesAgentFilter(item)), [conversations, matchesAgentFilter, debouncedSearch]);
   // Archivados: espejo del archivo de WhatsApp. Solo se ven en su pestaña; el resto de pestañas y
   // contadores parten de baseFiltered, que ya los excluye.
   const archivedList = useMemo(() => conversations.filter((item) => item.archived && matchesAgentFilter(item)), [conversations, matchesAgentFilter]);
-  const archivedUnreadCount = useMemo(() => archivedList.filter((item) => item.unreadCount > 0).length, [archivedList]);
   // Total across every conversation, not just the currently filtered/visible ones — same as
   // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
   // or filter is open.
@@ -1762,12 +1775,13 @@ export default function ConversationsPage() {
     }
   };
 
-  // Archivar/desarchivar: el API lo guarda y el worker lo replica en WhatsApp. Se actualiza la
-  // lista al instante; si WhatsApp lo rechaza, el worker devuelve el valor por socket.
+  // Archivar/desarchivar: solo en el panel (ver ConversationsService.update: replicarlo en
+  // WhatsApp desvinculaba el dispositivo). Se actualiza la lista al instante.
   const setConversationArchived = async (id: string, archived: boolean) => {
     setConversations((current) => current.map((item) => item.id === id ? { ...item, archived } : item));
     try {
       await apiFetch(`/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) });
+      loadArchivedSummary();
     } catch (err) {
       setConversations((current) => current.map((item) => item.id === id ? { ...item, archived: !archived } : item));
       setError(err instanceof Error ? err.message : 'No se pudo archivar la conversación');
@@ -2603,10 +2617,10 @@ export default function ConversationsPage() {
               <button className="chat-archived-entry open" onClick={() => setQuickFilter('all')} title="Volver a los chats">
                 <ArrowLeft size={16} /><strong>Archivados</strong><span className="chat-archived-count">{archivedList.length}</span>
               </button>
-            ) : quickFilter === 'all' && archivedList.length > 0 && (
+            ) : quickFilter === 'all' && !debouncedSearch && archivedSummary.count > 0 && (
               <button className="chat-archived-entry" onClick={() => setQuickFilter('archived')} title="Ver chats archivados">
                 <Archive size={16} /><strong>Archivados</strong>
-                {archivedUnreadCount > 0 ? <span className="chat-unread">{archivedUnreadCount > 9 ? '9+' : archivedUnreadCount}</span> : <span className="chat-archived-count">{archivedList.length}</span>}
+                {archivedSummary.unread > 0 ? <span className="chat-unread">{archivedSummary.unread > 9 ? '9+' : archivedSummary.unread}</span> : <span className="chat-archived-count">{archivedSummary.count}</span>}
               </button>
             )}
             {quickFilter === 'archived' && archivedList.length === 0 && (
@@ -2675,7 +2689,7 @@ export default function ConversationsPage() {
                 <button className="icon-button chat-header-action-extra" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
                 <button className="icon-button chat-header-action-extra" onClick={openAppointmentModal} title="Agendar una cita con este cliente"><CalendarDays size={16} /></button>
                 {selected.contact.phone ? <a className="icon-button chat-header-action-extra" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button chat-header-action-extra" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
-                <button className="icon-button" onClick={toggleArchive} title={selected.archived ? 'Desarchivar chat (también en WhatsApp)' : 'Archivar chat (también en WhatsApp)'}>{selected.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
+                <button className="icon-button" onClick={toggleArchive} title={selected.archived ? 'Desarchivar chat (solo en el panel)' : 'Archivar chat (solo en el panel; no cambia el WhatsApp del teléfono)'}>{selected.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                 <button className="icon-button contact-panel-toggle" onClick={() => setContactPanelOpen(true)} title="Ver etiquetas, notas e incidencias"><Info size={16} /></button>
                 {/* En celular no caben los 7 botones de arriba — .chat-header-action-extra se
                     esconde por CSS a partir de 850px y sus acciones se agrupan acá, ya que este

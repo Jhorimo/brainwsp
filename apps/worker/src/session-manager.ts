@@ -1151,37 +1151,6 @@ export class SessionManager {
     }
   }
 
-  // Aplica en WhatsApp el archivado que el agente ya guardó en la base desde el panel. Si
-  // WhatsApp no lo acepta (línea desconectada, error de sincronización) se devuelve la base a
-  // su estado anterior para que el panel no diga algo distinto al teléfono, y se relanza el error.
-  async setChatArchived(instanceId: string, conversationId: string, archive: boolean) {
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, instanceId },
-      select: { id: true, companyId: true, departmentId: true, contact: { select: { waId: true } } },
-    });
-    if (!conversation) return;
-    try {
-      const socket = this.sockets.get(instanceId);
-      if (!socket) throw new Error('La línea de WhatsApp no está conectada');
-      const last = await this.prisma.message.findFirst({
-        where: { conversationId },
-        orderBy: { createdAt: 'desc' },
-        select: { waMessageId: true, direction: true, createdAt: true },
-      });
-      // Sin ningún mensaje no hay referencia que WhatsApp pueda usar: queda solo en el panel.
-      if (!last) return;
-      const jid = conversation.contact.waId;
-      await socket.chatModify(
-        { archive, lastMessages: [{ key: { remoteJid: jid, id: last.waMessageId, fromMe: last.direction === 'OUTBOUND' }, messageTimestamp: Math.floor(last.createdAt.getTime() / 1000) }] },
-        jid,
-      );
-    } catch (error) {
-      await this.prisma.conversation.update({ where: { id: conversationId }, data: { archived: !archive } }).catch(() => {});
-      await this.realtime.publish(conversation.companyId, 'conversation.updated', { id: conversationId, archived: !archive, departmentId: conversation.departmentId }, conversation.departmentId);
-      throw error;
-    }
-  }
-
   private async scheduleReconnect(instanceId: string, statusCode?: number) {
     if (this.reconnectTimers.has(instanceId) || this.manualStops.has(instanceId)) return;
     const instance = await this.prisma.whatsAppInstance.findUnique({

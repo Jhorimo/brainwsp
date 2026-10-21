@@ -594,7 +594,8 @@ model Conversation {
   // en session-manager.ts, justo antes de maybeRunFlow/maybeReplyWithAi).
   botDisabledUntil DateTime?
   pinned         Boolean            @default(false)
-  // Espejo del "archivado" de WhatsApp: se sincroniza en ambos sentidos (ver SessionManager.setChatArchived y el evento chats.update).
+  // Archivado del panel. Lo archivado desde el teléfono se refleja aquí (chats.update), pero el panel
+  // NO lo replica en WhatsApp: chatModify desvinculaba el dispositivo (ver ConversationsService.update).
   archived       Boolean            @default(false)
   // Anuncio de Click-to-WhatsApp por el que entró el cliente (el último, si hizo clic en varios).
   // Lo pone el worker desde contextInfo.externalAdReply; los chats viejos se rellenan con

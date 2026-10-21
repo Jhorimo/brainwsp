@@ -21,7 +21,9 @@ export class CommandWorker {
     if (job.name === 'disconnect') return this.sessions.disconnect(job.data.instanceId);
     if (job.name === 'logout') return this.sessions.logout(job.data.instanceId);
     if (job.name === 'refresh-avatars') return this.sessions.forceRefreshAvatars(job.data.instanceId);
-    if (job.name === 'archive-chat') return this.sessions.setChatArchived(job.data.instanceId, job.data.conversationId!, !!job.data.archive);
+    // Desactivado: chatModify(archive) hacía que WhatsApp desvinculara el dispositivo (ver
+    // ConversationsService.update). Se ignora por si queda algún job viejo en la cola.
+    if (job.name === 'archive-chat') return;
     throw new Error(`Unknown command: ${job.name}`);
   }
 

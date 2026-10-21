@@ -81,6 +81,20 @@ export class ConversationsService {
     return departmentIds;
   }
 
+  async archivedSummary(user: JwtUser) {
+    const restriction = await this.resolveDepartmentRestriction(user);
+    const where = {
+      companyId: user.companyId,
+      archived: true,
+      ...(restriction ? { OR: [{ departmentId: null }, { departmentId: { in: restriction } }] } : {}),
+    };
+    const [count, unread] = await Promise.all([
+      this.prisma.conversation.count({ where }),
+      this.prisma.conversation.count({ where: { ...where, unreadCount: { gt: 0 } } }),
+    ]);
+    return { count, unread };
+  }
+
   async list(
     user: JwtUser,
     status?: ConversationStatus,
@@ -92,6 +106,7 @@ export class ConversationsService {
     stageIds?: string,
     tagIds?: string,
     contactsOnly?: string,
+    archived?: string,
   ) {
     const restriction = await this.resolveDepartmentRestriction(user);
     // Cada filtro llega como CSV (?departmentIds=a,b,c) y se traduce a "in" — vacio u
@@ -113,6 +128,10 @@ export class ConversationsService {
     // mas que en medio de otra palabra de un chat) y el orden es alfabetico en vez de
     // anclados-primero-por-actividad (que no tiene sentido para elegir a quien compartir).
     const onlyContacts = contactsOnly === '1' || contactsOnly === 'true';
+    // Archivados como WhatsApp: la bandeja normal no los trae (así no ocupan los 100 lugares de
+    // la lista), archived=only trae solo ellos (la vista "Archivados"), y una búsqueda o
+    // "Compartir contacto" los incluye a todos, igual que el buscador de WhatsApp.
+    const archivedWhere = archived === 'only' ? { archived: true } : search || onlyContacts ? {} : { archived: false };
     // Matches WhatsApp Web's own chat search: the contact's name/phone, OR any message in the
     // conversation (not just the last one shown in the sidebar preview) mentioning the term.
     // Combined with the department restriction via `AND` (not a second top-level `OR`, which
@@ -120,6 +139,7 @@ export class ConversationsService {
     const conversations = await this.prisma.conversation.findMany({
       where: {
         companyId: user.companyId,
+        ...archivedWhere,
         ...(status ? { status } : {}),
         ...(lastMessageAt ? { lastMessageAt } : {}),
         AND: [
@@ -774,14 +794,10 @@ export class ConversationsService {
         ...(departmentChanged ? { stageId: nextStageId } : {}),
       },
     });
-    // Archivar/desarchivar se replica en WhatsApp (chatModify) vía el worker; si no lo acepta,
-    // el worker devuelve el campo a su valor anterior y lo avisa por socket.
-    if (data.archived !== undefined && data.archived !== current.archived) {
-      const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: current.instanceId }, select: { provider: true } });
-      if (instance && instance.provider !== 'CLIENERA_CHAT') {
-        await this.queues.commands.add('archive-chat', { instanceId: current.instanceId, conversationId, archive: data.archived }, { removeOnComplete: 100, removeOnFail: 100 });
-      }
-    }
+    // Archivar/desarchivar queda SOLO en el panel. Replicarlo en WhatsApp (chatModify, comando
+    // 'archive-chat' del worker) hacía que WhatsApp desvinculara el dispositivo: 401 "Stream
+    // Errored (conflict)" ~2 s después de archivar (2026-10-21, líneas Marcia Cuba y Wendy).
+    // Lo que se archiva desde el teléfono sí se sigue reflejando (chats.update, solo lectura).
     const hydrated = await this.getHydrated(companyId, conversationId);
     // Notify both the old and new department rooms so an agent watching either side
     // of a reassignment sees the conversation appear/disappear from their list live.
