@@ -112,6 +112,11 @@ export class UpdateConversationDto {
   @IsBoolean()
   pinned?: boolean;
 
+  @ApiPropertyOptional({ description: 'Archiva/desarchiva el chat; se refleja también en WhatsApp.' })
+  @IsOptional()
+  @IsBoolean()
+  archived?: boolean;
+
   @ApiPropertyOptional({ description: 'Activa/desactiva el agente IA para esta conversación.' })
   @IsOptional()
   @IsBoolean()

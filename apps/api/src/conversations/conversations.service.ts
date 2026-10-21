@@ -731,7 +731,7 @@ export class ConversationsService {
   async update(
     user: JwtUser,
     conversationId: string,
-    data: { status?: ConversationStatus; assignedUserId?: string | null; departmentId?: string | null; projectId?: string | null; pinned?: boolean; aiEnabled?: boolean },
+    data: { status?: ConversationStatus; assignedUserId?: string | null; departmentId?: string | null; projectId?: string | null; pinned?: boolean; archived?: boolean; aiEnabled?: boolean },
   ) {
     const companyId = user.companyId;
     const current = await this.getOwned(user, conversationId);
@@ -774,6 +774,14 @@ export class ConversationsService {
         ...(departmentChanged ? { stageId: nextStageId } : {}),
       },
     });
+    // Archivar/desarchivar se replica en WhatsApp (chatModify) vía el worker; si no lo acepta,
+    // el worker devuelve el campo a su valor anterior y lo avisa por socket.
+    if (data.archived !== undefined && data.archived !== current.archived) {
+      const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: current.instanceId }, select: { provider: true } });
+      if (instance && instance.provider !== 'CLIENERA_CHAT') {
+        await this.queues.commands.add('archive-chat', { instanceId: current.instanceId, conversationId, archive: data.archived }, { removeOnComplete: 100, removeOnFail: 100 });
+      }
+    }
     const hydrated = await this.getHydrated(companyId, conversationId);
     // Notify both the old and new department rooms so an agent watching either side
     // of a reassignment sees the conversation appear/disappear from their list live.

@@ -1,4 +1,4 @@
-import { getContentType, normalizeMessageContent, type WAMessage } from '@whiskeysockets/baileys';
+import { getContentType, normalizeMessageContent, type proto, type WAMessage } from '@whiskeysockets/baileys';
 import { MessageType } from '@prisma/client';
 
 export function jidToPhone(jid: string): string | null {
@@ -20,7 +20,7 @@ function toFileSize(value: number | { toNumber(): number } | null | undefined): 
   return typeof value === 'number' ? value : value.toNumber();
 }
 
-export function extractMessage(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string; fileSize?: number; metadata?: Record<string, unknown>; quotedStanzaId?: string } {
+function extractContent(message: WAMessage): { type: MessageType; body?: string; caption?: string; fileName?: string; mimeType?: string; fileSize?: number; metadata?: Record<string, unknown>; quotedStanzaId?: string } {
   // Baileys' getContentType only reads the outermost key — messages sent with
   // disappearing messages on, as "view once", or synced from another device arrive
   // wrapped (ephemeralMessage/viewOnceMessage*/deviceSentMessage) and need unwrapping
@@ -123,4 +123,51 @@ export function extractMessage(message: WAMessage): { type: MessageType; body?: 
     default:
       return { type: MessageType.UNKNOWN };
   }
+}
+
+// Origen publicitario (anuncio de Click-to-WhatsApp de Facebook/Instagram). WhatsApp lo manda en
+// el `contextInfo` del PRIMER mensaje de la conversación, sin `stanzaId` (no es una cita: por eso
+// el detector de citas no lo ve). Va en metadata.ad solo si el mensaje trae algo de esto.
+export type AdContext = {
+  title?: string;
+  body?: string;
+  sourceType?: string;
+  sourceId?: string;
+  sourceUrl?: string;
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  ctwaClid?: string;
+  conversionSource?: string;
+  conversionApp?: string;
+};
+
+function extractAdContext(message: WAMessage): AdContext | undefined {
+  const content = normalizeMessageContent(message.message);
+  if (!content) return undefined;
+  const type = getContentType(content);
+  if (!type) return undefined;
+  const info = (content[type] as { contextInfo?: proto.IContextInfo | null } | null | undefined)?.contextInfo;
+  if (!info) return undefined;
+  const ad = info.externalAdReply;
+  const conversionSource = info.entryPointConversionSource || undefined;
+  if (!ad && !conversionSource) return undefined;
+  const clean = (value?: string | null) => value || undefined;
+  return {
+    title: clean(ad?.title),
+    body: clean(ad?.body),
+    sourceType: clean(ad?.sourceType),
+    sourceId: clean(ad?.sourceId),
+    sourceUrl: clean(ad?.sourceUrl),
+    mediaUrl: clean(ad?.mediaUrl),
+    thumbnailUrl: clean(ad?.thumbnailUrl),
+    ctwaClid: clean(ad?.ctwaClid),
+    conversionSource,
+    conversionApp: clean(info.entryPointConversionApp),
+  };
+}
+
+export function extractMessage(message: WAMessage): ReturnType<typeof extractContent> {
+  const result = extractContent(message);
+  const ad = extractAdContext(message);
+  return ad ? { ...result, metadata: { ...result.metadata, ad } } : result;
 }

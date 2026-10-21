@@ -333,6 +333,17 @@ export class SessionManager {
       }
     });
 
+    // Archivar/desarchivar un chat desde el teléfono (u otro dispositivo vinculado) llega como
+    // `chats.update` con `archived`. Solo cambia el estado de chats que ya existen en el panel.
+    socket.ev.on('chats.update', async (updates) => {
+      for (const update of updates) {
+        if (!update.id || typeof update.archived !== 'boolean') continue;
+        await this.handleChatArchiveChange(instanceId, update.id, update.archived).catch((error) => {
+          childLogger.warn({ err: error, waId: update.id }, 'failed to handle chat archive change');
+        });
+      }
+    });
+
     // WhatsApp never routes a group's photo change through `contacts.update` — groups get
     // their own `groups.update` event instead, and unlike contacts.update it doesn't say
     // which field changed (subject, description, settings or photo), so just re-fetch the
@@ -592,7 +603,7 @@ export class SessionManager {
     const conversation = existingConversation
       ? await this.prisma.conversation.update({
           where: { id: existingConversation.id },
-          data: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
+          data: { lastMessageAt: new Date(), unreadCount: { increment: 1 }, archived: false },
         })
       : await this.prisma.conversation.create({
           data: {
@@ -633,6 +644,11 @@ export class SessionManager {
     // Nothing to resolve for a reply to a message this instance has never seen (e.g. the
     // history predates this deployment), so it's left unquoted rather than failing the whole
     // inbound message.
+    // Mensaje que llega de un anuncio: se registra para poder verificar el origen en producción.
+    if (content.metadata?.ad) {
+      this.logger.info({ instanceId, waMessageId: message.key.id, ad: content.metadata.ad }, 'mensaje con origen de anuncio');
+    }
+
     let quotedMessageId: string | undefined;
     if (content.quotedStanzaId) {
       const quoted = await this.prisma.message.findUnique({
@@ -1113,6 +1129,48 @@ export class SessionManager {
     });
     for (const conversation of conversations) {
       await this.realtime.publish(companyId, 'conversation.updated', conversation, conversation.departmentId);
+    }
+  }
+
+  private async handleChatArchiveChange(instanceId: string, waId: string, archived: boolean) {
+    const conversations = await this.prisma.conversation.findMany({
+      where: { instanceId, archived: !archived, contact: { waId } },
+      select: { id: true, companyId: true, departmentId: true },
+    });
+    for (const conversation of conversations) {
+      await this.prisma.conversation.update({ where: { id: conversation.id }, data: { archived } });
+      await this.realtime.publish(conversation.companyId, 'conversation.updated', { id: conversation.id, archived, departmentId: conversation.departmentId }, conversation.departmentId);
+    }
+  }
+
+  // Aplica en WhatsApp el archivado que el agente ya guardó en la base desde el panel. Si
+  // WhatsApp no lo acepta (línea desconectada, error de sincronización) se devuelve la base a
+  // su estado anterior para que el panel no diga algo distinto al teléfono, y se relanza el error.
+  async setChatArchived(instanceId: string, conversationId: string, archive: boolean) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, instanceId },
+      select: { id: true, companyId: true, departmentId: true, contact: { select: { waId: true } } },
+    });
+    if (!conversation) return;
+    try {
+      const socket = this.sockets.get(instanceId);
+      if (!socket) throw new Error('La línea de WhatsApp no está conectada');
+      const last = await this.prisma.message.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { waMessageId: true, direction: true, createdAt: true },
+      });
+      // Sin ningún mensaje no hay referencia que WhatsApp pueda usar: queda solo en el panel.
+      if (!last) return;
+      const jid = conversation.contact.waId;
+      await socket.chatModify(
+        { archive, lastMessages: [{ key: { remoteJid: jid, id: last.waMessageId, fromMe: last.direction === 'OUTBOUND' }, messageTimestamp: Math.floor(last.createdAt.getTime() / 1000) }] },
+        jid,
+      );
+    } catch (error) {
+      await this.prisma.conversation.update({ where: { id: conversationId }, data: { archived: !archive } }).catch(() => {});
+      await this.realtime.publish(conversation.companyId, 'conversation.updated', { id: conversationId, archived: !archive, departmentId: conversation.departmentId }, conversation.departmentId);
+      throw error;
     }
   }
 

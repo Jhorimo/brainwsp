@@ -133,6 +133,9 @@ function MultiLineChart({ series, formatLabel, hidden, onToggle }: {
   );
 }
 
+// Máximo de filas visibles: con más, la tarjeta crecería según los datos de cada empresa y rompería el
+// alineado de la fila; el resto se resume en "+N más".
+const RANK_LIMIT = 8;
 function RankList({ icon: Icon, items, emptyLabel, subtitle, highlight }: { icon: typeof Building2; items: Array<{ id: string; label: string; sub?: string; count: number }>; emptyLabel: string; subtitle?: string; highlight?: { label: string; sub: string; count: number } }) {
   const max = Math.max(1, highlight?.count || 0, ...items.map((item) => item.count));
   return (
@@ -148,7 +151,7 @@ function RankList({ icon: Icon, items, emptyLabel, subtitle, highlight }: { icon
           <span className="rank-count warning">{highlight.count}</span>
         </div>
       )}
-      {items.map((item) => (
+      {items.slice(0, RANK_LIMIT).map((item) => (
         <div className="activity-row rank-row" key={item.id}>
           <div className="activity-icon"><Icon size={16} /></div>
           <div className="activity-copy">
@@ -159,6 +162,7 @@ function RankList({ icon: Icon, items, emptyLabel, subtitle, highlight }: { icon
           <span className="rank-count">{item.count}</span>
         </div>
       ))}
+      {items.length > RANK_LIMIT && <div className="rank-more">+{items.length - RANK_LIMIT} más</div>}
       {!items.length && !highlight?.count && <div className="empty-state"><div><strong>{emptyLabel}</strong></div></div>}
     </div>
   );
@@ -362,6 +366,8 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {/* Orden por secciones: volumen → pipeline → atención → distribución. Las filas de dos o tres
+          tarjetas se estiran a la misma altura (ver .dashboard-grid* en globals.css) para no dejar huecos. */}
       <div className="dashboard-grid">
         <section className="card">
           <div className="card-header"><div><h2>Actividad de mensajes</h2><p>Recibidos vs. enviados por día — {rangeLabel.toLowerCase()}</p></div><span className="status-pill success"><span className="status-dot" />Sistema activo</span></div>
@@ -396,20 +402,17 @@ export default function DashboardPage() {
           </div>
         </section>
         <section className="card">
-          <div className="card-header"><div><h2>Arquitectura activa</h2><p>Servicios principales del MVP</p></div></div>
-          <div className="card-body activity-list">
-            {[
-              ['API Gateway', 'NestJS · APP KEY / AUTH KEY'],
-              ['WhatsApp Worker', 'Baileys · Session Manager'],
-              ['Message Queue', 'BullMQ · Redis'],
-              ['Realtime', 'Socket.IO · Redis Pub/Sub'],
-              ['Persistencia', 'PostgreSQL · Prisma'],
-            ].map(([name, detail]) => <div className="activity-row" key={name}><div className="activity-icon"><Activity size={16} /></div><div className="activity-copy"><strong>{name}</strong><span>{detail}</span></div><span className="activity-time">Ready</span></div>)}
+          <div className="card-header"><div><h2>Resumen del periodo</h2><p>{rangeLabel}</p></div></div>
+          <div className="card-body activity-list dashboard-fill">
+            <div className="activity-row"><div className="activity-icon"><CircleUserRound size={16} /></div><div className="activity-copy"><strong>Mensajes recibidos</strong><span>Volumen entrante — clave para medir campañas de ads</span></div><span className="activity-time">{stats.inboundInRange}</span></div>
+            <div className="activity-row"><div className="activity-icon"><Send size={16} /></div><div className="activity-copy"><strong>Mensajes enviados</strong><span>Total saliente — humanos + IA + API</span></div><span className="activity-time">{stats.outboundInRange}</span></div>
+            <div className="activity-row"><div className="activity-icon"><Bot size={16} /></div><div className="activity-copy"><strong>Respondidos por IA</strong><span>Mensajes que no tocó un humano</span></div><span className="activity-time">{stats.aiMessagesInRange}</span></div>
+            <div className="activity-row"><div className="activity-icon"><UserRoundCheck size={16} /></div><div className="activity-copy"><strong>Agentes con actividad</strong><span>Enviaron al menos un mensaje</span></div><span className="activity-time">{agentPerf.filter((item) => item.messagesSent > 0).length}</span></div>
           </div>
         </section>
       </div>
 
-      <div className="dashboard-grid">
+      <div className="dashboard-full">
         <section className="card">
           <div className="card-header"><div><h2>Pipeline por departamento</h2><p>Dónde se está atascando cada área — solo conversaciones abiertas</p></div></div>
           <div className="card-body">
@@ -440,18 +443,9 @@ export default function DashboardPage() {
             {!pipeline.length && <div className="empty-state"><div><strong>Aún no hay pipelines configurados</strong>Crea etapas por departamento desde Equipo y agentes.</div></div>}
           </div>
         </section>
-        <section className="card">
-          <div className="card-header"><div><h2>Etiquetas</h2><p>Contactos marcados con cada etiqueta</p></div></div>
-          <RankList
-            icon={TagIcon}
-            emptyLabel="Aún no hay etiquetas en uso"
-            subtitle="Etiqueta"
-            items={breakdown.byTag.map((tag) => ({ id: tag.id, label: tag.name, count: tag.contacts }))}
-          />
-        </section>
       </div>
 
-      <div className="dashboard-grid">
+      <div className="dashboard-grid-2">
         <section className="card">
           <div className="card-header"><div><h2>Mensajes por agente</h2><p>Control de personal — quién está atendiendo, {rangeLabel.toLowerCase()}</p></div></div>
           <RankList
@@ -491,13 +485,13 @@ export default function DashboardPage() {
           />
         </section>
         <section className="card">
-          <div className="card-header"><div><h2>Resumen del periodo</h2><p>{rangeLabel}</p></div></div>
-          <div className="card-body activity-list">
-            <div className="activity-row"><div className="activity-icon"><CircleUserRound size={16} /></div><div className="activity-copy"><strong>Mensajes recibidos</strong><span>Volumen entrante — clave para medir campañas de ads</span></div><span className="activity-time">{stats.inboundInRange}</span></div>
-            <div className="activity-row"><div className="activity-icon"><Send size={16} /></div><div className="activity-copy"><strong>Mensajes enviados</strong><span>Total saliente — humanos + IA + API</span></div><span className="activity-time">{stats.outboundInRange}</span></div>
-            <div className="activity-row"><div className="activity-icon"><Bot size={16} /></div><div className="activity-copy"><strong>Respondidos por IA</strong><span>Mensajes que no tocó un humano</span></div><span className="activity-time">{stats.aiMessagesInRange}</span></div>
-            <div className="activity-row"><div className="activity-icon"><UserRoundCheck size={16} /></div><div className="activity-copy"><strong>Agentes con actividad</strong><span>Enviaron al menos un mensaje</span></div><span className="activity-time">{agentPerf.filter((item) => item.messagesSent > 0).length}</span></div>
-          </div>
+          <div className="card-header"><div><h2>Etiquetas</h2><p>Contactos marcados con cada etiqueta</p></div></div>
+          <RankList
+            icon={TagIcon}
+            emptyLabel="Aún no hay etiquetas en uso"
+            subtitle="Etiqueta"
+            items={breakdown.byTag.map((tag) => ({ id: tag.id, label: tag.name, count: tag.contacts }))}
+          />
         </section>
       </div>
     </AppShell>

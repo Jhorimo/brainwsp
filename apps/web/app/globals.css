@@ -686,8 +686,15 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .stat-label { color: var(--muted); font-size: 11px; margin-top: 15px; }
 .stat-value { margin-top: 3px; font-size: 26px; line-height: 1; font-weight: 800; letter-spacing: -.7px; }
 .stat-meta { color: var(--text-neutral-2); font-size: 10px; margin-top: 7px; }
-.dashboard-grid { margin-top: 18px; display: grid; grid-template-columns: 1.65fr 1fr; gap: 18px; }
-.dashboard-grid-3 { margin-top: 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.dashboard-grid { margin-top: 18px; display: grid; grid-template-columns: 1.65fr 1fr; gap: 18px; align-items: stretch; }
+.dashboard-grid-2 { margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+.dashboard-grid-3 { margin-top: 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+.dashboard-full { margin-top: 18px; }
+/* Las tarjetas de una misma fila llenan todo el alto de la fila: sin huecos bajo la más corta. */
+.dashboard-grid > .card, .dashboard-grid-2 > .card, .dashboard-grid-3 > .card { display: flex; flex-direction: column; min-width: 0; margin: 0; }
+.dashboard-grid > .card > .card-body, .dashboard-grid-2 > .card > .card-body, .dashboard-grid-3 > .card > .card-body { flex: 1; }
+.dashboard-fill { align-content: space-between; }
+.rank-more { padding-top: 4px; text-align: center; font-size: 10px; color: var(--muted); }
 .rank-row .activity-copy { min-width: 0; }
 .rank-bar { height: 4px; border-radius: 3px; background: var(--surface-neutral-4); margin-top: 6px; overflow: hidden; }
 .rank-bar-fill { height: 100%; background: var(--chart-rank); border-radius: 3px; }
@@ -697,6 +704,7 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .rank-bar-fill.warning { background: var(--warning); }
 .rank-count.warning { color: var(--warning-text); }
 @media (max-width: 1200px) { .dashboard-grid-3 { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .dashboard-grid-2 { grid-template-columns: 1fr; } }
 .pipeline-dept { padding: 14px 0; border-top: 1px solid var(--border-neutral-3); }
 .pipeline-dept:first-child { border-top: 0; padding-top: 4px; }
 .pipeline-dept-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }

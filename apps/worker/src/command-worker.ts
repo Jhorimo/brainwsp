@@ -16,11 +16,12 @@ export class CommandWorker {
     this.worker.on('failed', (job, error) => this.logger.error({ err: error, jobId: job?.id }, 'command failed'));
   }
 
-  private async process(job: Job<{ instanceId: string }>) {
+  private async process(job: Job<{ instanceId: string; conversationId?: string; archive?: boolean }>) {
     if (job.name === 'connect') return this.sessions.connect(job.data.instanceId);
     if (job.name === 'disconnect') return this.sessions.disconnect(job.data.instanceId);
     if (job.name === 'logout') return this.sessions.logout(job.data.instanceId);
     if (job.name === 'refresh-avatars') return this.sessions.forceRefreshAvatars(job.data.instanceId);
+    if (job.name === 'archive-chat') return this.sessions.setChatArchived(job.data.instanceId, job.data.conversationId!, !!job.data.archive);
     throw new Error(`Unknown command: ${job.name}`);
   }
 

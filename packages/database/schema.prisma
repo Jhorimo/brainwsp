@@ -594,6 +594,8 @@ model Conversation {
   // en session-manager.ts, justo antes de maybeRunFlow/maybeReplyWithAi).
   botDisabledUntil DateTime?
   pinned         Boolean            @default(false)
+  // Espejo del "archivado" de WhatsApp: se sincroniza en ambos sentidos (ver SessionManager.setChatArchived y el evento chats.update).
+  archived       Boolean            @default(false)
   unreadCount    Int                @default(0)
   lastMessageAt  DateTime           @default(now())
   createdAt      DateTime           @default(now())

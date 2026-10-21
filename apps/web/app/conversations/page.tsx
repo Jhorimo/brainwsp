@@ -4,7 +4,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { AlertCircle, AlertTriangle, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, Volume2, VolumeX, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Archive, ArchiveRestore, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, Megaphone, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, Volume2, VolumeX, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { Theme as EmojiTheme, type EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
@@ -35,6 +35,7 @@ type Conversation = {
   id: string;
   status: string;
   pinned: boolean;
+  archived?: boolean;
   aiEnabled: boolean;
   unreadCount: number;
   lastMessageAt: string;
@@ -47,7 +48,8 @@ type Conversation = {
   messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin };
+type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; ctwaClid?: string; conversionSource?: string };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
@@ -348,6 +350,12 @@ function handleMediaError(e: SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.style.display = 'none';
   const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
   if (fallback) fallback.style.display = 'flex';
+}
+// Muchos anuncios comparten título ("Chatea con nosotros"); lo que los distingue es el código del
+// enlace corto (fb.me/XXXX), así que se agrega al texto del chip.
+function adOriginLabel(ad: AdOrigin) {
+  const code = ad.sourceUrl?.replace(/[?#].*$/, '').split('/').filter(Boolean).pop();
+  return `Anuncio${ad.title ? `: ${ad.title}` : ''}${code ? ` (${code})` : ''}`;
 }
 function parseVCard(vcard?: string) {
   if (!vcard) return { name: undefined as string | undefined, phones: [] as string[] };
@@ -861,7 +869,7 @@ export default function ConversationsPage() {
           ? 0
           : (found?.unreadCount || 0) + (event.message.direction === 'INBOUND' ? 1 : 0);
         const next: Conversation = found
-          ? { ...found, unreadCount: unread, lastMessageAt: event.message.createdAt, messages: [event.message] }
+          ? { ...found, ...(event.message.direction === 'INBOUND' ? { archived: false } : {}), unreadCount: unread, lastMessageAt: event.message.createdAt, messages: [event.message] }
           : { ...event.conversation, unreadCount: unread, messages: [event.message] };
         return sortConversations([next, ...current.filter((item) => item.id !== next.id)]);
       });
@@ -1260,9 +1268,12 @@ export default function ConversationsPage() {
   // Departamento/proyecto/etapa/etiquetas ya vienen filtrados desde el servidor (ver
   // conversationsQuery) — solo queda por aplicar aca filterAgent, que sigue siendo
   // client-side sobre la lista ya cargada.
-  const baseFiltered = useMemo(() => conversations.filter((item) =>
-    !filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent)
-  ), [conversations, filterAgent]);
+  const matchesAgentFilter = useCallback((item: Conversation) =>
+    !filterAgent || (filterAgent === 'unassigned' ? !item.assignedUser : item.assignedUser?.id === filterAgent), [filterAgent]);
+  const baseFiltered = useMemo(() => conversations.filter((item) => !item.archived && matchesAgentFilter(item)), [conversations, matchesAgentFilter]);
+  // Archivados: espejo del archivo de WhatsApp. Solo se ven en su pestaña; el resto de pestañas y
+  // contadores parten de baseFiltered, que ya los excluye.
+  const archivedList = useMemo(() => conversations.filter((item) => item.archived && matchesAgentFilter(item)), [conversations, matchesAgentFilter]);
   // Total across every conversation, not just the currently filtered/visible ones — same as
   // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
   // or filter is open.
@@ -1272,7 +1283,7 @@ export default function ConversationsPage() {
   const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
   const aiTabCount = useMemo(() => baseFiltered.filter((item) => item.aiEnabled).length, [baseFiltered]);
   const awaitingTabCount = baseFiltered.filter((item) => awaitingReply(item)).length;
-  const filtered = useMemo(() => baseFiltered.filter((item) => {
+  const filtered = useMemo(() => (quickFilter === 'archived' ? archivedList : baseFiltered).filter((item) => {
     if (quickFilter === 'unread') return item.unreadCount > 0;
     if (quickFilter === 'pinned') return item.pinned;
     if (quickFilter === 'groups') return isGroupContact(item.contact);
@@ -1280,7 +1291,7 @@ export default function ConversationsPage() {
     if (quickFilter === 'awaiting') return !!awaitingReply(item);
     if (quickFilter.startsWith('tag:')) return item.contact.tags?.some((t) => t.tag.id === quickFilter.slice(4));
     return true;
-  }).sort((a, b) => quickFilter === 'awaiting' ? new Date(a.lastMessageAt).getTime() - new Date(b.lastMessageAt).getTime() : 0), [baseFiltered, quickFilter]);
+  }).sort((a, b) => quickFilter === 'awaiting' ? new Date(a.lastMessageAt).getTime() - new Date(b.lastMessageAt).getTime() : 0), [baseFiltered, archivedList, quickFilter]);
   const hasActiveFilters = !!(filterAgent || filterDept.length || filterProject.length || filterStage.length || filterTags.length || dateFilter !== 'all');
 
   const isAdmin = identity.role === 'OWNER' || identity.role === 'ADMIN';
@@ -1290,6 +1301,8 @@ export default function ConversationsPage() {
     departments.filter((department) => department.users?.some((item) => item.user.id === identity.id)).map((department) => department.id),
   ), [departments, identity.id]);
   const canManageIncident = useCallback((incident: Incident) => isAdmin || myDepartmentIds.has(incident.department.id), [isAdmin, myDepartmentIds]);
+  // Origen publicitario: lo trae el primer mensaje de la conversación que vino de un anuncio.
+  const adOrigin = useMemo(() => messages.find((m) => m.metadata?.ad)?.metadata?.ad ?? null, [messages]);
   const conversationIncidents = useMemo(() => incidents.filter((incident) => incident.conversation.id === selectedId), [incidents, selectedId]);
   const conversationAppointments = useMemo(
     () => appointments.filter((a) => a.conversation?.id === selectedId).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
@@ -1728,6 +1741,21 @@ export default function ConversationsPage() {
     } catch (err) {
       setAppointments((current) => [...current, appointment]);
       setError(err instanceof Error ? err.message : 'No se pudo cancelar la cita');
+    }
+  };
+
+  // Archivar/desarchivar: el API lo guarda y el worker lo replica en WhatsApp. Se actualiza la
+  // lista al instante; si WhatsApp lo rechaza, el worker devuelve el valor por socket.
+  const toggleArchive = async () => {
+    if (!selectedId) return;
+    const id = selectedId;
+    const archived = !selected?.archived;
+    setConversations((current) => current.map((item) => item.id === id ? { ...item, archived } : item));
+    try {
+      await apiFetch(`/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) });
+    } catch (err) {
+      setConversations((current) => current.map((item) => item.id === id ? { ...item, archived: !archived } : item));
+      setError(err instanceof Error ? err.message : 'No se pudo archivar la conversación');
     }
   };
 
@@ -2503,7 +2531,7 @@ export default function ConversationsPage() {
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
               <button className={`chat-quick-tab chat-quick-tab-awaiting ${quickFilter === 'awaiting' ? 'active' : ''} ${awaitingTabCount > 0 ? 'has-items' : ''}`} onClick={() => setQuickFilter('awaiting')} title="Clientes que escribieron y llevan 1 día o más sin respuesta (el más atrasado primero)">Sin responder{awaitingTabCount > 0 && ` ${awaitingTabCount}`}</button>
               <div className="chat-quick-more">
-                <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
+                <button ref={quickMenuButtonRef} className={`chat-quick-tab chat-quick-tab-icon ${quickFilter === 'groups' || quickFilter === 'ai' || quickFilter === 'archived' || quickFilter.startsWith('tag:') ? 'active' : ''}`} onClick={() => setQuickMenuOpen((v) => !v)} title="Más filtros"><ChevronDown size={13} /></button>
               </div>
             </div>
             {filtersOpen && (
@@ -2598,6 +2626,14 @@ export default function ConversationsPage() {
                   {selected.contact.sourceUrl && (
                     <span className="chat-header-source" title={selected.contact.sourceUrl}><Globe size={11} />{hostnameFromUrl(selected.contact.sourceUrl)}</span>
                   )}
+                  {adOrigin && (
+                    <span className="chat-header-source" title={[adOrigin.title, adOrigin.body, adOrigin.sourceUrl].filter(Boolean).join(' · ')}>
+                      <Megaphone size={11} />
+                      {adOrigin.sourceUrl
+                        ? <a href={adOrigin.sourceUrl} target="_blank" rel="noreferrer">{adOriginLabel(adOrigin)}</a>
+                        : <>{adOriginLabel(adOrigin)}</>}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="chat-header-actions">
@@ -2607,6 +2643,7 @@ export default function ConversationsPage() {
                 <button className="icon-button chat-header-action-extra" onClick={openIncidentModal} title="Reportar una incidencia de este cliente"><AlertTriangle size={16} /></button>
                 <button className="icon-button chat-header-action-extra" onClick={openAppointmentModal} title="Agendar una cita con este cliente"><CalendarDays size={16} /></button>
                 {selected.contact.phone ? <a className="icon-button chat-header-action-extra" href={`tel:${selected.contact.phone}`} title={`Llamar a ${selected.contact.phone}`}><Phone size={16} /></a> : <button className="icon-button chat-header-action-extra" disabled title="No hay un número de teléfono para este contacto"><Phone size={16} /></button>}
+                <button className="icon-button" onClick={() => void toggleArchive()} title={selected.archived ? 'Desarchivar chat (también en WhatsApp)' : 'Archivar chat (también en WhatsApp)'}>{selected.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                 <button className="icon-button contact-panel-toggle" onClick={() => setContactPanelOpen(true)} title="Ver etiquetas, notas e incidencias"><Info size={16} /></button>
                 {/* En celular no caben los 7 botones de arriba — .chat-header-action-extra se
                     esconde por CSS a partir de 850px y sus acciones se agrupan acá, ya que este
@@ -3003,6 +3040,7 @@ export default function ConversationsPage() {
       <div ref={quickMenuRef} className="chat-quick-menu" style={{ position: 'fixed', top: quickMenuPos.top, left: quickMenuPos.left, right: 'auto' }}>
         <button className={quickFilter === 'groups' ? 'active' : ''} onClick={() => { setQuickFilter('groups'); setQuickMenuOpen(false); }}><Users size={14} />Grupos{groupTabCount > 0 && <span className="chat-quick-menu-count">{groupTabCount}</span>}</button>
         <button className={quickFilter === 'ai' ? 'active' : ''} onClick={() => { setQuickFilter('ai'); setQuickMenuOpen(false); }}><Bot size={14} />Con IA activa{aiTabCount > 0 && <span className="chat-quick-menu-count">{aiTabCount}</span>}</button>
+        <button className={quickFilter === 'archived' ? 'active' : ''} onClick={() => { setQuickFilter('archived'); setQuickMenuOpen(false); }}><Archive size={14} />Archivados{archivedList.length > 0 && <span className="chat-quick-menu-count">{archivedList.length}</span>}</button>
         {companyTags.length > 0 && <div className="chat-quick-menu-divider" />}
         {companyTags.map((tag) => (
           <button key={tag.id} className={quickFilter === `tag:${tag.id}` ? 'active' : ''} onClick={() => { setQuickFilter(`tag:${tag.id}`); setQuickMenuOpen(false); }}>
