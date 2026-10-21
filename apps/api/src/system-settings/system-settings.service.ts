@@ -5,11 +5,6 @@ import { StorageService } from '../storage/storage.service';
 
 const SETTINGS_ROW_ID = 1;
 
-function effectiveMaxMediaSize(settings: { maxMediaSizeBytes: number; tempMaxMediaSizeBytes: number | null; tempMaxMediaSizeUntil: Date | null }) {
-  const tempActive = !!settings.tempMaxMediaSizeBytes && !!settings.tempMaxMediaSizeUntil && settings.tempMaxMediaSizeUntil > new Date();
-  return tempActive ? Math.max(settings.tempMaxMediaSizeBytes!, settings.maxMediaSizeBytes) : settings.maxMediaSizeBytes;
-}
-
 @Injectable()
 export class SystemSettingsService {
   private readonly logger = new Logger(SystemSettingsService.name);
@@ -30,7 +25,7 @@ export class SystemSettingsService {
     });
   }
 
-  async update(patch: { mediaRetentionDays?: number; maxMediaSizeBytes?: number; tempMaxMediaSizeBytes?: number | null; tempMaxMediaSizeUntil?: Date | null }) {
+  async update(patch: { mediaRetentionDays?: number; maxMediaSizeBytes?: number }) {
     return this.prisma.systemSettings.upsert({
       where: { id: SETTINGS_ROW_ID },
       update: patch,
@@ -38,34 +33,11 @@ export class SystemSettingsService {
     });
   }
 
-  // Lo que ve el panel de superadmin: los ajustes, el límite que se aplica en este momento y el
-  // techo del proxy (nginx/Cloudflare), que no se controla desde aquí — se declara en
-  // UPLOAD_PROXY_LIMIT_MB para que el panel avise si el máximo configurado lo supera.
-  async getForAdmin() {
-    const settings = await this.get();
-    const proxyMb = Number(process.env.UPLOAD_PROXY_LIMIT_MB);
-    return {
-      ...settings,
-      effectiveMaxMediaSizeBytes: effectiveMaxMediaSize(settings),
-      proxyLimitBytes: Number.isFinite(proxyMb) && proxyMb > 0 ? proxyMb * 1024 * 1024 : null,
-    };
-  }
-
-  async setTemporaryLimit(maxBytes: number, hours: number) {
-    const until = new Date(Date.now() + hours * 3_600_000);
-    await this.update({ tempMaxMediaSizeBytes: maxBytes, tempMaxMediaSizeUntil: until });
-    return this.getForAdmin();
-  }
-
-  async clearTemporaryLimit() {
-    await this.update({ tempMaxMediaSizeBytes: null, tempMaxMediaSizeUntil: null });
-    return this.getForAdmin();
-  }
-
-  // Límite del envío saliente (panel, respuestas rápidas, automatizaciones, widget). El worker
-  // lee maxMediaSizeBytes directo por Prisma para la descarga entrante, sin la subida temporal.
+  // Reusado por el worker via Prisma directo (mismo esquema, otro proceso) para el
+  // limite en la descarga entrante — aca solo se usa para el envio saliente del panel.
   async maxMediaSizeBytes(): Promise<number> {
-    return effectiveMaxMediaSize(await this.get());
+    const settings = await this.get();
+    return settings.maxMediaSizeBytes;
   }
 
   async heaviestFiles() {

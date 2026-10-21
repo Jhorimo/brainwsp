@@ -338,11 +338,6 @@ model SystemSettings {
   id                 Int      @id @default(1)
   mediaRetentionDays Int      @default(7)
   maxMediaSizeBytes  Int      @default(67108864)
-  // "Subida grande temporal": mientras tempMaxMediaSizeUntil esté en el futuro, el envío
-  // saliente (panel, respuestas rápidas, automatizaciones, widget) usa tempMaxMediaSizeBytes;
-  // al vencer vuelve solo a maxMediaSizeBytes. No afecta a lo que se recibe por WhatsApp.
-  tempMaxMediaSizeBytes Int?
-  tempMaxMediaSizeUntil DateTime?
   updatedAt          DateTime @updatedAt
 }
 

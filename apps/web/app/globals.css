@@ -2241,8 +2241,3 @@ tr:last-child td { border-bottom: 0; }
   outline-offset: 2px;
 }
 
-/* Configuración de superadmin: avisos de límites de tamaño. */
-.settings-warning { display: block; margin-top: 6px; font-size: 10.5px; color: var(--danger-text); }
-.settings-temp-active { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--warning); background: var(--warning-soft); color: var(--warning-text); font-size: 12px; }
-.settings-limits { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 11.5px; color: var(--muted); }
-.settings-limits strong { color: var(--text); }
