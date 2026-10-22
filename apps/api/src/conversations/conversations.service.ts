@@ -81,11 +81,35 @@ export class ConversationsService {
     return departmentIds;
   }
 
-  async archivedSummary(user: JwtUser) {
+  async lines(user: JwtUser) {
+    const restriction = await this.resolveDepartmentRestriction(user);
+    const [instances, unread] = await Promise.all([
+      this.prisma.whatsAppInstance.findMany({
+        where: { companyId: user.companyId, active: true },
+        select: { id: true, name: true, status: true, provider: true, lastConnectedAt: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.conversation.groupBy({
+        by: ['instanceId'],
+        where: {
+          companyId: user.companyId,
+          archived: false,
+          unreadCount: { gt: 0 },
+          ...(restriction ? { OR: [{ departmentId: null }, { departmentId: { in: restriction } }] } : {}),
+        },
+        _count: { _all: true },
+      }),
+    ]);
+    const unreadByInstance = new Map(unread.map((row) => [row.instanceId, row._count._all]));
+    return instances.map((instance) => ({ ...instance, unreadChats: unreadByInstance.get(instance.id) || 0 }));
+  }
+
+  async archivedSummary(user: JwtUser, instanceId?: string) {
     const restriction = await this.resolveDepartmentRestriction(user);
     const where = {
       companyId: user.companyId,
       archived: true,
+      ...(instanceId ? { instanceId } : {}),
       ...(restriction ? { OR: [{ departmentId: null }, { departmentId: { in: restriction } }] } : {}),
     };
     const [count, unread] = await Promise.all([
@@ -107,6 +131,7 @@ export class ConversationsService {
     tagIds?: string,
     contactsOnly?: string,
     archived?: string,
+    instanceId?: string,
   ) {
     const restriction = await this.resolveDepartmentRestriction(user);
     // Cada filtro llega como CSV (?departmentIds=a,b,c) y se traduce a "in" — vacio u
@@ -140,6 +165,8 @@ export class ConversationsService {
       where: {
         companyId: user.companyId,
         ...archivedWhere,
+        // Selector de línea de la bandeja: solo los chats de ese número (vacío = todas).
+        ...(instanceId && !onlyContacts ? { instanceId } : {}),
         ...(status ? { status } : {}),
         ...(lastMessageAt ? { lastMessageAt } : {}),
         AND: [

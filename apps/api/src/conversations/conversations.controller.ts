@@ -38,15 +38,23 @@ export class ConversationsController {
     @Query('tagIds') tagIds?: string,
     @Query('contactsOnly') contactsOnly?: string,
     @Query('archived') archived?: string,
+    @Query('instanceId') instanceId?: string,
   ) {
-    return this.service.list(user, status, from, to, q, departmentIds, projectIds, stageIds, tagIds, contactsOnly, archived);
+    return this.service.list(user, status, from, to, q, departmentIds, projectIds, stageIds, tagIds, contactsOnly, archived, instanceId);
   }
 
   // Cuántos chats archivados hay (y cuántos con mensajes sin leer) para la fila "Archivados"
   // de la bandeja — la lista principal ya no los trae, así que el panel no puede contarlos.
   @Get('archived-summary')
-  archivedSummary(@CurrentUser() user: JwtUser) {
-    return this.service.archivedSummary(user);
+  archivedSummary(@CurrentUser() user: JwtUser, @Query('instanceId') instanceId?: string) {
+    return this.service.archivedSummary(user, instanceId);
+  }
+
+  // Líneas de la empresa para el selector de la bandeja, con cuántos chats sin leer tiene cada
+  // una. Liviano a propósito: GET /instances recorre los mensajes de la empresa.
+  @Get('lines')
+  lines(@CurrentUser() user: JwtUser) {
+    return this.service.lines(user);
   }
 
   // Antes de las rutas ':id' para que "contact-mentions" no se lea como un id.

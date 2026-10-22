@@ -53,6 +53,9 @@ type Conversation = {
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
 type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin };
 type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; ctwaClid?: string; conversionSource?: string };
+type LineSummary = { id: string; name: string; status: string; provider: string; lastConnectedAt: string | null; unreadChats: number };
+const LINE_FILTER_KEY = 'brainwsp_line_filter';
+const lineStatusLabel: Record<string, string> = { CONNECTED: 'conectada', CONNECTING: 'conectando', RECONNECTING: 'reconectando', QR_PENDING: 'esperando QR', DISCONNECTED: 'desconectada', LOGGED_OUT: 'sin vincular', ERROR: 'con error' };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
@@ -116,10 +119,12 @@ function conversationsQuery(
   tagIds: string[],
   contactsOnly?: boolean,
   archivedOnly?: boolean,
+  instanceId?: string,
 ) {
   const params = new URLSearchParams();
   if (contactsOnly) params.set('contactsOnly', '1');
   if (archivedOnly) params.set('archived', 'only');
+  if (instanceId) params.set('instanceId', instanceId);
   if (preset !== 'all') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -561,6 +566,13 @@ export default function ConversationsPage() {
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<DatePreset>('all');
   const [quickFilter, setQuickFilter] = useState<string>('all');
+  // Selector de línea: con varios números en la cuenta, la bandeja muestra uno a la vez ('' =
+  // todas). Por defecto el último elegido en este navegador, o la primera línea vinculada.
+  const [lines, setLines] = useState<LineSummary[]>([]);
+  const [lineFilter, setLineFilter] = useState('');
+  const [linesReady, setLinesReady] = useState(false);
+  const lineFilterRef = useRef('');
+  useEffect(() => { lineFilterRef.current = lineFilter; }, [lineFilter]);
   // Re-evalúa "sin responder" (depende de la hora actual) sin esperar a que llegue un mensaje.
   const [, setAwaitingTick] = useState(0);
   useEffect(() => {
@@ -738,11 +750,54 @@ export default function ConversationsPage() {
   // La fila "Archivados" se cuenta en el servidor: la bandeja ya no trae los archivados.
   const [archivedSummary, setArchivedSummary] = useState({ count: 0, unread: 0 });
   const loadArchivedSummary = useCallback(() => {
-    apiFetch<{ count: number; unread: number }>('/conversations/archived-summary').then(setArchivedSummary).catch(() => undefined);
+    const line = lineFilterRef.current;
+    apiFetch<{ count: number; unread: number }>(`/conversations/archived-summary${line ? `?instanceId=${line}` : ''}`).then(setArchivedSummary).catch(() => undefined);
   }, []);
+
+  const loadLines = useCallback(() => {
+    apiFetch<LineSummary[]>('/conversations/lines').then(setLines).catch(() => undefined);
+  }, []);
+  // Primera carga: elige la línea inicial antes de pedir la bandeja, para no mostrar todo
+  // mezclado un instante y luego saltar a una sola línea.
+  useEffect(() => {
+    apiFetch<LineSummary[]>('/conversations/lines')
+      .then((data) => {
+        setLines(data);
+        let saved: string | null = null;
+        try { saved = localStorage.getItem(LINE_FILTER_KEY); } catch { /* modo privado */ }
+        // Enlace directo a un chat (?id=, ej. desde Pipelines): todas las líneas, para que ese chat
+        // aparezca sea de la línea que sea.
+        const linkedChat = new URLSearchParams(window.location.search).has('id');
+        const initial = data.length <= 1 || linkedChat
+          ? ''
+          : saved === 'all'
+            ? ''
+            : saved && data.some((line) => line.id === saved)
+              ? saved
+              : (data.find((line) => line.lastConnectedAt) || data[0]).id;
+        lineFilterRef.current = initial;
+        setLineFilter(initial);
+      })
+      .catch(() => undefined)
+      .finally(() => setLinesReady(true));
+  }, []);
+  // Los contadores de no leídos del selector se refrescan como mucho cada 3 s, aunque entren
+  // muchos mensajes seguidos.
+  const linesRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLinesRefresh = useCallback(() => {
+    if (linesRefreshTimer.current) return;
+    linesRefreshTimer.current = setTimeout(() => { linesRefreshTimer.current = null; loadLines(); }, 3000);
+  }, [loadLines]);
+  const changeLineFilter = (value: string) => {
+    try { localStorage.setItem(LINE_FILTER_KEY, value || 'all'); } catch { /* modo privado */ }
+    lineFilterRef.current = value;
+    setLineFilter(value);
+    setSelectedId(null);
+  };
 
   const loadConversations = useCallback(async () => {
     loadArchivedSummary();
+    scheduleLinesRefresh();
     try {
       const data = await apiFetch<Conversation[]>(`/conversations${listQueryRef.current}`);
       setConversations((current) => {
@@ -764,7 +819,7 @@ export default function ConversationsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar las conversaciones');
     }
-  }, [loadArchivedSummary]);
+  }, [loadArchivedSummary, scheduleLinesRefresh]);
 
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
@@ -860,9 +915,9 @@ export default function ConversationsPage() {
   // whatever's currently selected.
   const listQueryRef = useRef('');
   useEffect(() => {
-    listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, false, archivedView);
-  }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, archivedView]);
-  useEffect(() => { void loadConversations(); }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, archivedView, loadConversations]);
+    listQueryRef.current = conversationsQuery(dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, false, archivedView, lineFilter);
+  }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, archivedView, lineFilter]);
+  useEffect(() => { if (linesReady) void loadConversations(); }, [dateFilter, debouncedSearch, filterDept, filterProject, filterStage, filterTags, archivedView, lineFilter, linesReady, loadConversations]);
 
   // "Compartir contacto" busca su propia lista en el servidor con SOLO el texto tipeado, en
   // vez de reusar `conversations` — ese array ya viene filtrado por lo que esté activo en la
@@ -889,7 +944,12 @@ export default function ConversationsPage() {
     // forces a full refetch to make sure the list can't get stuck showing stale data forever.
     socket.on('connect', () => void loadConversations());
     socket.on('message.created', (event: { message: Message; conversation: Conversation }) => {
-      setConversations((current) => {
+      if (event.message.direction === 'INBOUND') scheduleLinesRefresh();
+      // Con una línea elegida, los chats de otras líneas no entran a la bandeja (solo suman en el
+      // selector). Si el evento no dice su línea, se muestra igual, para no perder nada.
+      const eventLine = event.conversation.instance?.id ?? (event.conversation as { instanceId?: string }).instanceId;
+      const otherLine = !!lineFilterRef.current && !!eventLine && eventLine !== lineFilterRef.current;
+      if (!otherLine) setConversations((current) => {
         const found = current.find((item) => item.id === event.conversation.id);
         const unread = selectedIdRef.current === event.conversation.id
           ? 0
@@ -983,7 +1043,7 @@ export default function ConversationsPage() {
       typingTimersRef.current.forEach((timer) => clearTimeout(timer));
       typingTimersRef.current.clear();
     };
-  }, [loadMessages, loadConversations]);
+  }, [loadMessages, loadConversations, scheduleLinesRefresh]);
 
   // Anclar al último mensaje SOLO si el agente ya estaba abajo. Antes se forzaba en cada
   // cambio de `messages`, y eso incluye cosas que no son mensajes nuevos: cada acuse de
@@ -1639,7 +1699,8 @@ export default function ConversationsPage() {
       const instances = await apiFetch<Array<{ id: string; name: string; status: string }>>('/instances');
       const connected = instances.filter((instance) => instance.status === 'CONNECTED');
       setNewChatInstances(connected);
-      setNewChatInstanceId((current) => current && connected.some((i) => i.id === current) ? current : connected[0]?.id || '');
+      const preferred = lineFilterRef.current && connected.some((i) => i.id === lineFilterRef.current) ? lineFilterRef.current : '';
+      setNewChatInstanceId((current) => preferred || (current && connected.some((i) => i.id === current) ? current : connected[0]?.id || ''));
     } catch {
       setNewChatInstances([]);
     }
@@ -2545,6 +2606,19 @@ export default function ConversationsPage() {
               <h2>Conversaciones</h2>
               <button className="button small" onClick={() => void openNewChatModal()} title="Iniciar una conversación con un número nuevo"><Plus size={14} />Nuevo chat</button>
             </div>
+            {lines.length > 1 && (
+              <div className="line-selector">
+                <Phone size={14} />
+                <select value={lineFilter} onChange={(e) => changeLineFilter(e.target.value)} aria-label="Línea de WhatsApp" title="Elige qué número ver">
+                  {lines.map((line) => (
+                    <option key={line.id} value={line.id}>
+                      {line.provider === 'CLIENERA_CHAT' ? '💬 ' : ''}{line.name}{line.provider !== 'CLIENERA_CHAT' && line.status !== 'CONNECTED' ? ` (${lineStatusLabel[line.status] || line.status})` : ''}{line.unreadChats ? ` · ${line.unreadChats} sin leer` : ''}
+                    </option>
+                  ))}
+                  <option value="">Todas las líneas{lines.some((line) => line.unreadChats) ? ` · ${lines.reduce((sum, line) => sum + line.unreadChats, 0)} sin leer` : ''}</option>
+                </select>
+              </div>
+            )}
             <div className="searchbox-row">
               <div className="searchbox clearable">
                 <Search size={16} />

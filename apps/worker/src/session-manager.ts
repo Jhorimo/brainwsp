@@ -49,6 +49,8 @@ const AVATAR_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export class SessionManager {
   private readonly sockets = new Map<string, WASocket>();
   private readonly reconnectTimers = new Map<string, NodeJS.Timeout>();
+  // Reintentos de connect() cuando el lease de Redis está ocupado (ver scheduleLeaseRetry).
+  private readonly leaseRetryTimers = new Map<string, NodeJS.Timeout>();
   private readonly leaseTimers = new Map<string, NodeJS.Timeout>();
   private readonly manualStops = new Set<string>();
   private readonly leaseLost = new Set<string>();
@@ -125,8 +127,10 @@ export class SessionManager {
     const hasLease = await this.ensureLease(instanceId);
     if (!hasLease) {
       this.logger.info({ instanceId }, 'instance owned by another worker');
+      this.scheduleLeaseRetry(instanceId);
       return;
     }
+    this.clearLeaseRetry(instanceId);
 
     // Una instancia LOGGED_OUT conserva credenciales muertas de WhatsApp: reusarlas hace que
     // el servidor las rechace otra vez (401) y nunca aparezca un QR. Se descartan para que
@@ -362,6 +366,7 @@ export class SessionManager {
   async disconnect(instanceId: string) {
     this.manualStops.add(instanceId);
     this.clearReconnectTimer(instanceId);
+    this.clearLeaseRetry(instanceId);
     const socket = this.sockets.get(instanceId);
     this.sockets.delete(instanceId);
     if (socket) socket.end(new Error('manual disconnect'));
@@ -372,6 +377,7 @@ export class SessionManager {
   async logout(instanceId: string) {
     this.manualStops.add(instanceId);
     this.clearReconnectTimer(instanceId);
+    this.clearLeaseRetry(instanceId);
     const socket = this.sockets.get(instanceId);
     this.sockets.delete(instanceId);
     try {
@@ -400,6 +406,8 @@ export class SessionManager {
       await this.releaseLease(instanceId);
     }
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer);
+    for (const timer of this.leaseRetryTimers.values()) clearTimeout(timer);
+    this.leaseRetryTimers.clear();
     for (const timer of this.leaseTimers.values()) clearInterval(timer);
     clearInterval(this.avatarRefreshTimer);
     this.reconnectTimers.clear();
@@ -1182,6 +1190,28 @@ export class SessionManager {
     }, delay);
     timer.unref();
     this.reconnectTimers.set(instanceId, timer);
+  }
+
+  // Antes, si el lease estaba ocupado connect() se rendía para siempre. Tras un reinicio del
+  // worker (deploy o caída) el lease del proceso anterior sigue vivo hasta LEASE_TTL_MS, así que
+  // el proceso nuevo dejaba TODAS las líneas sin socket mientras la base seguía diciendo
+  // CONNECTED: 2026-10-22, ~75 líneas sin recibir mensajes de 03:22 a 10:00. Ahora se reintenta
+  // cuando ese lease ya expiró; si otro worker vivo lo está renovando, el reintento solo vuelve
+  // a mirar Redis y se reprograma.
+  private scheduleLeaseRetry(instanceId: string) {
+    if (this.leaseRetryTimers.has(instanceId) || this.manualStops.has(instanceId)) return;
+    const timer = setTimeout(() => {
+      this.leaseRetryTimers.delete(instanceId);
+      void this.connect(instanceId).catch((error) => this.logger.error({ err: error, instanceId }, 'lease retry connect failed'));
+    }, LEASE_TTL_MS + 5_000);
+    timer.unref();
+    this.leaseRetryTimers.set(instanceId, timer);
+  }
+
+  private clearLeaseRetry(instanceId: string) {
+    const timer = this.leaseRetryTimers.get(instanceId);
+    if (timer) clearTimeout(timer);
+    this.leaseRetryTimers.delete(instanceId);
   }
 
   private clearReconnectTimer(instanceId: string) {
