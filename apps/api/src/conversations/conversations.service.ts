@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InstanceStatus, MessageDirection, MessageStatus, MessageType, Prisma, UserRole, type ConversationStatus } from '@prisma/client';
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
+import { findExistingContactWaId } from '../common/utils/contact-identity';
 import { DealsService } from '../crm/deals.service';
 import { LeadsService } from '../crm/leads.service';
 import { transcodeToOggOpus } from '../media/audio-transcode';
@@ -361,14 +362,8 @@ export class ConversationsService {
 
     const phone = rawPhone.replace(/[^0-9]/g, '');
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
-    // Same reason as in messages.service: the number may already be on file under an
-    // opaque `@lid` waId, and assuming the phone JID forks a duplicate contact.
-    const existingContact = await this.prisma.contact.findFirst({
-      where: { companyId, phone, waId: { not: { endsWith: '@broadcast' } } },
-      orderBy: { createdAt: 'asc' },
-      select: { waId: true },
-    });
-    const waId = existingContact?.waId ?? `${phone}@s.whatsapp.net`;
+    // El número puede estar guardado como un @lid: reusar ese contacto en vez de crear otro.
+    const waId = (await findExistingContactWaId(this.prisma, companyId, phone)) ?? `${phone}@s.whatsapp.net`;
     const trimmedName = name?.trim() || undefined;
 
     const contact = await this.prisma.contact.upsert({

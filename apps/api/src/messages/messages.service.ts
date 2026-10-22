@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { MessageDirection, MessageStatus, MessageType, WhatsAppProvider } from '@prisma/client';
 import { basename, extname } from 'node:path';
 import type { ApiClientContext } from '../common/types/jwt-user';
+import { findExistingContactWaId } from '../common/utils/contact-identity';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -153,17 +154,8 @@ export class MessagesService {
 
     const phone = rawTo.replace(/[^0-9]/g, '');
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
-    // WhatsApp may have this contact on file under an opaque `@lid` waId instead of
-    // the phone JID (see session-manager). Building the phone JID unconditionally
-    // created a second row for someone already known, so reuse whatever waId the
-    // company already has for this number — @broadcast rows excluded, since a
-    // broadcast list legitimately carries the same phone.
-    const existing = await this.prisma.contact.findFirst({
-      where: { companyId: client.companyId, phone, waId: { not: { endsWith: '@broadcast' } } },
-      orderBy: { createdAt: 'asc' },
-      select: { waId: true },
-    });
-    const waId = existing?.waId ?? `${phone}@s.whatsapp.net`;
+    // Reusar el waId que la empresa ya tiene para este número (puede ser un @lid).
+    const waId = (await findExistingContactWaId(this.prisma, client.companyId, phone)) ?? `${phone}@s.whatsapp.net`;
 
     const contact = await this.prisma.contact.upsert({
       where: { companyId_waId: { companyId: client.companyId, waId } },

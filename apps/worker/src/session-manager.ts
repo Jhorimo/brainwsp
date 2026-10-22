@@ -26,6 +26,7 @@ import { usePrismaAuthState } from './auth-state.js';
 import { maybeReplyWithAi } from './ai-agent.js';
 import { maybeRunFlow } from './automation-engine.js';
 import { extensionFromMime, extractMessage, jidToPhone, type AdContext } from './message-utils.js';
+import { completeLidPair } from './lid-identity.js';
 import { aBuffer, descifrarEdicion, sinDispositivo } from './secret-edit.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
@@ -549,23 +550,30 @@ export class SessionManager {
       return server ? `${user.split(':')[0]}@${server}` : jid;
     };
     const lidJid = !isGroup ? stripDevice(remoteJid) : remoteJid;
-    const altPhoneJid =
-      !isGroup && message.key.remoteJidAlt && jidToPhone(message.key.remoteJidAlt)
-        ? stripDevice(message.key.remoteJidAlt)
-        : null;
+    let altPhoneJid: string | null = null;
     let identityJid = lidJid;
     if (!isGroup) {
-      // Reconcile in BOTH directions. The previous version only looked when the
-      // message arrived as @lid, so a contact recorded under @lid who then messaged
-      // from the phone JID forked a second row. The phone fallback catches the case
-      // where neither JID matches but the same real number is already on file —
-      // excluding @broadcast rows, which legitimately share a phone with a contact.
-      const phoneHint = jidToPhone(lidJid) || (altPhoneJid ? jidToPhone(altPhoneJid) : null);
+      // remoteJidAlt puede traer la forma de teléfono O la @lid (cuando el mensaje llega por el
+      // número). Antes solo se usaba la de teléfono, y si el mensaje traía una sola forma no se
+      // encontraba el contacto guardado con la otra: se creaba un duplicado en la misma línea.
+      // La forma que falte se completa con la equivalencia que Baileys ya guardó (lid-mapping);
+      // si esa consulta falla se sigue con lo que trajo el mensaje, como antes.
+      const sent = [lidJid, ...(message.key.remoteJidAlt ? [stripDevice(message.key.remoteJidAlt)] : [])];
+      const pair = await completeLidPair(this.prisma, instance.companyId, sent).catch((error) => {
+        this.logger.warn({ err: error, instanceId, remoteJid }, 'failed to resolve lid mapping');
+        return { lidJid: sent.find((jid) => jid.endsWith('@lid')) ?? null, phoneJid: sent.find((jid) => jidToPhone(jid)) ?? null };
+      });
+      altPhoneJid = pair.phoneJid;
+      // Reconcile in BOTH directions. The phone fallback catches the case where neither
+      // JID matches but the same real number is already on file — excluding @broadcast
+      // rows, which legitimately share a phone with a contact.
+      const knownJids = [...new Set([lidJid, ...(pair.lidJid ? [pair.lidJid] : []), ...(pair.phoneJid ? [pair.phoneJid] : [])])];
+      const phoneHint = pair.phoneJid ? jidToPhone(pair.phoneJid) : null;
       const existing = await this.prisma.contact.findFirst({
         where: {
           companyId: instance.companyId,
           OR: [
-            { waId: { in: altPhoneJid ? [lidJid, altPhoneJid] : [lidJid] } },
+            { waId: { in: knownJids } },
             ...(phoneHint ? [{ phone: phoneHint, waId: { not: { endsWith: '@broadcast' } } }] : []),
           ],
         },
@@ -575,6 +583,8 @@ export class SessionManager {
       });
       identityJid = existing?.waId || altPhoneJid || lidJid;
     }
+    // Un contacto guardado como @lid también se queda con su número: así lo encuentran el
+    // "nuevo chat" del panel y la API, que buscan por teléfono.
     const phone = jidToPhone(identityJid) || (altPhoneJid ? jidToPhone(altPhoneJid) : null);
     const contact = await this.prisma.contact.upsert({
       where: { companyId_waId: { companyId: instance.companyId, waId: identityJid } },
