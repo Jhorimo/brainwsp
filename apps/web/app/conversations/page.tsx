@@ -2608,7 +2608,7 @@ export default function ConversationsPage() {
             </div>
             {lines.length > 1 && (
               <div className="line-selector">
-                <Phone size={14} />
+                <Phone size={15} className="line-selector-icon" />
                 <select value={lineFilter} onChange={(e) => changeLineFilter(e.target.value)} aria-label="Línea de WhatsApp" title="Elige qué número ver">
                   {lines.map((line) => (
                     <option key={line.id} value={line.id}>
@@ -2617,6 +2617,7 @@ export default function ConversationsPage() {
                   ))}
                   <option value="">Todas las líneas{lines.some((line) => line.unreadChats) ? ` · ${lines.reduce((sum, line) => sum + line.unreadChats, 0)} sin leer` : ''}</option>
                 </select>
+                <ChevronDown size={15} className="line-selector-caret" />
               </div>
             )}
             <div className="searchbox-row">

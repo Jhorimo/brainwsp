@@ -117,7 +117,23 @@ export class SessionManager {
     throw new Error('WhatsApp aún no está conectado; el mensaje será reintentado');
   }
 
+  // connect() tarda varios pasos asíncronos (base, lease, credenciales, versión de WA) antes de
+  // registrar el socket en this.sockets. Dos llamadas simultáneas para la misma línea (reintento
+  // del lease + un envío que llama a ensureConnected, por ejemplo) pasaban ambas el chequeo y
+  // abrían DOS sockets con las mismas credenciales: WhatsApp los echaba entre sí (la línea recibía
+  // pero no enviaba y el estado parpadeaba, 2026-10-22). Ahora la segunda espera a la primera.
+  private readonly connecting = new Map<string, Promise<void>>();
+
   async connect(instanceId: string) {
+    if (this.sockets.has(instanceId)) return;
+    const inFlight = this.connecting.get(instanceId);
+    if (inFlight) return inFlight;
+    const attempt = this.connectOnce(instanceId).finally(() => this.connecting.delete(instanceId));
+    this.connecting.set(instanceId, attempt);
+    return attempt;
+  }
+
+  private async connectOnce(instanceId: string) {
     if (this.sockets.has(instanceId)) return;
     this.manualStops.delete(instanceId);
 
