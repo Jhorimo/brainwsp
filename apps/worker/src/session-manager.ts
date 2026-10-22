@@ -627,7 +627,9 @@ export class SessionManager {
     const conversation = existingConversation
       ? await this.prisma.conversation.update({
           where: { id: existingConversation.id },
-          data: { lastMessageAt: new Date(), unreadCount: { increment: 1 }, archived: false },
+          // Como WhatsApp con "Mantener los chats archivados": un mensaje nuevo NO desarchiva el
+          // chat; solo se desarchiva a mano desde el panel.
+          data: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
         })
       : await this.prisma.conversation.create({
           data: {

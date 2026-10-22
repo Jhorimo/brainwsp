@@ -944,7 +944,13 @@ export default function ConversationsPage() {
     // forces a full refetch to make sure the list can't get stuck showing stale data forever.
     socket.on('connect', () => void loadConversations());
     socket.on('message.created', (event: { message: Message; conversation: Conversation }) => {
-      if (event.message.direction === 'INBOUND') scheduleLinesRefresh();
+      // Un chat archivado sigue archivado aunque llegue un mensaje (como WhatsApp): no suena y
+      // solo actualiza el contador de la fila "Archivados".
+      const archivedChat = !!event.conversation.archived;
+      if (event.message.direction === 'INBOUND') {
+        if (archivedChat) loadArchivedSummary();
+        else scheduleLinesRefresh();
+      }
       // Con una línea elegida, los chats de otras líneas no entran a la bandeja (solo suman en el
       // selector). Si el evento no dice su línea, se muestra igual, para no perder nada.
       const eventLine = event.conversation.instance?.id ?? (event.conversation as { instanceId?: string }).instanceId;
@@ -955,7 +961,7 @@ export default function ConversationsPage() {
           ? 0
           : (found?.unreadCount || 0) + (event.message.direction === 'INBOUND' ? 1 : 0);
         const next: Conversation = found
-          ? { ...found, ...(event.message.direction === 'INBOUND' ? { archived: false } : {}), unreadCount: unread, lastMessageAt: event.message.createdAt, messages: [event.message] }
+          ? { ...found, archived: event.conversation.archived ?? found.archived, unreadCount: unread, lastMessageAt: event.message.createdAt, messages: [event.message] }
           : { ...event.conversation, unreadCount: unread, messages: [event.message] };
         return sortConversations([next, ...current.filter((item) => item.id !== next.id)]);
       });
@@ -970,7 +976,7 @@ export default function ConversationsPage() {
         }
       }
       if (event.message.direction === 'INBOUND') {
-        if (soundEnabledRef.current) playNotificationSound();
+        if (soundEnabledRef.current && !archivedChat) playNotificationSound();
         // "Llegó a la bandeja" (✓✓ gris en el widget) — ver RealtimeGateway
         // 'message:delivered'. El "leído" (✓✓ azul) real lo dispara el POST .../read de
         // arriba, no esto.
@@ -1043,7 +1049,7 @@ export default function ConversationsPage() {
       typingTimersRef.current.forEach((timer) => clearTimeout(timer));
       typingTimersRef.current.clear();
     };
-  }, [loadMessages, loadConversations, scheduleLinesRefresh]);
+  }, [loadMessages, loadConversations, scheduleLinesRefresh, loadArchivedSummary]);
 
   // Anclar al último mensaje SOLO si el agente ya estaba abajo. Antes se forzaba en cada
   // cambio de `messages`, y eso incluye cosas que no son mensajes nuevos: cada acuse de
@@ -1365,7 +1371,7 @@ export default function ConversationsPage() {
   // Total across every conversation, not just the currently filtered/visible ones — same as
   // WhatsApp Web's own tab badge, which reflects the whole inbox regardless of which chat
   // or filter is open.
-  const totalUnreadCount = useMemo(() => conversations.reduce((sum, item) => sum + item.unreadCount, 0), [conversations]);
+  const totalUnreadCount = useMemo(() => conversations.reduce((sum, item) => (item.archived ? sum : sum + item.unreadCount), 0), [conversations]);
   const unreadTabCount = useMemo(() => baseFiltered.filter((item) => item.unreadCount > 0).length, [baseFiltered]);
   const pinnedTabCount = useMemo(() => baseFiltered.filter((item) => item.pinned).length, [baseFiltered]);
   const groupTabCount = useMemo(() => baseFiltered.filter((item) => isGroupContact(item.contact)).length, [baseFiltered]);
