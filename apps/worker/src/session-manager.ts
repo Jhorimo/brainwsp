@@ -602,7 +602,13 @@ export class SessionManager {
     let authorContactId: string | undefined;
     if (isGroup && message.key.participant) {
       const participantJid = message.key.participant;
-      const participantPhone = jidToPhone(participantJid) || (message.key.participantAlt ? jidToPhone(message.key.participantAlt) : null);
+      let participantPhone = jidToPhone(participantJid) || (message.key.participantAlt ? jidToPhone(message.key.participantAlt) : null);
+      // Si escribió como @lid sin número, se completa con la equivalencia guardada: así el panel
+      // puede abrir su chat individual al hacer clic en su nombre dentro del grupo.
+      if (!participantPhone) {
+        const pair = await completeLidPair(this.prisma, instance.companyId, [stripDevice(participantJid)]).catch(() => null);
+        participantPhone = pair?.phoneJid ? jidToPhone(pair.phoneJid) : null;
+      }
       const author = await this.prisma.contact.upsert({
         where: { companyId_waId: { companyId: instance.companyId, waId: participantJid } },
         update: { phone: participantPhone || undefined, pushName: message.pushName || undefined, lastSeenAt: new Date() },

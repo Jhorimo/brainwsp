@@ -17,6 +17,8 @@ import { SystemSettingsService } from '../system-settings/system-settings.servic
 // frontend no note el cambio de implementacion.
 interface LastMessage {
   id: string;
+  // Para que la lista de chats actualice los checks con el acuse de WhatsApp, que solo trae este id.
+  waMessageId: string | null;
   body: string | null;
   caption: string | null;
   type: MessageType;
@@ -241,7 +243,7 @@ export class ConversationsService {
 
     const rows = await this.prisma.$queryRaw<LastMessageRow[]>`
       SELECT DISTINCT ON (m."conversationId")
-             m."conversationId", m."id", m."body", m."caption", m."type", m."direction",
+             m."conversationId", m."id", m."waMessageId", m."body", m."caption", m."type", m."direction",
              m."status", m."createdAt", m."deleted",
              a."id" AS "authorId", a."name" AS "authorName", a."pushName" AS "authorPushName"
         FROM "Message" m
@@ -255,6 +257,7 @@ export class ConversationsService {
       byConversation.set(row.conversationId, [
         {
           id: row.id,
+          waMessageId: row.waMessageId,
           body: row.body,
           caption: row.caption,
           type: row.type,
@@ -280,7 +283,8 @@ export class ConversationsService {
       orderBy: { createdAt: 'desc' },
       take: 500,
       include: {
-        author: { select: { id: true, name: true, pushName: true } },
+        // phone: para que el nombre de quien escribe en un grupo abra su chat individual.
+        author: { select: { id: true, name: true, pushName: true, phone: true } },
         reactions: { select: { id: true, emoji: true, fromMe: true, reactorJid: true, contactId: true } },
         quotedMessage: { select: quotedMessageSelect },
       },

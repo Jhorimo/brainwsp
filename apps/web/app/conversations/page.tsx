@@ -30,7 +30,7 @@ const emojiDataEs = emojiDataEsRaw as unknown as EmojiData;
 type Tag = { id: string; name: string; color: string };
 type Stage = { id: string; name: string; color: string };
 type Contact = { id: string; name?: string | null; pushName?: string | null; phone?: string | null; waId: string; notes?: string | null; avatarUrl?: string | null; sourceUrl?: string | null; tags?: Array<{ tag: Tag }> };
-type Author = { id: string; name?: string | null; pushName?: string | null };
+type Author = { id: string; name?: string | null; pushName?: string | null; phone?: string | null };
 type Conversation = {
   id: string;
   status: string;
@@ -48,11 +48,11 @@ type Conversation = {
   project?: { id: string; name: string } | null;
   stage?: Stage | null;
   instance: { id: string; name: string; slug: string; status: string; provider: string };
-  messages: Array<{ id: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
+  messages: Array<{ id: string; waMessageId?: string | null; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
 type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin };
-type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; ctwaClid?: string; conversionSource?: string };
+type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; thumbnailUrl?: string; ctwaClid?: string; conversionSource?: string; conversionApp?: string };
 type LineSummary = { id: string; name: string; status: string; provider: string; lastConnectedAt: string | null; unreadChats: number };
 const LINE_FILTER_KEY = 'brainwsp_line_filter';
 const lineStatusLabel: Record<string, string> = { CONNECTED: 'conectada', CONNECTING: 'conectando', RECONNECTING: 'reconectando', QR_PENDING: 'esperando QR', DISCONNECTED: 'desconectada', LOGGED_OUT: 'sin vincular', ERROR: 'con error' };
@@ -248,6 +248,11 @@ function statusIcon(status: string) {
     : <Clock size={10} />;
   return <span title={labels[status] || status}>{icon}</span>;
 }
+// Los acuses pueden llegar desordenados (un "entregado" después del "leído"): nunca se baja.
+const STATUS_RANK: Record<string, number> = { QUEUED: 0, PROCESSING: 0, SENT: 1, DELIVERED: 2, READ: 3 };
+function statusUpgrade(current: string, next: string) {
+  return next === 'FAILED' || (STATUS_RANK[next] ?? 0) > (STATUS_RANK[current] ?? 0);
+}
 // Fechas estilo WhatsApp. Los días se comparan por fecha calendario LOCAL (no por 24 h
 // transcurridas), así "Ayer" es el día anterior aunque hayan pasado menos de 24 horas.
 const DAY_MS = 86_400_000;
@@ -363,6 +368,30 @@ function handleMediaError(e: SyntheticEvent<HTMLImageElement>) {
 }
 // Muchos anuncios comparten título ("Chatea con nosotros"); lo que los distingue es el código del
 // enlace corto (fb.me/XXXX), así que se agrega al texto del chip.
+// Tarjeta del anuncio dentro del primer mensaje, como la muestra WhatsApp en un chat que llegó
+// por un anuncio de Click-to-WhatsApp: miniatura, título, texto y enlace al anuncio. La miniatura
+// es una URL del CDN de Facebook que caduca; si ya no carga, la tarjeta queda sin imagen.
+function AdReplyCard({ ad }: { ad: AdOrigin }) {
+  // externalAdReply también lo usan vistas previas que no son anuncios: solo se muestra si es un
+  // anuncio de verdad (sourceType 'ad' o trae el id de clic de Click-to-WhatsApp).
+  if (ad.sourceType !== 'ad' && !ad.ctwaClid) return null;
+  if (!ad.title && !ad.body && !ad.sourceUrl) return null;
+  const app = ad.conversionApp?.toLowerCase().includes('instagram') ? 'Instagram' : 'Facebook';
+  const content = (
+    <>
+      {ad.thumbnailUrl && <img className="ad-reply-thumb" src={ad.thumbnailUrl} alt="" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+      <span className="ad-reply-copy">
+        <span className="ad-reply-kicker"><Megaphone size={11} />Anuncio de {app}</span>
+        {ad.title && <strong>{ad.title}</strong>}
+        {ad.body && <span className="ad-reply-body">{ad.body}</span>}
+        {ad.sourceUrl && <span className="ad-reply-link">{hostnameFromUrl(ad.sourceUrl)} · Ver anuncio</span>}
+      </span>
+    </>
+  );
+  return ad.sourceUrl
+    ? <a className="ad-reply-card" href={ad.sourceUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="Abrir el anuncio">{content}</a>
+    : <div className="ad-reply-card">{content}</div>;
+}
 function adOriginLabel(ad: AdOrigin) {
   const code = ad.sourceUrl?.replace(/[?#].*$/, '').split('/').filter(Boolean).pop();
   return `Anuncio${ad.title ? `: ${ad.title}` : ''}${code ? ` (${code})` : ''}`;
@@ -399,6 +428,7 @@ type MessageListApi = {
   scrollToMessage: (id: string) => void;
   quoteSenderLabel: (quoted: { direction: string; author?: Author | null }) => string;
   quoteSnippet: (quoted: { type: string; body?: string | null; caption?: string | null; fileName?: string | null }) => string;
+  openAuthorChat: (author: Author) => void;
 };
 const MessageList = memo(function MessageList({ messages, selectMode, selectedMessageIds, highlightMessageId, api }: {
   messages: Message[];
@@ -446,13 +476,16 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
                         <button className="message-react-trigger" onClick={(e) => api.toggleReactionMenu(e, message.id)} title="Reaccionar"><Smile size={13} /></button>
                       </>
                     )}
-                    {message.direction === 'INBOUND' && authorName(message.author) && <div className="message-author">{authorName(message.author)}</div>}
+                    {message.direction === 'INBOUND' && authorName(message.author) && (
+                      <button className="message-author" onClick={(e) => { e.stopPropagation(); api.openAuthorChat(message.author!); }} title="Abrir el chat con esta persona">{authorName(message.author)}</button>
+                    )}
                     {message.quotedMessage && (
                       <button className="message-quote" onClick={(e) => { e.stopPropagation(); api.scrollToMessage(message.quotedMessage!.id); }}>
                         <strong>{api.quoteSenderLabel(message.quotedMessage)}</strong>
                         <span>{api.quoteSnippet(message.quotedMessage)}</span>
                       </button>
                     )}
+                    {message.metadata?.ad && <AdReplyCard ad={message.metadata.ad} />}
                     {api.renderMessageBody(message)}
                     {message.reactions && message.reactions.length > 0 && (
                       <div className="message-reactions">{[...new Set(message.reactions.map((r) => r.emoji))].join(' ')}</div>
@@ -488,6 +521,7 @@ const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing,
   onToggleArchive: (conversation: Conversation) => void;
 }) {
   const waiting = awaitingReply(conversation);
+  const lastMessage = conversation.messages[0];
   return (
 
               <button className={`chat-row ${active ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`} key={conversation.id} style={{ borderLeftColor: conversation.stage?.color || 'transparent' }} onClick={() => onOpen(conversation.id)}>
@@ -506,6 +540,10 @@ const ChatRow = memo(function ChatRow({ conversation, active, showAgent, typing,
                     )}
                   </div>
                   <span className={typing ? 'chat-row-typing' : undefined}>
+                    {/* Checks del último mensaje si lo enviamos nosotros, como en la lista de WhatsApp. */}
+                    {!typing && lastMessage?.direction === 'OUTBOUND' && !lastMessage.deleted && (
+                      <span className={`chat-row-status ${lastMessage.status.toLowerCase()}`}>{statusIcon(lastMessage.status)}</span>
+                    )}
                     {typing ? 'Escribiendo...' : lastText(conversation)}
                   </span>
                   {showAgent && (
@@ -936,6 +974,18 @@ export default function ConversationsPage() {
     return () => clearTimeout(timer);
   }, [shareContactOpen, shareContactSearch]);
 
+  // Checks de la lista de chats: el acuse de WhatsApp actualiza el último mensaje del chat al que
+  // pertenece. Si no coincide con ninguno, se devuelve la misma lista y no se vuelve a pintar.
+  const patchLastMessageStatus = useCallback((matches: (last: Conversation['messages'][number]) => boolean, status: string) => {
+    setConversations((current) => {
+      const index = current.findIndex((item) => item.messages[0] && matches(item.messages[0]));
+      if (index === -1 || !statusUpgrade(current[index].messages[0].status, status)) return current;
+      const next = [...current];
+      next[index] = { ...next[index], messages: [{ ...next[index].messages[0], status }] };
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
     socketRef.current = socket;
@@ -985,6 +1035,7 @@ export default function ConversationsPage() {
     });
     socket.on('message.status', (data: { ids: string[]; status: string }) => {
       setMessages((current) => current.map((item) => (data.ids.includes(item.id) ? { ...item, status: data.status } : item)));
+      patchLastMessageStatus((last) => data.ids.includes(last.id), data.status);
     });
     socket.on('contact.typing', (data: { conversationId: string; typing: boolean }) => {
       const timers = typingTimersRef.current;
@@ -1015,6 +1066,10 @@ export default function ConversationsPage() {
     // `{ waMessageId, status }` desde el acuse de WhatsApp, de ahí las dos búsquedas.
     socket.on('message.updated', (payload: (Partial<Message> & { waMessageId?: string }) | null) => {
       if (!payload) return;
+      if (payload.status) {
+        const status = payload.status;
+        patchLastMessageStatus((last) => (payload.id ? last.id === payload.id : !!payload.waMessageId && last.waMessageId === payload.waMessageId), status);
+      }
       setMessages((current) => {
         const index = payload.id
           ? current.findIndex((item) => item.id === payload.id)
@@ -1049,7 +1104,7 @@ export default function ConversationsPage() {
       typingTimersRef.current.forEach((timer) => clearTimeout(timer));
       typingTimersRef.current.clear();
     };
-  }, [loadMessages, loadConversations, scheduleLinesRefresh, loadArchivedSummary]);
+  }, [loadMessages, loadConversations, scheduleLinesRefresh, loadArchivedSummary, patchLastMessageStatus]);
 
   // Anclar al último mensaje SOLO si el agente ya estaba abajo. Antes se forzaba en cada
   // cambio de `messages`, y eso incluye cosas que no son mensajes nuevos: cada acuse de
@@ -1718,6 +1773,32 @@ export default function ConversationsPage() {
   // with that number, instead of sending the agent out to wa.me.
   const openNewChatWithPhone = (digits: string) => {
     void openNewChatModal().then(() => setNewChatPhone(digits));
+  };
+
+  // Clic en el nombre de quien escribió en un grupo: abre su chat individual en la misma línea del
+  // grupo; si todavía no hay chat con esa persona, abre "Nuevo chat" con su número ya puesto.
+  const openAuthorChat = async (author: Author) => {
+    if (!selected) return;
+    const lineId = selected.instance.id;
+    const digits = author.phone?.replace(/\D/g, '') || '';
+    const matches = (item: Conversation) => item.instance.id === lineId && !isGroupContact(item.contact)
+      && (item.contact.id === author.id || (!!digits && item.contact.phone === digits));
+    const loaded = conversations.find(matches);
+    if (loaded) { openChat(loaded.id); return; }
+    if (!digits) { setError('WhatsApp no compartió el número de esta persona en el grupo, así que no se puede abrir su chat.'); return; }
+    try {
+      const found = (await apiFetch<Conversation[]>(`/conversations?q=${digits}&instanceId=${lineId}`)).find(matches);
+      if (found) {
+        setConversations((current) => current.some((item) => item.id === found.id) ? current : sortConversations([found, ...current]));
+        openChat(found.id);
+        return;
+      }
+    } catch { /* si la búsqueda falla, se ofrece crear el chat */ }
+    void openNewChatModal().then(() => {
+      setNewChatPhone(digits);
+      setNewChatName(authorName(author) || '');
+      setNewChatInstanceId(lineId);
+    });
   };
 
   const submitNewChat = async () => {
@@ -2585,8 +2666,8 @@ export default function ConversationsPage() {
 
   // Handlers estables para los componentes memoizados (MessageList / ChatRow): llaman siempre a
   // la última versión, así que no quedan con estado viejo y no rompen el memo.
-  const latestHandlers = useRef({ renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin, setConversationArchived });
-  latestHandlers.current = { renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin, setConversationArchived };
+  const latestHandlers = useRef({ renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin, setConversationArchived, openAuthorChat });
+  latestHandlers.current = { renderMessageBody, toggleMessageSelected, startReply, toggleMessageMenu, toggleReactionMenu, scrollToMessage, quoteSenderLabel, quoteSnippet, toggleConversationPin, setConversationArchived, openAuthorChat };
   const messageListApi = useMemo<MessageListApi>(() => ({
     renderMessageBody: (m) => latestHandlers.current.renderMessageBody(m),
     toggleMessageSelected: (id) => latestHandlers.current.toggleMessageSelected(id),
@@ -2596,6 +2677,7 @@ export default function ConversationsPage() {
     scrollToMessage: (id) => latestHandlers.current.scrollToMessage(id),
     quoteSenderLabel: (q) => latestHandlers.current.quoteSenderLabel(q),
     quoteSnippet: (q) => latestHandlers.current.quoteSnippet(q),
+    openAuthorChat: (a) => { void latestHandlers.current.openAuthorChat(a); },
   }), []);
   const openChat = useCallback((id: string) => { setSelectedId(id); setMobileChatOpen(true); }, []);
   const toggleConversationArchiveStable = useCallback((conversation: Conversation) => { void latestHandlers.current.setConversationArchived(conversation.id, !conversation.archived); }, []);
@@ -2753,14 +2835,15 @@ export default function ConversationsPage() {
                   {selected.contact.sourceUrl && (
                     <span className="chat-header-source" title={selected.contact.sourceUrl}><Globe size={11} />{hostnameFromUrl(selected.contact.sourceUrl)}</span>
                   )}
-                  {adOrigin && (
-                    <span className="chat-header-source" title={[adOrigin.title, adOrigin.body, adOrigin.sourceUrl].filter(Boolean).join(' · ')}>
-                      <Megaphone size={11} />
-                      {adOrigin.sourceUrl
-                        ? <a href={adOrigin.sourceUrl} target="_blank" rel="noreferrer">{adOriginLabel(adOrigin)}</a>
-                        : <>{adOriginLabel(adOrigin)}</>}
-                    </span>
-                  )}
+                  {adOrigin && (() => {
+                    // Chip con el anuncio completo; si la cabecera es angosta se corta con "…" (el
+                    // detalle completo también está en el panel derecho, sección Conversación).
+                    const label = <><Megaphone size={11} /><span className="ad-chip-label">{adOriginLabel(adOrigin)}</span></>;
+                    const title = [adOrigin.title, adOrigin.body, adOrigin.sourceUrl].filter(Boolean).join(' · ');
+                    return adOrigin.sourceUrl
+                      ? <a className="chat-header-source ad-chip" href={adOrigin.sourceUrl} target="_blank" rel="noreferrer" title={`${title}\nClic para abrir el anuncio`}>{label}</a>
+                      : <span className="chat-header-source ad-chip" title={title}>{label}</span>;
+                  })()}
                 </div>
               </div>
               <div className="chat-header-actions">
@@ -2934,7 +3017,7 @@ export default function ConversationsPage() {
                   {stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.name}</option>)}
                 </select>
               ) : <p className="contact-empty-hint">"{selected.department.name}" todavía no tiene etapas configuradas. Créalas desde Equipo y agentes.</p>;
-            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div>{selected.contact.sourceUrl && <div className="contact-line"><span>Página de origen</span><a href={selected.contact.sourceUrl} target="_blank" rel="noreferrer" title={selected.contact.sourceUrl} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{hostnameFromUrl(selected.contact.sourceUrl)}</a></div>}{conversationLead &&<div className="contact-line"><span>Prospecto</span><span style={{ display: 'flex', gap: 6 }}>{conversationLead.convertedDealId ? <><Link className="icon-button small" href="/crm/deals" title="Ver trato"><Handshake size={14} /></Link><Link className="icon-button small" href={conversationLead.departmentId ? `/crm/pipelines?departmentId=${conversationLead.departmentId}` : '/crm/pipelines'} title="Ver Pipelines"><Kanban size={14} /></Link></> : <button className="icon-button small primary" disabled={converting || !conversationLead.departmentId} title={!conversationLead.departmentId ? 'Asigna un departamento antes de convertir' : 'Convertir en trato'} onClick={() => void convertToDeal()}><Handshake size={14} /></button>}</span></div>}<div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">Sin departamento</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Citas</h4><button className="button small" onClick={openAppointmentModal}><CalendarDays size={13} />Nueva</button></div>{conversationAppointments.map((appointment) => (<div className="incident-row" key={appointment.id}><div className="incident-row-copy"><strong>{appointment.title}</strong><span>{new Date(appointment.startAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span></div><button className="icon-button" onClick={() => void cancelAppointment(appointment)} title="Cancelar cita"><Trash2 size={12} /></button></div>))}{!conversationAppointments.length && <p className="contact-empty-hint">Sin citas agendadas para este cliente.</p>}</div></> : null}
+            })() : <p className="contact-empty-hint">Asigna un departamento para poder usar etapas.</p>}</div><div className="contact-section"><h4>Conversación</h4><div className="contact-line"><span>Estado</span><strong>{selected.status}</strong></div>{adOrigin && <div className="contact-line"><span>Origen</span>{adOrigin.sourceUrl ? <a className="contact-ad-origin" href={adOrigin.sourceUrl} target="_blank" rel="noreferrer" title={adOriginLabel(adOrigin)}><Megaphone size={12} />{adOriginLabel(adOrigin)}</a> : <strong className="contact-ad-origin" title={adOriginLabel(adOrigin)}><Megaphone size={12} />{adOriginLabel(adOrigin)}</strong>}</div>}{selected.contact.sourceUrl && <div className="contact-line"><span>Página de origen</span><a href={selected.contact.sourceUrl} target="_blank" rel="noreferrer" title={selected.contact.sourceUrl} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{hostnameFromUrl(selected.contact.sourceUrl)}</a></div>}{conversationLead &&<div className="contact-line"><span>Prospecto</span><span style={{ display: 'flex', gap: 6 }}>{conversationLead.convertedDealId ? <><Link className="icon-button small" href="/crm/deals" title="Ver trato"><Handshake size={14} /></Link><Link className="icon-button small" href={conversationLead.departmentId ? `/crm/pipelines?departmentId=${conversationLead.departmentId}` : '/crm/pipelines'} title="Ver Pipelines"><Kanban size={14} /></Link></> : <button className="icon-button small primary" disabled={converting || !conversationLead.departmentId} title={!conversationLead.departmentId ? 'Asigna un departamento antes de convertir' : 'Convertir en trato'} onClick={() => void convertToDeal()}><Handshake size={14} /></button>}</span></div>}<div className="field compact-field"><label>Agente asignado</label><select value={selected.assignedUser?.id || ''} onChange={(e) => void updateAssignment('assignedUserId', e.target.value)}><option value="">Sin asignar</option>{teamUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div><div className="field compact-field"><label>Departamento</label><select value={selected.department?.id || ''} onChange={(e) => void updateAssignment('departmentId', e.target.value)}><option value="">Sin departamento</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></div><div className="field compact-field"><label>Proyecto</label><select value={selected.project?.id || ''} onChange={(e) => void updateAssignment('projectId', e.target.value)}><option value="">Sin definir</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></div></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Notas</h4><button className={`button small notes-save-button ${notesSaved ? 'saved' : ''}`} disabled={notesSaving} onMouseDown={(e) => e.preventDefault()} onClick={() => void saveNotes(notesDraft)}>{notesSaved ? <Check size={13} /> : null}{notesSaving ? 'Guardando...' : notesSaved ? 'Guardado' : 'Guardar'}</button></div><textarea className="notes-textarea" placeholder="Notas internas sobre este cliente..." value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => void saveNotes(notesDraft)} /></div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Incidencias</h4><button className="button small" onClick={openIncidentModal}><AlertTriangle size={13} />Nueva</button></div>{conversationIncidents.map((incident) => (<div className="incident-row" key={incident.id}><div className="incident-row-copy"><strong>{incident.subject}</strong><span>{incident.department.name}</span></div>{canManageIncident(incident) ? (<select className={`status-select status-select-${incident.status.toLowerCase()}`} value={incident.status} onChange={(e) => void updateIncidentStatus(incident, e.target.value as IncidentStatus)}><option value="PENDING">Pendiente</option><option value="IN_PROGRESS">En proceso</option><option value="RESOLVED">Solucionado</option></select>) : (<span className={`status-pill ${incident.status === 'RESOLVED' ? 'success' : incident.status === 'IN_PROGRESS' ? 'warning' : 'neutral'}`}><span className="status-dot" />{incidentStatusLabels[incident.status]}</span>)}</div>))}{!conversationIncidents.length && <p className="contact-empty-hint">Sin incidencias para este cliente.</p>}</div><div className="contact-section"><div className="card-header" style={{padding:0,marginBottom:10}}><h4 style={{margin:0}}>Citas</h4><button className="button small" onClick={openAppointmentModal}><CalendarDays size={13} />Nueva</button></div>{conversationAppointments.map((appointment) => (<div className="incident-row" key={appointment.id}><div className="incident-row-copy"><strong>{appointment.title}</strong><span>{new Date(appointment.startAt).toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' })}</span></div><button className="icon-button" onClick={() => void cancelAppointment(appointment)} title="Cancelar cita"><Trash2 size={12} /></button></div>))}{!conversationAppointments.length && <p className="contact-empty-hint">Sin citas agendadas para este cliente.</p>}</div></> : null}
         </aside>
       </section>
 

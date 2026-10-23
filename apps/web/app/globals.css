@@ -1121,6 +1121,12 @@ tr:last-child td { border-bottom: 0; }
 .chat-copy strong { display: block; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-copy span { display: block; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 5px; }
 .chat-copy span.chat-row-typing { color: var(--brand-text); font-weight: 600; }
+/* Checks del último mensaje en la lista (gris enviado/entregado, azul leído, rojo no enviado). */
+.chat-copy span.chat-row-status, .chat-copy span.chat-row-status span { display: inline; margin: 0; overflow: visible; color: var(--text-neutral-9); }
+.chat-copy span.chat-row-status { margin-right: 3px; }
+.chat-copy span.chat-row-status svg { vertical-align: -2px; }
+.chat-copy span.chat-row-status.read svg { color: var(--text-info-4); }
+.chat-copy span.chat-row-status.failed svg { color: var(--danger-text); }
 /* Asignado / "Sin asignar" en negro y negrita para que se lea de un vistazo. */
 .chat-copy span.chat-row-agent { display: flex; align-items: center; gap: 3px; margin-top: 4px; font-size: 10px; font-weight: 700; color: var(--text); }
 .chat-time { color: var(--text-neutral-9); font-size: 9px; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.3; white-space: nowrap; }
@@ -1156,6 +1162,15 @@ tr:last-child td { border-bottom: 0; }
 .chat-header-meta .chat-header-status { color: var(--success-text) !important; }
 .chat-header-meta .chat-header-source { display: inline-flex !important; align-items: center; gap: 3px; color: var(--muted) !important; flex-shrink: 0; }
 .chat-header-meta .chat-header-source::before { content: '·'; margin-right: 4px; color: var(--muted); }
+/* Chip del anuncio: puede achicarse (con "…") para que nunca tape el estado de la línea. */
+.chat-header-meta .chat-header-source.ad-chip { flex-shrink: 1; min-width: 0; padding: 1px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-text) !important; font-weight: 600; text-decoration: none; }
+.chat-header-meta .chat-header-source.ad-chip::before { content: none; }
+.chat-header-meta .chat-header-source.ad-chip svg { flex-shrink: 0; }
+.chat-header-meta .ad-chip .ad-chip-label { min-width: 0; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.chat-header-source.ad-chip:hover { text-decoration: underline; }
+.chat-header-meta .chat-header-status { flex-shrink: 0; }
+.contact-ad-origin { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; text-align: right; }
+.contact-ad-origin svg { vertical-align: -2px; margin-right: 4px; }
 .chat-header-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 /* Escondido en escritorio (ahi entran los 7 botones sin problema) — el breakpoint de abajo
    lo muestra y esconde .chat-header-action-extra, que es donde vive el resto. */
@@ -1178,6 +1193,15 @@ tr:last-child td { border-bottom: 0; }
 .message-edited { display: inline-flex; align-items: center; gap: 2px; color: var(--text-neutral-10); font-style: italic; }
 
 /* "Responder" quote preview shown above a message's own content. */
+/* Tarjeta de anuncio (Click-to-WhatsApp) dentro de la burbuja, estilo WhatsApp. */
+.ad-reply-card { display: flex; gap: 8px; align-items: stretch; max-width: 320px; margin-bottom: 6px; padding: 6px; border-radius: 6px; border-left: 3px solid var(--brand); background: var(--surface-neutral-23); color: inherit; text-decoration: none; }
+a.ad-reply-card:hover { background: var(--brand-soft); }
+.ad-reply-thumb { width: 56px; height: 56px; flex-shrink: 0; object-fit: cover; border-radius: 4px; }
+.ad-reply-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ad-reply-kicker { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 700; color: var(--brand-text); }
+.ad-reply-copy strong { font-size: 11px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ad-reply-body { font-size: 10.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ad-reply-link { font-size: 9.5px; color: var(--brand-text); }
 .message-quote { display: block; width: 100%; text-align: left; border: 0; border-left: 3px solid var(--brand); background: var(--surface-neutral-23); border-radius: 6px; padding: 5px 8px; margin-bottom: 6px; cursor: pointer; }
 .message-quote strong { display: block; font-size: 10.5px; color: var(--brand-text); margin-bottom: 1px; }
 .message-quote span { display: block; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1218,7 +1242,8 @@ tr:last-child td { border-bottom: 0; }
 .message-time { display: flex; justify-content: flex-end; align-items: center; gap: 4px; color: var(--text-neutral-10); margin-top: 5px; font-size: 8px; }
 .message-time .status-read { color: var(--text-info-4); }
 .message-time .status-failed { color: var(--danger-text); }
-.message-author { font-weight: 700; font-size: 10px; margin-bottom: 3px; color: var(--brand-text); }
+.message-author { display: block; font-weight: 700; font-size: 10px; margin-bottom: 3px; color: var(--brand-text); border: 0; background: none; padding: 0; font-family: inherit; text-align: left; cursor: pointer; }
+.message-author:hover { text-decoration: underline; }
 .chat-composer { background: var(--surface); border-top: 1px solid var(--line); padding: 13px 15px; display: flex; gap: 9px; align-items: flex-end; position: relative; flex-shrink: 0; }
 .chat-composer textarea { resize: none; flex: 1; min-height: 42px; max-height: 110px; border: 1px solid var(--border-neutral-8); border-radius: 11px; padding: 11px 12px; outline: 0; font-size: 11px; }
 .chat-composer textarea:focus { border-color: var(--border-info-2); }
