@@ -862,10 +862,18 @@ export default function ConversationsPage() {
     }
   }, [loadArchivedSummary, scheduleLinesRefresh]);
 
-  const loadMessages = useCallback(async (conversationId: string) => {
+  const loadMessages = useCallback(async (conversationId: string, retries = 3) => {
     try {
-      setMessages(await apiFetch<Message[]>(`/conversations/${conversationId}/messages`));
+      const list = await apiFetch<Message[]>(`/conversations/${conversationId}/messages`);
+      setMessages(list);
       setConversations((current) => current.map((item) => item.id === conversationId ? { ...item, unreadCount: 0 } : item));
+      // Un chat recién creado ("Nuevo chat") se carga con el primer mensaje todavía en cola, y el
+      // aviso de "enviado" puede llegar antes que esta carga y perderse; sin él los ✓✓ tampoco
+      // lo encuentran (vienen solo con el id de WhatsApp) y el reloj quedaba hasta recargar.
+      const pending = list.some((item) => item.direction === 'OUTBOUND' && (item.status === 'QUEUED' || item.status === 'PROCESSING'));
+      if (pending && retries > 0) {
+        setTimeout(() => { if (selectedIdRef.current === conversationId) void loadMessages(conversationId, retries - 1); }, 3000);
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron cargar los mensajes'); }
   }, []);
 
