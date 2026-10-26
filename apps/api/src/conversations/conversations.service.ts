@@ -1,9 +1,9 @@
 import { extname } from 'node:path';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InstanceStatus, MessageDirection, MessageStatus, MessageType, Prisma, UserRole, type ConversationStatus } from '@prisma/client';
+import { InstanceStatus, MessageDirection, MessageStatus, MessageType, Prisma, UserRole, WhatsAppProvider, type ConversationStatus } from '@prisma/client';
 import { AgentAccessService } from '../common/services/agent-access.service';
 import type { JwtUser } from '../common/types/jwt-user';
-import { findExistingContactWaId } from '../common/utils/contact-identity';
+import { findExistingContactWaId, normalizePhone } from '../common/utils/contact-identity';
 import { DealsService } from '../crm/deals.service';
 import { LeadsService } from '../crm/leads.service';
 import { transcodeToOggOpus } from '../media/audio-transcode';
@@ -363,8 +363,9 @@ export class ConversationsService {
     const instance = await this.prisma.whatsAppInstance.findFirst({ where: { id: instanceId, companyId, active: true } });
     if (!instance) throw new NotFoundException('Instancia de WhatsApp no encontrada');
     if (instance.status !== InstanceStatus.CONNECTED) throw new BadRequestException('La instancia de WhatsApp no está conectada');
+    if (instance.provider === WhatsAppProvider.CLIENERA_CHAT) throw new BadRequestException('Clienera Chat es el chat de la web: elige una línea de WhatsApp para escribir a un número');
 
-    const phone = rawPhone.replace(/[^0-9]/g, '');
+    const phone = normalizePhone(rawPhone);
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
     // El número puede estar guardado como un @lid: reusar ese contacto en vez de crear otro.
     const waId = (await findExistingContactWaId(this.prisma, companyId, phone)) ?? `${phone}@s.whatsapp.net`;

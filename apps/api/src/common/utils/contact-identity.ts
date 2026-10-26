@@ -1,5 +1,12 @@
 import type { PrismaService } from '../../prisma/prisma.service';
 
+// Solo dígitos, y un celular peruano escrito sin código (9 dígitos que empiezan con 9) se
+// completa con 51: sin código WhatsApp lo acepta como "enviado" pero nunca lo entrega.
+export function normalizePhone(raw: string): string {
+  const phone = raw.replace(/[^0-9]/g, '');
+  return /^9\d{8}$/.test(phone) ? `51${phone}` : phone;
+}
+
 // waId con el que la empresa ya tiene guardado a este número, o null si es un contacto nuevo.
 // WhatsApp puede tenerlo como un @lid opaco (ver session-manager del worker), y armar siempre
 // '<numero>@s.whatsapp.net' creaba un segundo contacto para alguien ya conocido. Además del

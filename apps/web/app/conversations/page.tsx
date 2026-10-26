@@ -14,6 +14,7 @@ import { AppShell } from '@/components/app-shell';
 import { useConfirm } from '@/components/confirm-provider';
 import { MultiSelectFilter } from '@/components/multi-select-filter';
 import { playNotificationSound, readSoundPref, writeSoundPref } from '@/lib/notification-sound';
+import { buildPhone, DEFAULT_COUNTRY, OTHER_COUNTRY, PHONE_COUNTRIES, splitPhone } from '@/lib/phone-countries';
 import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 // Preferencia de sonido del panel de agentes — global para todo el navegador (a diferencia
@@ -767,6 +768,8 @@ export default function ConversationsPage() {
   const [newChatModal, setNewChatModal] = useState(false);
   const [newChatInstances, setNewChatInstances] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [newChatInstanceId, setNewChatInstanceId] = useState('');
+  const [newChatCountry, setNewChatCountry] = useState(DEFAULT_COUNTRY);
+  const [newChatDial, setNewChatDial] = useState('');
   const [newChatPhone, setNewChatPhone] = useState('');
   const [newChatName, setNewChatName] = useState('');
   const [newChatText, setNewChatText] = useState('');
@@ -1752,13 +1755,17 @@ export default function ConversationsPage() {
 
   const openNewChatModal = async () => {
     setNewChatError('');
+    setNewChatCountry(DEFAULT_COUNTRY);
+    setNewChatDial('');
     setNewChatPhone('');
     setNewChatName('');
     setNewChatText('');
     setNewChatModal(true);
     try {
-      const instances = await apiFetch<Array<{ id: string; name: string; status: string }>>('/instances');
-      const connected = instances.filter((instance) => instance.status === 'CONNECTED');
+      const instances = await apiFetch<Array<{ id: string; name: string; status: string; provider?: string }>>('/instances');
+      // Clienera Chat es el chat de la web: figura siempre "conectada" pero no puede escribirle a
+      // un número de WhatsApp, y el mensaje quedaba como enviado sin salir nunca.
+      const connected = instances.filter((instance) => instance.status === 'CONNECTED' && instance.provider !== 'CLIENERA_CHAT');
       setNewChatInstances(connected);
       const preferred = lineFilterRef.current && connected.some((i) => i.id === lineFilterRef.current) ? lineFilterRef.current : '';
       setNewChatInstanceId((current) => preferred || (current && connected.some((i) => i.id === current) ? current : connected[0]?.id || ''));
@@ -1769,10 +1776,25 @@ export default function ConversationsPage() {
 
   const closeNewChatModal = () => setNewChatModal(false);
 
+  // Reparte un número completo entre el selector de país y la casilla del número.
+  const fillNewChatPhone = (raw: string) => {
+    const parts = splitPhone(raw);
+    setNewChatCountry(parts.country);
+    setNewChatDial(parts.customDial);
+    setNewChatPhone(parts.national);
+  };
+
+  // Si pegan el número con "+" o con el código adelante, se separa solo.
+  const changeNewChatPhone = (value: string) => {
+    const digits = value.replace(/\D/g, '');
+    if (value.trim().startsWith('+') && digits.length > 9) { fillNewChatPhone(digits); return; }
+    setNewChatPhone(digits);
+  };
+
   // Clicking an auto-linked phone number inside a message opens "Nuevo chat" pre-filled
   // with that number, instead of sending the agent out to wa.me.
   const openNewChatWithPhone = (digits: string) => {
-    void openNewChatModal().then(() => setNewChatPhone(digits));
+    void openNewChatModal().then(() => fillNewChatPhone(digits));
   };
 
   // Clic en el nombre de quien escribió en un grupo: abre su chat individual en la misma línea del
@@ -1795,7 +1817,7 @@ export default function ConversationsPage() {
       }
     } catch { /* si la búsqueda falla, se ofrece crear el chat */ }
     void openNewChatModal().then(() => {
-      setNewChatPhone(digits);
+      fillNewChatPhone(digits);
       setNewChatName(authorName(author) || '');
       setNewChatInstanceId(lineId);
     });
@@ -1803,14 +1825,15 @@ export default function ConversationsPage() {
 
   const submitNewChat = async () => {
     if (!newChatInstanceId) { setNewChatError('Selecciona la línea de WhatsApp desde la que vas a escribir'); return; }
-    if (newChatPhone.replace(/[^0-9]/g, '').length < 8) { setNewChatError('Ingresa un número válido con código de país'); return; }
+    const target = buildPhone({ country: newChatCountry, customDial: newChatDial, national: newChatPhone });
+    if (!target.phone) { setNewChatError(target.error || 'Número inválido'); return; }
     if (!newChatText.trim()) { setNewChatError('Escribe el primer mensaje'); return; }
     setNewChatSaving(true);
     setNewChatError('');
     try {
       const message = await apiFetch<{ conversationId: string }>('/conversations/start', {
         method: 'POST',
-        body: JSON.stringify({ instanceId: newChatInstanceId, phone: newChatPhone.trim(), text: newChatText.trim(), name: newChatName.trim() || undefined }),
+        body: JSON.stringify({ instanceId: newChatInstanceId, phone: target.phone, text: newChatText.trim(), name: newChatName.trim() || undefined }),
       });
       await loadConversations();
       setSelectedId(message.conversationId);
@@ -3082,9 +3105,6 @@ export default function ConversationsPage() {
             <div className="modal-header"><h2>Nuevo chat</h2><p>Escríbele primero a un número que todavía no te ha contactado.</p></div>
             <div className="modal-body">
               {newChatError && <div className="error-box">{newChatError}</div>}
-              <div className="warning-box">
-                <strong>Ten cuidado:</strong> este número simula tu WhatsApp normal, no la API oficial de negocios. Escribirle a desconocidos que no te han contactado puede generar reportes de spam y, si se abusa, el bloqueo de tu número. Úsalo solo con contactos legítimos (ej. un cliente que te dejó su número por otro medio).
-              </div>
               <div className="form-grid">
                 <div className="field">
                   <label>Línea de WhatsApp</label>
@@ -3094,8 +3114,15 @@ export default function ConversationsPage() {
                   </select>
                 </div>
                 <div className="field">
-                  <label>Número (con código de país)</label>
-                  <input value={newChatPhone} onChange={(e) => setNewChatPhone(e.target.value)} placeholder="Ej: 51999999999" />
+                  <label>Número de WhatsApp</label>
+                  <div className="phone-input">
+                    <select value={newChatCountry} onChange={(e) => setNewChatCountry(e.target.value)} aria-label="País">
+                      {PHONE_COUNTRIES.map((country) => <option value={country.iso} key={country.iso}>{country.name} +{country.dial}</option>)}
+                      <option value={OTHER_COUNTRY}>Otro país</option>
+                    </select>
+                    {newChatCountry === OTHER_COUNTRY && <input className="phone-input-dial" value={newChatDial} onChange={(e) => setNewChatDial(e.target.value.replace(/\D/g, ''))} placeholder="+ código" inputMode="numeric" aria-label="Código de país" />}
+                    <input value={newChatPhone} onChange={(e) => changeNewChatPhone(e.target.value)} placeholder={newChatCountry === 'PE' ? 'Ej: 987654321' : 'Número'} inputMode="tel" aria-label="Número" />
+                  </div>
                 </div>
                 <div className="field">
                   <label>Nombre (opcional)</label>

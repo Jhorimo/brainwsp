@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { MessageDirection, MessageStatus, MessageType, WhatsAppProvider } from '@prisma/client';
 import { basename, extname } from 'node:path';
 import type { ApiClientContext } from '../common/types/jwt-user';
-import { findExistingContactWaId } from '../common/utils/contact-identity';
+import { findExistingContactWaId, normalizePhone } from '../common/utils/contact-identity';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -152,7 +152,7 @@ export class MessagesService {
       throw new BadRequestException('El provider META_CLOUD está reservado para la siguiente fase y todavía no puede enviar mensajes');
     }
 
-    const phone = rawTo.replace(/[^0-9]/g, '');
+    const phone = normalizePhone(rawTo);
     if (phone.length < 8) throw new BadRequestException('Número de destino inválido');
     // Reusar el waId que la empresa ya tiene para este número (puede ser un @lid).
     const waId = (await findExistingContactWaId(this.prisma, client.companyId, phone)) ?? `${phone}@s.whatsapp.net`;
