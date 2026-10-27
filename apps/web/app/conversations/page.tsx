@@ -2749,7 +2749,7 @@ export default function ConversationsPage() {
                   <div className="searchbox clearable">
                     <Search size={16} />
                     <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setSearchOpen(false); } }} placeholder="Buscar cliente o palabra en la conversación..." />
-                    {search && <button className="searchbox-clear" onClick={() => setSearch('')} title="Limpiar búsqueda"><X size={14} /></button>}
+                    {search && <button className="searchbox-clear" onClick={() => { setSearch(''); setSearchOpen(false); }} title="Cerrar búsqueda" aria-label="Cerrar búsqueda"><X size={14} /></button>}
                   </div>
                 </>
               ) : (
