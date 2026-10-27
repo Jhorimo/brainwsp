@@ -27,12 +27,15 @@
   // vive embebido dentro de OTRO software (ver AGENTS.md) y el usuario de ese software no
   // siempre quiere ver la burbuja flotando encima de su propia UI.
   var minimizedStorageKey = 'clienera_chat_minimized_' + slug;
-  var minimized = false;
-  try { minimized = localStorage.getItem(minimizedStorageKey) === '1'; } catch (e) {}
+  // Arranca minimizado por defecto (solo la pestaña del borde): la burbuja + mascota tapaba
+  // botones/totales de la UI anfitriona (p.ej. el POS). Solo se muestra expandido si el
+  // visitante ya la restauró antes en este navegador ('0' guardado por setMinimized).
+  var minimized = true;
+  try { minimized = localStorage.getItem(minimizedStorageKey) !== '0'; } catch (e) {}
 
   var CHAT_ICON = '<svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   var CLOSE_ICON = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  var MINUS_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="4" y1="12" x2="20" y2="12"/></svg>';
+  var SMALL_CLOSE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
   var CHEVRON_ICON = function (dir) {
     return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
       (dir === 'right' ? '<polyline points="9 6 15 12 9 18"/>' : '<polyline points="15 6 9 12 15 18"/>') + '</svg>';
@@ -121,16 +124,20 @@
   // pensado para cuando este widget está embebido dentro de otro software y estorba sobre su
   // propia UI (ver comentario de minimizedStorageKey). Oculto hasta que el bootstrap confirme
   // que la empresa permite minimizar (allowMinimize, default true).
+  // X roja sobre la esquina superior del botón (como un badge de notificación): bien visible
+  // para que el usuario del software anfitrión sepa cómo quitarla de encima y seguir
+  // trabajando. Pegada al botón y no más arriba para no chocar con el panel abierto (bottom:88px).
   var minimizeBadge = document.createElement('button');
   minimizeBadge.setAttribute('aria-label', 'Ocultar burbuja de chat');
-  minimizeBadge.innerHTML = MINUS_ICON;
+  minimizeBadge.setAttribute('title', 'Ocultar chat');
+  minimizeBadge.innerHTML = SMALL_CLOSE_ICON;
   minimizeBadge.style.cssText =
-    'position:fixed;bottom:84px;' + side +
-    'z-index:2147483001;width:22px;height:22px;border-radius:50%;border:none;' +
-    'background:rgba(25,28,40,.55);color:#fff;cursor:pointer;display:none;align-items:center;justify-content:center;' +
-    'opacity:.7;transition:opacity .15s ease,transform .15s ease;';
-  minimizeBadge.onmouseenter = function () { minimizeBadge.style.opacity = '1'; minimizeBadge.style.transform = 'scale(1.1)'; };
-  minimizeBadge.onmouseleave = function () { minimizeBadge.style.opacity = '.7'; minimizeBadge.style.transform = 'scale(1)'; };
+    'position:fixed;bottom:64px;' + (position === 'left' ? 'left:12px;' : 'right:12px;') +
+    'z-index:2147483001;width:24px;height:24px;border-radius:50%;border:2px solid #fff;padding:0;' +
+    'background:#e5383b;color:#fff;cursor:pointer;display:none;align-items:center;justify-content:center;' +
+    'box-shadow:0 2px 6px rgba(0,0,0,.3);transition:background .15s ease,transform .15s ease;';
+  minimizeBadge.onmouseenter = function () { minimizeBadge.style.background = '#c1121f'; minimizeBadge.style.transform = 'scale(1.12)'; };
+  minimizeBadge.onmouseleave = function () { minimizeBadge.style.background = '#e5383b'; minimizeBadge.style.transform = 'scale(1)'; };
 
   // Pestaña delgada pegada al borde para restaurar la burbuja minimizada.
   var restoreTab = document.createElement('button');
@@ -343,8 +350,8 @@
     if (position === 'left') { launcher.style.left = '20px'; launcher.style.right = ''; }
     else { launcher.style.right = '20px'; launcher.style.left = ''; }
 
-    if (position === 'left') { minimizeBadge.style.left = '20px'; minimizeBadge.style.right = ''; }
-    else { minimizeBadge.style.right = '20px'; minimizeBadge.style.left = ''; }
+    if (position === 'left') { minimizeBadge.style.left = '12px'; minimizeBadge.style.right = ''; }
+    else { minimizeBadge.style.right = '12px'; minimizeBadge.style.left = ''; }
 
     if (position === 'left') { restoreTab.style.left = '0'; restoreTab.style.right = ''; restoreTab.style.borderRadius = '0 10px 10px 0'; }
     else { restoreTab.style.right = '0'; restoreTab.style.left = ''; restoreTab.style.borderRadius = '10px 0 0 10px'; }
