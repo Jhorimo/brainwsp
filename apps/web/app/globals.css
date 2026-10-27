@@ -890,6 +890,9 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .searchbox.clearable input { padding-right: 34px; }
 .searchbox-clear { position: absolute; top: 0; bottom: 0; right: 6px; margin: auto 0; width: 22px; height: 22px; border: 0; background: none; color: var(--text-neutral-3); padding: 0; display: grid; place-items: center; cursor: pointer; border-radius: 50%; line-height: 1; }
 .searchbox-clear:hover { color: var(--text); background: var(--surface-2); }
+.searchbox .searchbox-clear svg { position: static; }
+.searchbox .searchbox-clear { background: var(--surface-2); color: var(--text-neutral-1); }
+.searchbox .searchbox-clear:hover { background: var(--line); color: var(--text); }
 
 .table-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; overflow-y: hidden; }
 /* Para paginas tipo "Usuarios" del superadmin: la tabla debe scrollear ella sola dentro
@@ -1035,7 +1038,7 @@ tr:last-child td { border-bottom: 0; }
    quiera ocupar el alto disponible sin generar scroll de pagina — ver tambien .page-fit. */
 .chat-layout { height: calc(100vh - var(--shell-chrome, 156px) - var(--banner-h, 0px)); min-height: 590px; display: grid; grid-template-columns: 310px minmax(460px, 1fr) 280px; background: var(--surface); border: 1px solid var(--line); border-radius: 17px; overflow: hidden; box-shadow: 0 5px 18px var(--shadow-info-5); }
 .chat-list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.chat-list-head { padding: 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.chat-list-head { padding: 10px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .searchbox-row { display: flex; align-items: center; gap: 8px; }
 .searchbox-row .searchbox { max-width: none; }
 .filters-active { border-color: var(--brand); color: var(--brand-text); background: var(--brand-soft); }
@@ -1046,8 +1049,10 @@ tr:last-child td { border-bottom: 0; }
    overflow-y a auto tambien (regla de la spec CSS cuando solo se fija un eje), y eso
    recortaba el menu "Mas filtros" (.chat-quick-menu, position: absolute) que se abre por
    debajo de esta barra — el estado cambiaba bien pero el menu quedaba invisible. */
-.chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 10px; overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-.chat-quick-filters::-webkit-scrollbar { display: none; }
+.chat-quick-filters { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-bottom: 5px; overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.chat-quick-filters::-webkit-scrollbar { height: 5px; }
+.chat-quick-filters::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+.chat-quick-filters:hover::-webkit-scrollbar-thumb { background: var(--text-neutral-3); }
 /* Altura/tipografia unificadas con .chat-filters select y .multi-select-trigger de abajo —
    antes esta pastilla usaba 27px/10px y esos otros 30px/9.5px, se notaba desalineado. */
 .chat-quick-tab { flex-shrink: 0; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 11px; font-weight: 600; }
@@ -1083,10 +1088,47 @@ tr:last-child td { border-bottom: 0; }
 .multi-select-clear:hover { background: var(--danger-soft); }
 .chat-filters select:focus { border-color: var(--border-info-2); outline: 0; }
 .filter-clear-row { flex-basis: 100%; display: flex; justify-content: flex-end; }
+.chat-filters-head { flex-basis: 100%; display: flex; align-items: center; gap: 8px; }
+.chat-filters-title { flex: 1; font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .45px; color: var(--text-neutral-7); }
+.chat-filters-hide { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text-neutral-1); display: grid; place-items: center; padding: 0; cursor: pointer; }
+.chat-filters-hide:hover { color: var(--brand-text); background: var(--brand-soft); }
 .filter-clear { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px; border: 1px solid var(--border-danger-1); border-radius: 999px; background: var(--surface-neutral-15); color: var(--danger-text); font-size: 10.5px; font-weight: 700; }
 .filter-clear:hover { background: var(--surface-neutral-16); border-color: var(--border-danger-3); }
 .chat-list-head h2 { margin: 0; font-size: 13px; }
 .chat-list-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.chat-list-head .chat-head-bar { display: flex; align-items: center; gap: 2px; height: 40px; }
+.chat-head-bar .searchbox { max-width: none; }
+.chat-head-bar .icon-button.ghost { width: 32px; height: 36px; border-radius: 9px; }
+.chat-head-bar .icon-button.ghost.filters-active { color: var(--brand-text); background: var(--brand-soft); }
+.chat-head-new { width: 36px; height: 36px; border-radius: 10px; margin-left: 4px; flex-shrink: 0; }
+.chat-head-title { flex: 1; min-width: 0; padding-left: 4px; font-size: 15px !important; }
+.line-picker { position: relative; flex: 1; min-width: 0; }
+.line-picker-trigger { width: 100%; max-width: 100%; height: 36px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 10px; padding: 0 4px 0 6px; background: transparent; color: var(--text); font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.line-picker-trigger:hover, .line-picker-trigger.open { background: var(--surface-2); }
+.line-picker-trigger:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--shadow-info-4); }
+.line-picker-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.line-picker-caret { flex-shrink: 0; color: var(--text-neutral-3); }
+.line-picker-badge { flex-shrink: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--brand); color: var(--on-color, #fff); font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.line-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: #9aa5b8; box-shadow: 0 0 0 3px var(--surface); }
+.line-dot.ok { background: #16a34a; }
+.line-dot.warn { background: #f59e0b; }
+.line-dot.off { background: #dc2626; }
+.line-picker-all-icon, .line-picker-web-icon { flex-shrink: 0; color: var(--brand-text); }
+.line-picker-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 25; width: 290px; max-width: calc(100vw - 32px); max-height: 380px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 14px 34px var(--shadow-info-5, rgba(23,32,51,.16)); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.line-picker-search { display: flex; align-items: center; gap: 7px; height: 34px; margin-bottom: 4px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-neutral-3); }
+.line-picker-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 12px; }
+.line-picker-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: 9px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.line-picker-option:hover { background: var(--surface-2); }
+.line-picker-option.selected { background: var(--brand-soft); }
+.line-picker-option-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.line-picker-option-copy strong { font-size: 12.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.line-picker-option-copy small { font-size: 10.5px; color: var(--text-neutral-7); }
+.line-picker-check { flex-shrink: 0; color: var(--brand-text); }
+.line-picker-empty { padding: 12px; font-size: 12px; color: var(--text-neutral-7); text-align: center; }
+/* Pantalla grande: la bandeja cubre el menú lateral y la barra superior, sin salir de la pestaña.
+   z-index 15: sobre la barra (10) y la franja de soporte (12), debajo de los menús flotantes (20+). */
+@media (min-width: 641px) { .chat-layout.expanded { position: fixed; inset: 0; z-index: 15; height: auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; } }
+@media (max-width: 640px) { .inbox-expand-button { display: none !important; } }
 .chat-list-scroll { flex: 1; min-height: 0; overflow: auto; }
 .chat-row { width: 100%; background: var(--surface); border: 0; border-bottom: 1px solid var(--border-neutral-4); border-left: 3px solid transparent; padding: 13px 14px; text-align: left; display: grid; grid-template-columns: 39px 1fr auto auto; gap: 10px; align-items: start; }
 .chat-row.pinned { background: var(--surface-neutral-17); }

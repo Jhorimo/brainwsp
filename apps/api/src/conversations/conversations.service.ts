@@ -89,7 +89,7 @@ export class ConversationsService {
     const [instances, unread] = await Promise.all([
       this.prisma.whatsAppInstance.findMany({
         where: { companyId: user.companyId, active: true },
-        select: { id: true, name: true, status: true, provider: true, lastConnectedAt: true, createdAt: true },
+        select: { id: true, name: true, status: true, provider: true, phoneNumber: true, lastConnectedAt: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.conversation.groupBy({

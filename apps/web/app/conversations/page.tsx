@@ -4,7 +4,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { AlertCircle, AlertTriangle, Archive, ArchiveRestore, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, Megaphone, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, Volume2, VolumeX, X, Zap, ZoomIn } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Archive, ArchiveRestore, ArrowLeft, Ban, Bot, CalendarDays, Check, CheckCheck, CheckSquare, ChevronDown, ChevronUp, Clock, Copy, FileText, Forward, Globe, Handshake, Info, Kanban, Lightbulb, MapPin, Maximize2, Megaphone, MessageCircle, Mic, Minimize2, MoreHorizontal, Paperclip, Pencil, Phone, Pin, Plus, Reply, Search, Send, Settings, SlidersHorizontal, Smile, Sticker as StickerIcon, Square, StickyNote, Star, Tag as TagIcon, Trash2, User, Users, UserRoundCheck, Volume2, VolumeX, X, Zap, ZoomIn } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { Theme as EmojiTheme, type EmojiClickData } from 'emoji-picker-react';
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes';
@@ -12,6 +12,7 @@ import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { useTheme } from '@/components/theme-provider';
 import { AppShell } from '@/components/app-shell';
 import { useConfirm } from '@/components/confirm-provider';
+import { LinePicker } from '@/components/line-picker';
 import { MultiSelectFilter } from '@/components/multi-select-filter';
 import { playNotificationSound, readSoundPref, writeSoundPref } from '@/lib/notification-sound';
 import { buildPhone, DEFAULT_COUNTRY, OTHER_COUNTRY, PHONE_COUNTRIES, splitPhone } from '@/lib/phone-countries';
@@ -54,7 +55,7 @@ type Conversation = {
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
 type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin };
 type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; thumbnailUrl?: string; ctwaClid?: string; conversionSource?: string; conversionApp?: string };
-type LineSummary = { id: string; name: string; status: string; provider: string; lastConnectedAt: string | null; unreadChats: number };
+type LineSummary = { id: string; name: string; status: string; provider: string; phoneNumber?: string | null; lastConnectedAt: string | null; unreadChats: number };
 const LINE_FILTER_KEY = 'brainwsp_line_filter';
 const lineStatusLabel: Record<string, string> = { CONNECTED: 'conectada', CONNECTING: 'conectando', RECONNECTING: 'reconectando', QR_PENDING: 'esperando QR', DISCONNECTED: 'desconectada', LOGGED_OUT: 'sin vincular', ERROR: 'con error' };
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
@@ -596,6 +597,16 @@ export default function ConversationsPage() {
   const [contactPanelOpen, setContactPanelOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [search, setSearch] = useState('');
+  // La búsqueda vive escondida detrás de la lupa (como WhatsApp) para no gastar una fila entera.
+  const [searchOpen, setSearchOpen] = useState(false);
+  // "Pantalla grande": la bandeja tapa el menú lateral y la barra superior dentro de la misma
+  // pestaña (no es la pantalla completa del navegador). Se recuerda por navegador.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { try { setExpanded(localStorage.getItem('brainwsp_inbox_expanded') === '1'); } catch {} }, []);
+  const toggleExpanded = () => setExpanded((current) => {
+    try { localStorage.setItem('brainwsp_inbox_expanded', current ? '0' : '1'); } catch {}
+    return !current;
+  });
   const [filterAgent, setFilterAgent] = useState('');
   // Multi-seleccion, resueltas en el servidor (ver conversationsQuery) — no solo sobre lo
   // ya cargado en pantalla, a diferencia de filterAgent de arriba.
@@ -2716,41 +2727,44 @@ export default function ConversationsPage() {
 
   return (
     <>
-    <AppShell title="Conversaciones" subtitle="Bandeja en tiempo real para agentes">
+    <AppShell
+      title="Conversaciones"
+      actions={(
+        <>
+        <button className="icon-button inbox-expand-button" type="button" onClick={toggleExpanded} title="Pantalla grande: ocultar el menú y esta barra" aria-label="Pantalla grande"><Maximize2 size={18} /></button>
+        <button className="icon-button" type="button" onClick={toggleSound} title={soundEnabled ? 'Silenciar el sonido de mensajes nuevos' : 'Activar el sonido de mensajes nuevos'} aria-label={soundEnabled ? 'Silenciar sonido' : 'Activar sonido'}>
+          {soundEnabled ? <Volume2 size={19} /> : <VolumeX size={19} />}
+        </button>
+        </>
+      )}
+    >
       {error && <div className="error-box">{error}</div>}
-      <section className={`chat-layout ${mobileChatOpen ? 'mobile-chat-open' : ''}`}>
+      <section className={`chat-layout ${mobileChatOpen ? 'mobile-chat-open' : ''} ${expanded ? 'expanded' : ''}`}>
         <aside className="chat-list">
           <div className="chat-list-head">
-            <div className="chat-list-title-row">
-              <h2>Conversaciones</h2>
-              <button className="button small" onClick={() => void openNewChatModal()} title="Iniciar una conversación con un número nuevo"><Plus size={14} />Nuevo chat</button>
+            <div className="chat-head-bar">
+              {searchOpen ? (
+                <>
+                  <button className="icon-button ghost" onClick={() => { setSearch(''); setSearchOpen(false); }} title="Cerrar búsqueda" aria-label="Cerrar búsqueda"><ArrowLeft size={18} /></button>
+                  <div className="searchbox clearable">
+                    <Search size={16} />
+                    <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setSearchOpen(false); } }} placeholder="Buscar cliente o palabra en la conversación..." />
+                    {search && <button className="searchbox-clear" onClick={() => setSearch('')} title="Limpiar búsqueda"><X size={14} /></button>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {lines.length > 1 ? (
+                    <LinePicker lines={lines} value={lineFilter} onChange={changeLineFilter} />
+                  ) : <h2 className="chat-head-title">Conversaciones</h2>}
+                  <button className="icon-button ghost" onClick={() => setSearchOpen(true)} title="Buscar cliente o palabra" aria-label="Buscar"><Search size={18} /></button>
+                  <button className={`icon-button ghost ${hasActiveFilters ? 'filters-active' : ''}`} onClick={() => setFiltersOpen((v) => !v)} title="Filtrar por agente, departamento o proyecto" aria-label="Filtros"><SlidersHorizontal size={18} /></button>
+                  {expanded && <button className="icon-button ghost inbox-expand-button" onClick={toggleExpanded} title="Salir de pantalla grande" aria-label="Salir de pantalla grande"><Minimize2 size={18} /></button>}
+                  <button className="icon-button primary chat-head-new" onClick={() => void openNewChatModal()} title="Nuevo chat: escribir a un número" aria-label="Nuevo chat"><Plus size={18} /></button>
+                </>
+              )}
             </div>
-            {lines.length > 1 && (
-              <div className="line-selector">
-                <Phone size={15} className="line-selector-icon" />
-                <select value={lineFilter} onChange={(e) => changeLineFilter(e.target.value)} aria-label="Línea de WhatsApp" title="Elige qué número ver">
-                  {lines.map((line) => (
-                    <option key={line.id} value={line.id}>
-                      {line.provider === 'CLIENERA_CHAT' ? '💬 ' : ''}{line.name}{line.provider !== 'CLIENERA_CHAT' && line.status !== 'CONNECTED' ? ` (${lineStatusLabel[line.status] || line.status})` : ''}{line.unreadChats ? ` · ${line.unreadChats} sin leer` : ''}
-                    </option>
-                  ))}
-                  <option value="">Todas las líneas{lines.some((line) => line.unreadChats) ? ` · ${lines.reduce((sum, line) => sum + line.unreadChats, 0)} sin leer` : ''}</option>
-                </select>
-                <ChevronDown size={15} className="line-selector-caret" />
-              </div>
-            )}
-            <div className="searchbox-row">
-              <div className="searchbox clearable">
-                <Search size={16} />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente o palabra en la conversación..." />
-                {search && <button className="searchbox-clear" onClick={() => setSearch('')} title="Limpiar búsqueda"><X size={14} /></button>}
-              </div>
-              <button className={`icon-button ${hasActiveFilters ? 'filters-active' : ''}`} onClick={() => setFiltersOpen((v) => !v)} title="Filtrar por agente, departamento o proyecto"><SlidersHorizontal size={16} /></button>
-              <button className="icon-button" onClick={toggleSound} title={soundEnabled ? 'Silenciar sonido de notificaciones' : 'Activar sonido de notificaciones'}>
-                {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
-              </button>
-            </div>
-            <div className="chat-quick-filters">
+            <div className="chat-quick-filters" onWheel={(e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY; }}>
               <button className={`chat-quick-tab ${quickFilter === 'all' ? 'active' : ''}`} onClick={() => setQuickFilter('all')}>Todos</button>
               <button className={`chat-quick-tab ${quickFilter === 'unread' ? 'active' : ''}`} onClick={() => setQuickFilter('unread')}>No leídos{unreadTabCount > 0 && ` ${unreadTabCount}`}</button>
               <button className={`chat-quick-tab ${quickFilter === 'pinned' ? 'active' : ''}`} onClick={() => setQuickFilter('pinned')}>Favoritos</button>
@@ -2761,6 +2775,11 @@ export default function ConversationsPage() {
             </div>
             {filtersOpen && (
             <div className="chat-filters">
+              <div className="chat-filters-head">
+                <span className="chat-filters-title">Filtros</span>
+                {hasActiveFilters && <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept([]); setFilterProject([]); setFilterStage([]); setFilterTags([]); setDateFilter('all'); }}><X size={12} />Limpiar</button>}
+                <button className="chat-filters-hide" onClick={() => setFiltersOpen(false)} title="Ocultar filtros" aria-label="Ocultar filtros"><ChevronUp size={16} /></button>
+              </div>
               <div className="chat-date-presets">
                 <span className="chat-filters-label">Periodo</span>
                 {(['all', 'today', 'yesterday', '7d', '30d', 'month'] as DatePreset[]).map((preset) => (
@@ -2796,11 +2815,6 @@ export default function ConversationsPage() {
                 selected={filterTags}
                 onChange={setFilterTags}
               />
-              {hasActiveFilters && (
-                <div className="filter-clear-row">
-                  <button className="filter-clear" onClick={() => { setFilterAgent(''); setFilterDept([]); setFilterProject([]); setFilterStage([]); setFilterTags([]); setDateFilter('all'); }}><X size={12} />Limpiar filtros</button>
-                </div>
-              )}
             </div>
             )}
           </div>
