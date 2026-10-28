@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { MediaDedupService, objectNameFromUrl } from './media-dedup.service';
 
 const SETTINGS_ROW_ID = 1;
 
@@ -12,6 +13,7 @@ export class SystemSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly dedup: MediaDedupService,
   ) {}
 
   // Fila unica (id fijo): si nunca se configuro nada, la crea con los valores por
@@ -60,17 +62,22 @@ export class SystemSettingsService {
     });
   }
 
+  // Desde la unión de duplicados un mismo archivo puede estar en varios chats (y antes ya
+  // lo compartían los stickers guardados y los reenvíos): se quita de este mensaje y el
+  // objeto solo se borra de MinIO si ya nadie más lo usa.
   async deleteFile(messageId: string) {
-    const message = await this.prisma.message.findUniqueOrThrow({
-      where: { id: messageId },
-      select: { mediaUrl: true },
+    return this.dedup.exclusive(async () => {
+      const message = await this.prisma.message.findUniqueOrThrow({
+        where: { id: messageId },
+        select: { mediaUrl: true },
+      });
+      if (message.mediaUrl) {
+        const unused = await this.dedup.unreferencedObjects([objectNameFromUrl(message.mediaUrl)], [messageId]);
+        await this.storage.removeObjects(unused);
+      }
+      await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: null } });
+      return { ok: true };
     });
-    if (message.mediaUrl) {
-      const objectName = message.mediaUrl.split('/').pop() as string;
-      await this.storage.removeObject(objectName);
-    }
-    await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: null } });
-    return { ok: true };
   }
 
   // Reemplaza al script manual /root/mipse/brainwsp/purgar-media-vieja.sh (armado y
@@ -83,6 +90,10 @@ export class SystemSettingsService {
   // los borra a mano desde el panel si hace falta espacio.
   @Cron('30 4 * * *')
   async purgeOldMedia() {
+    return this.dedup.exclusive(() => this.purgeOldMediaUnlocked());
+  }
+
+  private async purgeOldMediaUnlocked() {
     const { mediaRetentionDays } = await this.get();
     const cutoff = new Date(Date.now() - mediaRetentionDays * 24 * 60 * 60 * 1000);
 
@@ -100,9 +111,14 @@ export class SystemSettingsService {
       return;
     }
 
-    const objectNames = toPurge.map((m) => (m.mediaUrl as string).split('/').pop() as string);
+    // Un archivo compartido con un mensaje que no se purga (una imagen o PDF idéntico, un
+    // reenvío reciente) o con un sticker/flujo se conserva: solo se quita de estos mensajes.
+    const objectNames = toPurge.map((m) => objectNameFromUrl(m.mediaUrl as string));
+    let removed = 0;
     try {
-      await this.storage.removeObjects(objectNames);
+      const unused = await this.dedup.unreferencedObjects(objectNames, toPurge.map((m) => m.id));
+      await this.storage.removeObjects(unused);
+      removed = unused.length;
     } catch (error) {
       this.logger.error(`purga de media: fallo el borrado en MinIO, no se toca la base — ${error instanceof Error ? error.message : error}`);
       return;
@@ -112,6 +128,6 @@ export class SystemSettingsService {
       where: { id: { in: toPurge.map((m) => m.id) } },
       data: { mediaUrl: null },
     });
-    this.logger.log(`purga de media: ${count} archivos borrados (retencion: ${mediaRetentionDays} dias)`);
+    this.logger.log(`purga de media: ${count} mensajes sin archivo, ${removed} archivos borrados del disco (retencion: ${mediaRetentionDays} dias)`);
   }
 }

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SystemSettingsController } from './system-settings.controller';
+import { MediaDedupService } from './media-dedup.service';
 import { SystemSettingsService } from './system-settings.service';
 
 // StorageService no se importa aparte: StorageModule es @Global() (ver
@@ -9,7 +10,7 @@ import { SystemSettingsService } from './system-settings.service';
 @Module({
   imports: [AuthModule],
   controllers: [SystemSettingsController],
-  providers: [SystemSettingsService, RolesGuard],
+  providers: [SystemSettingsService, MediaDedupService, RolesGuard],
   exports: [SystemSettingsService],
 })
 export class SystemSettingsModule {}
