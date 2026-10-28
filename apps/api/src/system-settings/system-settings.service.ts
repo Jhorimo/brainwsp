@@ -42,41 +42,45 @@ export class SystemSettingsService {
     return settings.maxMediaSizeBytes;
   }
 
+  // Una fila por archivo real en MinIO, no por mensaje: desde la unión de duplicados el
+  // mismo archivo puede estar en muchos chats y antes aparecía repetido en la lista.
+  // fileSize null se excluye a proposito: Postgres ordena NULL primero en un
+  // "ORDER BY ... DESC" (no al final como uno esperaria), asi que sin este filtro los
+  // 10 primeros eran mensajes SIN peso registrado (bug de larga data: gran parte de los
+  // documentos/audios nunca guardo su fileSize al recibirse), no los realmente pesados.
   async heaviestFiles() {
-    // fileSize null se excluye a proposito: Postgres ordena NULL primero en un
-    // "ORDER BY ... DESC" (no al final como uno esperaria), asi que sin este filtro los
-    // 10 primeros eran mensajes SIN peso registrado (bug de larga data: gran parte de los
-    // documentos/audios nunca guardo su fileSize al recibirse), no los realmente pesados.
-    return this.prisma.message.findMany({
-      where: { mediaUrl: { not: null }, fileSize: { not: null } },
-      orderBy: { fileSize: 'desc' },
-      take: 10,
-      select: {
-        id: true,
-        fileName: true,
-        fileSize: true,
-        type: true,
-        createdAt: true,
-        company: { select: { name: true } },
-      },
-    });
+    const rows = await this.prisma.$queryRaw<{ id: string; fileName: string | null; fileSize: number; type: string; createdAt: Date; uses: number; companies: string | null }[]>`
+      SELECT (array_agg(m.id ORDER BY m."createdAt" DESC))[1] AS id,
+             (array_agg(m."fileName" ORDER BY m."createdAt" DESC))[1] AS "fileName",
+             max(m."fileSize")::float8 AS "fileSize",
+             (array_agg(m.type::text ORDER BY m."createdAt" DESC))[1] AS type,
+             max(m."createdAt") AS "createdAt",
+             count(*)::int AS uses,
+             string_agg(DISTINCT c.name, ', ') AS companies
+      FROM "Message" m JOIN "Company" c ON c.id = m."companyId"
+      WHERE m."mediaUrl" IS NOT NULL AND m."fileSize" IS NOT NULL
+      GROUP BY m."mediaUrl"
+      ORDER BY max(m."fileSize") DESC
+      LIMIT 10`;
+    return rows.map(({ companies, ...row }) => ({ ...row, company: companies ? { name: companies } : null }));
   }
 
-  // Desde la unión de duplicados un mismo archivo puede estar en varios chats (y antes ya
-  // lo compartían los stickers guardados y los reenvíos): se quita de este mensaje y el
-  // objeto solo se borra de MinIO si ya nadie más lo usa.
+  // Borra el archivo real: se quita de todos los mensajes que lo comparten (desde la unión
+  // de duplicados pueden ser muchos chats) y se elimina de MinIO, salvo que lo siga usando
+  // algo que no es un mensaje (respuesta rápida, sticker guardado, flujo…).
   async deleteFile(messageId: string) {
     return this.dedup.exclusive(async () => {
       const message = await this.prisma.message.findUniqueOrThrow({
         where: { id: messageId },
         select: { mediaUrl: true },
       });
-      if (message.mediaUrl) {
-        const unused = await this.dedup.unreferencedObjects([objectNameFromUrl(message.mediaUrl)], [messageId]);
-        await this.storage.removeObjects(unused);
-      }
-      await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: null } });
-      return { ok: true };
+      if (!message.mediaUrl) return { ok: true, messages: 0 };
+      const sharing = await this.prisma.message.findMany({ where: { mediaUrl: message.mediaUrl }, select: { id: true } });
+      const ids = sharing.map((m) => m.id);
+      const unused = await this.dedup.unreferencedObjects([objectNameFromUrl(message.mediaUrl)], ids);
+      await this.storage.removeObjects(unused);
+      const { count } = await this.prisma.message.updateMany({ where: { id: { in: ids } }, data: { mediaUrl: null } });
+      return { ok: true, messages: count };
     });
   }
 

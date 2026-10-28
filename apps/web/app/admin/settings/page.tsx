@@ -14,6 +14,7 @@ type HeavyFile = {
   fileSize: number | null;
   type: string;
   createdAt: string;
+  uses: number;
   company: { name: string } | null;
 };
 
@@ -71,7 +72,8 @@ export default function AdminSettingsPage() {
   };
 
   const deleteFile = async (file: HeavyFile) => {
-    const ok = await confirm(`¿Borrar "${file.fileName || 'este archivo'}" (${formatMb(file.fileSize)})? El mensaje se conserva, solo se elimina el archivo.`, { danger: true, confirmText: 'Borrar' });
+    const where = file.uses > 1 ? `de los ${file.uses} chats donde está` : 'del chat donde está';
+    const ok = await confirm(`¿Borrar "${file.fileName || 'este archivo'}" (${formatMb(file.fileSize)}) ${where}? Los mensajes se conservan, solo se elimina el archivo.`, { danger: true, confirmText: 'Borrar' });
     if (!ok) return;
     try {
       await apiFetch(`/system-settings/heaviest-files/${file.id}`, { method: 'DELETE' });
@@ -117,6 +119,7 @@ export default function AdminSettingsPage() {
               <th>Archivo</th>
               <th>Tipo</th>
               <th>Peso</th>
+              <th>Usado en</th>
               <th>Empresa</th>
               <th>Fecha</th>
               <th></th>
@@ -128,6 +131,7 @@ export default function AdminSettingsPage() {
                 <td>{file.fileName || '—'}</td>
                 <td>{typeLabels[file.type] || file.type}</td>
                 <td>{formatMb(file.fileSize)}</td>
+                <td>{file.uses === 1 ? '1 chat' : `${file.uses} chats`}</td>
                 <td>{file.company?.name || '—'}</td>
                 <td>{new Date(file.createdAt).toLocaleDateString('es-PE')}</td>
                 <td>
@@ -138,7 +142,7 @@ export default function AdminSettingsPage() {
               </tr>
             ))}
             {heavyFiles.length === 0 && (
-              <tr><td colSpan={6}>No hay archivos almacenados todavía.</td></tr>
+              <tr><td colSpan={7}>No hay archivos almacenados todavía.</td></tr>
             )}
           </tbody>
         </table>
