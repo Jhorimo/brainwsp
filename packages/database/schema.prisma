@@ -449,6 +449,7 @@ model Department {
   stages      PipelineStage[]
   leads       Lead[]
   deals       Deal[]
+  quickReplies QuickReply[]
 
   @@unique([companyId, name])
 }
@@ -736,9 +737,15 @@ model QuickReply {
   // Adjuntos 2.º en adelante: [{ mediaUrl, fileName, mimeType, fileSize }]. El 1.º sigue en
   // mediaUrl/fileName/... para no tocar las respuestas que ya existen.
   extraAttachments Json?
+  // null = la ven todos los departamentos. Si tiene uno, un AGENT solo la ve si es miembro.
+  departmentId String?
+  // Cuántas veces se usó: la bandeja y el "/" muestran primero las más usadas.
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   @@unique([companyId, shortcut])
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
+import { AgentAccessService } from '../common/services/agent-access.service';
 import { extname } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -29,10 +30,35 @@ export class QuickRepliesService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly systemSettings: SystemSettingsService,
+    private readonly agentAccess: AgentAccessService,
   ) {}
 
-  list(companyId: string) {
-    return this.prisma.quickReply.findMany({ where: { companyId }, orderBy: { shortcut: 'asc' } });
+  // Las más usadas primero. Un AGENT solo ve las generales y las de sus departamentos; los
+  // demás roles ven todas (las administran).
+  async list(user: { sub: string; companyId: string; role: UserRole }) {
+    const where: Prisma.QuickReplyWhereInput = { companyId: user.companyId };
+    if (user.role === UserRole.AGENT) {
+      const { departmentIds } = await this.agentAccess.getAgentAccess(user.sub);
+      where.OR = [{ departmentId: null }, { departmentId: { in: departmentIds } }];
+    }
+    return this.prisma.quickReply.findMany({
+      where,
+      orderBy: [{ usageCount: 'desc' }, { shortcut: 'asc' }],
+      include: { department: { select: { id: true, name: true } } },
+    });
+  }
+
+  // Cuenta un uso (lo llama el panel al insertar la respuesta en el compositor).
+  async markUsed(companyId: string, id: string) {
+    await this.getOwned(companyId, id);
+    await this.prisma.quickReply.update({ where: { id }, data: { usageCount: { increment: 1 }, lastUsedAt: new Date() } });
+    return { success: true };
+  }
+
+  private async checkDepartment(companyId: string, departmentId: string | null | undefined) {
+    if (!departmentId) return;
+    const found = await this.prisma.department.findFirst({ where: { id: departmentId, companyId }, select: { id: true } });
+    if (!found) throw new BadRequestException('Departamento no válido');
   }
 
   async getOwned(companyId: string, id: string) {
@@ -50,7 +76,8 @@ export class QuickRepliesService {
     return { mediaUrl: internalUrl, fileName: file.originalname, mimeType: file.mimetype, fileSize: file.size };
   }
 
-  create(companyId: string, input: { shortcut: string; title: string; content?: string } & MediaInput) {
+  async create(companyId: string, input: { shortcut: string; title: string; content?: string; departmentId?: string | null } & MediaInput) {
+    await this.checkDepartment(companyId, input.departmentId);
     if (!input.content?.trim() && !input.mediaUrl) throw new BadRequestException('Agrega un mensaje o un archivo adjunto');
     if (!input.mediaUrl && input.extraAttachments?.length) throw new BadRequestException('Falta el archivo principal');
     return this.prisma.quickReply.create({
@@ -64,15 +91,18 @@ export class QuickRepliesService {
         mimeType: input.mimeType || null,
         fileSize: input.fileSize ?? null,
         extraAttachments: cleanAttachments(input.mediaUrl ? input.extraAttachments : null),
+        departmentId: input.departmentId || null,
       },
+      include: { department: { select: { id: true, name: true } } },
     }).catch((error: unknown) => {
       if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una respuesta rápida con ese atajo');
       throw error;
     });
   }
 
-  async update(companyId: string, id: string, input: { shortcut?: string; title?: string; content?: string; active?: boolean } & MediaInput) {
+  async update(companyId: string, id: string, input: { shortcut?: string; title?: string; content?: string; active?: boolean; departmentId?: string | null } & MediaInput) {
     const item = await this.getOwned(companyId, id);
+    await this.checkDepartment(companyId, input.departmentId);
     const nextContent = input.content !== undefined ? input.content : item.content;
     const nextMediaUrl = input.mediaUrl !== undefined ? input.mediaUrl : item.mediaUrl;
     if (!nextContent?.trim() && !nextMediaUrl) throw new BadRequestException('Agrega un mensaje o un archivo adjunto');
@@ -90,7 +120,9 @@ export class QuickRepliesService {
         ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
         ...(input.fileSize !== undefined ? { fileSize: input.fileSize } : {}),
         ...(input.extraAttachments !== undefined ? { extraAttachments: cleanAttachments(input.extraAttachments) } : {}),
+        ...(input.departmentId !== undefined ? { departmentId: input.departmentId || null } : {}),
       },
+      include: { department: { select: { id: true, name: true } } },
     }).catch((error: unknown) => {
       if (String(error).includes('Unique constraint')) throw new BadRequestException('Ya existe una respuesta rápida con ese atajo');
       throw error;

@@ -16,7 +16,7 @@ import { LinePicker } from '@/components/line-picker';
 import { MultiSelectFilter } from '@/components/multi-select-filter';
 import { playNotificationSound, readSoundPref, writeSoundPref } from '@/lib/notification-sound';
 import { buildPhone, DEFAULT_COUNTRY, OTHER_COUNTRY, PHONE_COUNTRIES, splitPhone } from '@/lib/phone-countries';
-import { apiFetch, fetchAsFile, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
+import { apiFetch, fetchAsFile, getStoredCompany, getStoredUser, getToken, mediaUrl, quickReplyFileUrl, stickerFileUrl, SOCKET_URL } from '@/lib/api';
 
 // Preferencia de sonido del panel de agentes — global para todo el navegador (a diferencia
 // del widget, que la guarda por canal), ver notification-sound.ts.
@@ -66,15 +66,46 @@ type TeamUser = { id: string; name: string; email: string; role: string; active:
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
 type QuickReplyAttachment = { mediaUrl: string; fileName?: string | null; mimeType?: string | null; fileSize?: number | null };
-type QuickReply = { id: string; shortcut: string; title: string; content?: string | null; active: boolean; mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; extraAttachments?: QuickReplyAttachment[] | null };
+type QuickReply = { id: string; shortcut: string; title: string; content?: string | null; active: boolean; mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; extraAttachments?: QuickReplyAttachment[] | null; departmentId?: string | null; department?: { id: string; name: string } | null; usageCount?: number };
+
+// Las más usadas primero (igual que el orden de la API), y a igualdad por atajo.
+const byUsage = (a: QuickReply, b: QuickReply) => (b.usageCount ?? 0) - (a.usageCount ?? 0) || a.shortcut.localeCompare(b.shortcut);
+const normalizeText = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+// Variables que se reemplazan al insertar una respuesta rápida.
+const QUICK_REPLY_VARIABLES = ['{{nombre}}', '{{agente}}', '{{empresa}}'];
 // Archivo en el formulario de respuestas rápidas. `savedIndex` = posición en la respuesta ya
 // guardada (para la vista previa desde el servidor); los recién subidos traen `previewUrl`.
 type QuickReplyDraftFile = { mediaUrl: string; fileName: string; mimeType: string; fileSize: number; previewUrl?: string; savedIndex?: number };
 
 // Todos los archivos de una respuesta rápida, en orden: el principal y luego los extra.
+// Escoba (lucide "brush-cleaning"; no viene en la versión de lucide-react instalada).
+function BroomIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m16 22-1-4" /><path d="M19 13.99a1 1 0 0 0 1-1V12a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v.99a1 1 0 0 0 1 1" /><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z" /><path d="m8 22 1-4" />
+    </svg>
+  );
+}
+
 function quickReplyFiles(qr: QuickReply): QuickReplyAttachment[] {
   if (!qr.mediaUrl) return [];
   return [{ mediaUrl: qr.mediaUrl, fileName: qr.fileName, mimeType: qr.mimeType, fileSize: qr.fileSize }, ...(qr.extraAttachments ?? [])];
+}
+
+// Miniaturas (máx. 3) y total de archivos de una respuesta rápida, para la bandeja y el "/".
+function QuickReplyThumbs({ qr }: { qr: QuickReply }) {
+  const files = quickReplyFiles(qr);
+  if (!files.length) return null;
+  return (
+    <span className="qr-thumbs">
+      {files.slice(0, 3).map((file, index) => (
+        file.mimeType?.startsWith('image/')
+          ? <img key={index} src={quickReplyFileUrl(qr.id, index)} alt="" loading="lazy" />
+          : <span key={index} className="qr-thumb-icon">{file.mimeType?.startsWith('video/') ? '▶' : <FileText size={11} />}</span>
+      ))}
+      {files.length > 1 && <span className="qr-thumbs-count">{files.length}</span>}
+    </span>
+  );
 }
 
 function fetchQuickReplyFiles(qr: QuickReply) {
@@ -713,6 +744,12 @@ export default function ConversationsPage() {
   const [qrFilesDraft, setQrFilesDraft] = useState<QuickReplyDraftFile[]>([]);
   const [qrMediaUploading, setQrMediaUploading] = useState(false);
   const qrFileInputRef = useRef<HTMLInputElement>(null);
+  const qrFormRef = useRef<HTMLDivElement>(null);
+  const [qrDepartmentDraft, setQrDepartmentDraft] = useState('');
+  const [qrTraySearch, setQrTraySearch] = useState('');
+  // Última respuesta rápida insertada en el compositor: al elegir otra, se quita su texto y
+  // sus archivos (reemplazo) en vez de sumarse.
+  const lastQuickReplyRef = useRef<{ content: string; fileIds: string[] } | null>(null);
   const [qrSendingId, setQrSendingId] = useState<string | null>(null);
   const [qrAutocompleteOpen, setQrAutocompleteOpen] = useState(false);
   const [qrAutocompleteMatches, setQrAutocompleteMatches] = useState<QuickReply[]>([]);
@@ -1304,7 +1341,7 @@ export default function ConversationsPage() {
     mentionsRef.current = draft ? draft.mentions : [];
     setText(draft ? draft.text : '');
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); resetQuickReplyForm(); setShowQuickReplyTray(false); setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); clearPendingFiles(); }, [selectedId]);
+  useEffect(() => { setQrAutocompleteOpen(false); setMentionQuery(null); resetQuickReplyForm(); setShowQuickReplyTray(false); lastQuickReplyRef.current = null; setReplyToMessage(null); setSelectMode(false); setSelectedMessageIds(new Set()); clearPendingFiles(); }, [selectedId]);
 
   // Same portal + fixed-position approach as the emoji picker above, for the same reason:
   // `.chat-layout` clips overflow, so a per-message dropdown positioned inside it would
@@ -1531,12 +1568,12 @@ export default function ConversationsPage() {
 
   // Acumula adjuntos (ya no reemplaza el anterior): arrastrar, pegar o elegir más archivos los
   // suma a la lista, hasta MAX_PENDING_FILES por envío.
-  const attachFiles = (files: File[]) => {
-    if (files.length === 0) return;
+  const attachFiles = (files: File[]): string[] => {
+    if (files.length === 0) return [];
     const room = Math.max(MAX_PENDING_FILES - pendingFilesRef.current.length, 0);
     const accepted = files.slice(0, room);
     if (accepted.length < files.length) setError(`Máximo ${MAX_PENDING_FILES} archivos por envío`);
-    if (accepted.length === 0) return;
+    if (accepted.length === 0) return [];
     const added = accepted.map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file,
@@ -1544,6 +1581,7 @@ export default function ConversationsPage() {
     }));
     pendingFilesRef.current = [...pendingFilesRef.current, ...added];
     setPendingFiles((current) => [...current, ...added]);
+    return added.map((item) => item.id);
   };
   const attachFile = (file: File) => attachFiles([file]);
 
@@ -1683,16 +1721,48 @@ export default function ConversationsPage() {
         if (conMedia) return match;
         conMedia = qr;
       }
-      return prefijo + (qr.content || '');
+      markQuickReplyUsed(qr);
+      return prefijo + fillQuickReplyVariables(qr.content);
     });
     return { texto, conMedia };
   };
 
   const mentionOpen = mentionQuery !== null && mentionItems.length > 0;
 
+  const fillQuickReplyVariables = (content?: string | null) => {
+    if (!content) return '';
+    const contactName = selected?.contact.name || selected?.contact.pushName || '';
+    const values: Record<string, string> = {
+      nombre: contactName.split(' ')[0] || '',
+      agente: getStoredUser<{ name?: string }>().name || '',
+      empresa: getStoredCompany<{ name?: string }>().name || '',
+    };
+    return content.replace(/\{\{\s*(nombre|agente|empresa)\s*\}\}/gi, (_, key: string) => values[key.toLowerCase()] ?? '');
+  };
+
+  // Suma un uso (sin esperar) y reordena localmente para que la próxima vez salga más arriba.
+  const markQuickReplyUsed = (qr: QuickReply) => {
+    void apiFetch(`/quick-replies/${qr.id}/use`, { method: 'POST' }).catch(() => {});
+    setQuickReplies((current) => current.map((item) => item.id === qr.id ? { ...item, usageCount: (item.usageCount ?? 0) + 1 } : item).sort(byUsage));
+  };
+
+  // Escobita del compositor: borra texto, adjuntos y menciones de una vez, para cambiar de
+  // respuesta rápida sin quitar archivo por archivo. La cita ("Responder") se mantiene.
+  const clearComposer = () => {
+    setText('');
+    mentionsRef.current = [];
+    clearPendingFiles();
+    setQrAutocompleteOpen(false);
+    setMentionQuery(null);
+    lastQuickReplyRef.current = null;
+    stopTyping();
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const send = async () => {
     if (!selectedId || sending) return;
     stopTyping();
+    lastQuickReplyRef.current = null;
     if (pendingFiles.length > 0) { await sendPendingFiles(); return; }
     if (!text.trim()) return;
     const { texto: expandido, conMedia } = expandirRespuestasRapidas(text);
@@ -2180,7 +2250,14 @@ export default function ConversationsPage() {
     const caret = e.target.selectionStart ?? value.length;
     if (syncMention(value, caret)) { setQrAutocompleteOpen(false); return; }
     const token = findSlashToken(value, caret);
-    const matches = token ? quickReplies.filter((qr) => qr.active && qr.shortcut.startsWith(token.query)) : [];
+    // Primero los atajos que empiezan con lo escrito; después los que lo tienen en el título o el texto.
+    const matches = token ? (() => {
+      const q = normalizeText(token.query);
+      const active = quickReplies.filter((qr) => qr.active);
+      const byShortcut = active.filter((qr) => qr.shortcut.startsWith(q));
+      const byText = q ? active.filter((qr) => !byShortcut.includes(qr) && normalizeText(`${qr.title} ${qr.content || ''}`).includes(q)) : [];
+      return [...byShortcut, ...byText];
+    })() : [];
     if (token && matches.length) {
       setQrAutocompleteMatches(matches);
       setQrAutocompleteOpen(true);
@@ -2194,46 +2271,55 @@ export default function ConversationsPage() {
     const textarea = textareaRef.current;
     const caret = textarea?.selectionStart ?? text.length;
     const token = findSlashToken(text, caret);
-    const start = token ? token.start : caret;
+    let start = token ? token.start : caret;
     setQrAutocompleteOpen(false);
+    markQuickReplyUsed(qr);
+
+    // El texto sin el "/token", calculado UNA vez aquí (setText es asíncrono: volver a leer
+    // `text` en el .then devolvía el valor viejo, con el token, y lo reinsertaba).
+    let sinToken = text.slice(0, start) + text.slice(caret);
+    // Reemplazo: si ya se había insertado otra respuesta rápida, se quitan su texto y sus
+    // archivos antes de poner la nueva.
+    const previous = lastQuickReplyRef.current;
+    if (previous) {
+      previous.fileIds.forEach((id) => { if (pendingFilesRef.current.some((item) => item.id === id)) removePendingFile(id); });
+      const at = previous.content ? sinToken.indexOf(previous.content) : -1;
+      if (at !== -1) {
+        sinToken = sinToken.slice(0, at) + sinToken.slice(at + previous.content.length);
+        if (at < start) start = Math.max(at, start - previous.content.length);
+        // Sin el texto anterior, el espacio que quedaba delante sobra.
+        const before = sinToken.slice(0, start);
+        if (!before.trim()) { sinToken = sinToken.slice(start); start = 0; }
+      }
+    }
+    const content = fillQuickReplyVariables(qr.content);
+    const conContenido = sinToken.slice(0, start) + content + sinToken.slice(start);
+    const focusAfter = () => requestAnimationFrame(() => {
+      textarea?.focus();
+      const pos = start + content.length;
+      textarea?.setSelectionRange(pos, pos);
+    });
+    lastQuickReplyRef.current = { content, fileIds: [] };
 
     if (qr.mediaUrl) {
-      // El texto sin el "/token", calculado UNA vez aquí. Antes esta rama borraba el
-      // token con setText y luego, al resolver la descarga, llamaba a
-      // `insertQuickReplyContent`, que vuelve a leer `text` del closure — congelado en
-      // el valor CON el token, porque setText es asincrono — y lo reinsertaba. Con el
-      // cursor ya en 0 el resultado era "contenido/330": el comando quedaba al final y
-      // habia que borrarlo a mano antes de enviar.
       const chatAtStart = selectedIdRef.current;
-      const sinToken = text.slice(0, start) + text.slice(caret);
       setText(sinToken);
       setQrSendingId(qr.id);
       fetchQuickReplyFiles(qr)
         .then((files) => {
           if (selectedIdRef.current !== chatAtStart) return;
-          attachFiles(files);
-          if (!qr.content) return;
-          const conContenido = sinToken.slice(0, start) + qr.content + sinToken.slice(start);
+          const fileIds = attachFiles(files);
+          lastQuickReplyRef.current = { content, fileIds };
           setText(conContenido);
-          requestAnimationFrame(() => {
-            textarea?.focus();
-            const pos = start + qr.content!.length;
-            textarea?.setSelectionRange(pos, pos);
-          });
+          focusAfter();
         })
         .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida'))
         .finally(() => setQrSendingId(null));
       return;
     }
 
-    const content = qr.content || '';
-    const next = text.slice(0, start) + content + text.slice(caret);
-    setText(next);
-    requestAnimationFrame(() => {
-      textarea?.focus();
-      const pos = start + content.length;
-      textarea?.setSelectionRange(pos, pos);
-    });
+    setText(conContenido);
+    focusAfter();
   };
 
   // Delega en el autocompletado en vez de insertar a secas: esta versión insertaba el
@@ -2249,6 +2335,7 @@ export default function ConversationsPage() {
     setQrShortcutDraft('');
     setQrTitleDraft('');
     setQrContentDraft('');
+    setQrDepartmentDraft('');
     setQrFilesDraft((current) => { current.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); }); return []; });
   };
 
@@ -2257,6 +2344,9 @@ export default function ConversationsPage() {
     setQrShortcutDraft(qr.shortcut);
     setQrTitleDraft(qr.title);
     setQrContentDraft(qr.content || '');
+    setQrDepartmentDraft(qr.departmentId || '');
+    // El formulario está al final de la bandeja: se baja hasta él para que se vea qué se edita.
+    requestAnimationFrame(() => qrFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
     setQrFilesDraft(quickReplyFiles(qr).map((file, index) => ({ mediaUrl: file.mediaUrl, fileName: file.fileName || '', mimeType: file.mimeType || '', fileSize: file.fileSize || 0, savedIndex: index })));
   };
 
@@ -2312,14 +2402,15 @@ export default function ConversationsPage() {
         fileName: first?.fileName || null,
         mimeType: first?.mimeType || null,
         fileSize: first?.fileSize ?? null,
+        departmentId: qrDepartmentDraft || null,
         extraAttachments: rest.map(({ mediaUrl, fileName, mimeType, fileSize }) => ({ mediaUrl, fileName, mimeType, fileSize })),
       };
       if (editingQuickReplyId) {
         const updated = await apiFetch<QuickReply>(`/quick-replies/${editingQuickReplyId}`, { method: 'PATCH', body: JSON.stringify(body) });
-        setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
+        setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort(byUsage));
       } else {
         const created = await apiFetch<QuickReply>('/quick-replies', { method: 'POST', body: JSON.stringify(body) });
-        setQuickReplies((current) => [...current, created].sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
+        setQuickReplies((current) => [...current, created].sort(byUsage));
       }
       resetQuickReplyForm();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la respuesta rápida'); }
@@ -3032,7 +3123,8 @@ export default function ConversationsPage() {
                       onClick={() => applyQuickReplyAutocomplete(qr)}
                     >
                       <span className="quick-reply-autocomplete-shortcut">/{qr.shortcut}</span>
-                      <span className="quick-reply-autocomplete-title">{qr.title}</span>
+                      <span className="quick-reply-autocomplete-title">{qr.title}{qr.content && <em> · {qr.content}</em>}</span>
+                      <QuickReplyThumbs qr={qr} />
                     </button>
                   ))}
                 </div>
@@ -3045,11 +3137,12 @@ export default function ConversationsPage() {
                 </div>
               ) : (
                 <>
-                  <button ref={composerMenuButtonRef} className="icon-button ghost" onClick={() => setShowComposerMenu((v) => !v)} title="Adjuntar, emojis, stickers y respuestas rápidas"><Plus size={17} /></button>
+                  <button ref={composerMenuButtonRef} className={`composer-plus ${showComposerMenu ? 'active' : ''}`} onClick={() => setShowComposerMenu((v) => !v)} title="Adjuntar, emojis, stickers y respuestas rápidas"><Plus size={17} /></button>
+                  <div className={`composer-input-wrap ${text || pendingFiles.length ? 'has-clear' : ''}`}>
                   <textarea
                     ref={textareaRef}
                     rows={1}
-                    placeholder={pendingFiles.length > 1 ? 'Mensaje para el primer archivo (opcional)...' : pendingFiles.length === 1 ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje... ("/" respuestas rápidas, "@" mencionar)'}
+                    placeholder={pendingFiles.length > 1 ? 'Mensaje para el primer archivo (opcional)...' : pendingFiles.length === 1 ? 'Agrega un mensaje (opcional)...' : 'Escribe un mensaje ("/" respuestas, "@" mencionar)'}
                     value={text}
                     onChange={onComposerTextChange}
                     onSelect={(e) => { const t = e.currentTarget; syncMention(t.value, t.selectionStart ?? t.value.length); }}
@@ -3071,6 +3164,10 @@ export default function ConversationsPage() {
                     }}
                     onPaste={onComposerPaste}
                   />
+                  {(text || pendingFiles.length > 0) && (
+                    <button className="composer-clear" onMouseDown={(e) => e.preventDefault()} onClick={clearComposer} title="Limpiar texto y adjuntos"><BroomIcon size={15} /></button>
+                  )}
+                  </div>
                 </>
               )}
               {!recording && !text.trim() && pendingFiles.length === 0 ? (
@@ -3389,13 +3486,15 @@ export default function ConversationsPage() {
     )}
     {showQuickReplyTray && quickReplyTrayPos && typeof document !== 'undefined' && createPortal(
       <div ref={quickReplyTrayRef} className="quick-reply-tray" style={{ top: quickReplyTrayPos.top, left: quickReplyTrayPos.left }}>
+        <input className="quick-reply-tray-search" value={qrTraySearch} onChange={(e) => setQrTraySearch(e.target.value)} placeholder="Buscar por atajo, título o texto…" />
         <div className="quick-reply-tray-list">
-          {quickReplies.map((qr) => (
+          {quickReplies.filter((qr) => !qrTraySearch.trim() || normalizeText(`${qr.shortcut} ${qr.title} ${qr.content || ''}`).includes(normalizeText(qrTraySearch.trim()))).map((qr) => (
             <div className="quick-reply-tray-item" key={qr.id}>
               <button className="quick-reply-tray-body" onClick={() => void sendQuickReplyFromTray(qr)} disabled={qrSendingId === qr.id}>
-                <span className="quick-reply-tray-shortcut">/{qr.shortcut}{!qr.active && ' · inactiva'}{qrSendingId === qr.id && ' · cargando…'}</span>
-                <strong>{qr.mediaUrl && <Paperclip size={11} />} {qr.title}</strong>
-                <span className="quick-reply-tray-preview">{qr.content || qr.fileName}{quickReplyFiles(qr).length > 1 && ` · ${quickReplyFiles(qr).length} archivos`}</span>
+                <span className="quick-reply-tray-shortcut">/{qr.shortcut}{!qr.active && ' · inactiva'}{qrSendingId === qr.id && ' · cargando…'}{qr.department && <span className="quick-reply-tray-dept">{qr.department.name}</span>}</span>
+                <strong>{qr.title}</strong>
+                <span className="quick-reply-tray-preview">{qr.content || qr.fileName}</span>
+                <QuickReplyThumbs qr={qr} />
               </button>
               {canManageQuickReplies && (
                 <div className="quick-reply-tray-actions">
@@ -3406,12 +3505,22 @@ export default function ConversationsPage() {
             </div>
           ))}
           {!quickReplies.length && <p className="contact-empty-hint">Aún no hay respuestas rápidas.</p>}
+          {!!quickReplies.length && !!qrTraySearch.trim() && !quickReplies.some((qr) => normalizeText(`${qr.shortcut} ${qr.title} ${qr.content || ''}`).includes(normalizeText(qrTraySearch.trim()))) && <p className="contact-empty-hint">Sin resultados.</p>}
         </div>
         {canManageQuickReplies && (
-          <div className="quick-reply-tray-form">
+          <div className="quick-reply-tray-form" ref={qrFormRef}>
             <input value={qrShortcutDraft} onChange={(e) => setQrShortcutDraft(e.target.value)} placeholder="atajo (ej: saludo)" />
             <input value={qrTitleDraft} onChange={(e) => setQrTitleDraft(e.target.value)} placeholder="Título" />
             <textarea value={qrContentDraft} onChange={(e) => setQrContentDraft(e.target.value)} placeholder="Mensaje (opcional si adjuntas un archivo)..." rows={2} />
+            <div className="quick-reply-vars">
+              {QUICK_REPLY_VARIABLES.map((variable) => (
+                <button key={variable} type="button" onClick={() => setQrContentDraft((current) => `${current}${current && !current.endsWith(' ') ? ' ' : ''}${variable}`)} title="Se reemplaza al usar la respuesta">{variable}</button>
+              ))}
+            </div>
+            <select value={qrDepartmentDraft} onChange={(e) => setQrDepartmentDraft(e.target.value)} title="Quién puede verla">
+              <option value="">Todos los departamentos</option>
+              {departments.map((department) => <option key={department.id} value={department.id}>Solo {department.name}</option>)}
+            </select>
             <input
               ref={qrFileInputRef}
               type="file"

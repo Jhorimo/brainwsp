@@ -1293,6 +1293,20 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .chat-composer { background: var(--surface); border-top: 1px solid var(--line); padding: 13px 15px; display: flex; gap: 9px; align-items: flex-end; position: relative; flex-shrink: 0; }
 .chat-composer textarea { resize: none; flex: 1; min-height: 42px; max-height: 110px; border: 1px solid var(--border-neutral-8); border-radius: 11px; padding: 11px 12px; outline: 0; font-size: 11px; line-height: 18px; }
 /* 42px = 18px de línea + 11px arriba y abajo + 2px de borde: el texto y el placeholder quedan al medio. */
+/* Vacío, el placeholder va en UNA línea (con "…" si no entra): partido en dos no cabía en los
+   42px y se veía corrido hacia arriba. Al escribir vuelve a ajustarse normal. */
+.chat-composer textarea:placeholder-shown { white-space: nowrap; overflow: hidden; }
+.chat-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.composer-input-wrap textarea { width: 100%; }
+.composer-input-wrap.has-clear textarea { padding-right: 40px; }
+.composer-clear { position: absolute; right: 7px; bottom: 7px; width: 28px; height: 28px; border: 0; border-radius: 8px; display: grid; place-items: center; color: var(--danger-text); background: var(--danger-soft, rgba(214, 69, 69, .1)); cursor: pointer; }
+.composer-clear:hover { color: #fff; background: var(--danger, #d64545); }
+.composer-plus { width: 42px; height: 42px; flex-shrink: 0; border: 1px solid var(--border-neutral-8); border-radius: 11px; background: var(--surface); color: var(--text-neutral-1); display: grid; place-items: center; cursor: pointer; transition: background .15s, color .15s, transform .15s; }
+.composer-plus:hover { color: var(--brand-text); border-color: var(--border-info-2); }
+.composer-plus.active { color: var(--brand-text); background: var(--brand-soft); border-color: var(--border-info-2); }
+.composer-plus.active svg { transform: rotate(45deg); }
+.composer-plus svg { transition: transform .15s; }
 .chat-composer textarea:focus { border-color: var(--border-info-2); }
 .send-button { width: 42px; height: 42px; border: 0; border-radius: 11px; color: var(--on-color); background: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
 .send-button:hover:not(:disabled) { background: var(--accent-dark); }
@@ -1362,6 +1376,19 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .quick-reply-tray-actions button:last-child:hover { color: var(--danger-text); }
 .quick-reply-tray-form { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; border-top: 1px solid var(--border-neutral-7); }
 .quick-reply-tray-form input, .quick-reply-tray-form textarea { border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font-size: 10.5px; resize: none; font-family: inherit; }
+.quick-reply-tray-search { border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 11px; background: var(--surface); color: var(--text); outline: 0; flex-shrink: 0; }
+.quick-reply-tray-search:focus { border-color: var(--border-info-2); }
+.quick-reply-tray-dept { margin-left: 6px; padding: 0 6px; border-radius: 10px; background: var(--brand-soft); color: var(--brand-text); font-weight: 600; font-size: 9.5px; }
+.quick-reply-tray-form select { border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font-size: 10.5px; background: var(--surface); color: var(--text); }
+.quick-reply-vars { display: flex; flex-wrap: wrap; gap: 4px; }
+.quick-reply-vars button { border: 1px dashed var(--border-neutral-8); background: none; border-radius: 10px; padding: 1px 7px; font-size: 10px; color: var(--muted); cursor: pointer; }
+.quick-reply-vars button:hover { color: var(--brand-text); border-color: var(--border-info-2); }
+.qr-thumbs { display: flex; align-items: center; gap: 3px; flex-shrink: 0; margin-top: 3px; }
+.qr-thumbs img, .qr-thumb-icon { width: 24px; height: 24px; border-radius: 5px; object-fit: cover; }
+.qr-thumb-icon { display: grid; place-items: center; background: var(--surface-neutral-26); color: var(--muted); font-size: 9px; }
+.qr-thumbs-count { font-size: 9.5px; font-weight: 700; color: var(--brand-text); background: var(--brand-soft); border-radius: 10px; padding: 1px 6px; }
+.quick-reply-autocomplete-item .qr-thumbs { margin: 0 0 0 auto; }
+.quick-reply-autocomplete-title em { font-style: normal; opacity: .75; }
 .quick-reply-tray-form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .quick-reply-tray-form-actions button { padding: 5px 10px; border-radius: 7px; background: var(--surface-2); font-size: 10.5px; }
 .quick-reply-tray-form-actions button:last-child { background: var(--accent); color: var(--on-color); }
@@ -1374,7 +1401,8 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .quick-reply-tray-form-media img, .quick-reply-tray-form-media video { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
 .quick-reply-tray-form-media-name { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quick-reply-tray-form-media button { margin-left: auto; color: var(--text-neutral-8); flex-shrink: 0; }
-.quick-reply-tray-form-media button:hover:not(:disabled) { color: var(--text); }
+.quick-reply-tray-form-media button { width: 24px; height: 24px; padding: 0; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; cursor: pointer; }
+.quick-reply-tray-form-media button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .quick-reply-tray-form-media button:disabled { opacity: .35; cursor: default; }
 .quick-reply-tray-form-media .quick-reply-tray-form-media-remove:hover { color: var(--danger-text); }
 
@@ -1652,6 +1680,7 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
      reducido a una franja inutilizable. */
   .chat-composer { padding: 10px 10px; gap: 4px; }
   .chat-composer .icon-button.ghost { width: 30px; height: 30px; }
+  .chat-composer .composer-plus { width: 38px; height: 38px; }
   .chat-composer .send-button { width: 38px; height: 38px; }
   .contact-panel.mobile-open { width: 100vw; max-width: none; }
 

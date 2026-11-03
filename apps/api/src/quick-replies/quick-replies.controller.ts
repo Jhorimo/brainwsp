@@ -31,7 +31,13 @@ export class QuickRepliesController {
 
   @Get()
   list(@CurrentUser() user: JwtUser) {
-    return this.service.list(user.companyId);
+    return this.service.list(user);
+  }
+
+  // Cualquier rol: solo suma 1 al contador de uso.
+  @Post(':id/use')
+  markUsed(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.markUsed(user.companyId, id);
   }
 
   @Post('media')

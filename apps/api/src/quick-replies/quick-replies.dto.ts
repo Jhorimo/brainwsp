@@ -70,6 +70,12 @@ export class CreateQuickReplyDto {
   @ValidateNested({ each: true })
   @Type(() => QuickReplyAttachmentDto)
   extraAttachments?: QuickReplyAttachmentDto[];
+
+  // Departamento que puede verla; sin valor (o null en update) = todos.
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  departmentId?: string | null;
 }
 
 export class UpdateQuickReplyDto {
@@ -125,4 +131,10 @@ export class UpdateQuickReplyDto {
   @ValidateNested({ each: true })
   @Type(() => QuickReplyAttachmentDto)
   extraAttachments?: QuickReplyAttachmentDto[] | null;
+
+  // Departamento que puede verla; sin valor (o null en update) = todos.
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  departmentId?: string | null;
 }
