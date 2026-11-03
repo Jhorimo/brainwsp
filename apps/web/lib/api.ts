@@ -97,8 +97,9 @@ export function stickerFileUrl(stickerId: string) {
   return `${API_URL}/stickers/${stickerId}/file?token=${encodeURIComponent(getToken())}`;
 }
 
-export function quickReplyFileUrl(quickReplyId: string) {
-  return `${API_URL}/quick-replies/${quickReplyId}/file?token=${encodeURIComponent(getToken())}`;
+// index 0 = archivo principal; 1, 2, … = adjuntos extra.
+export function quickReplyFileUrl(quickReplyId: string, index = 0) {
+  return `${API_URL}/quick-replies/${quickReplyId}/file?token=${encodeURIComponent(getToken())}${index > 0 ? `&index=${index}` : ''}`;
 }
 
 export function paymentMethodQrUrl(methodId: string) {

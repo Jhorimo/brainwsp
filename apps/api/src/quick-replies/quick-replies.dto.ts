@@ -1,5 +1,26 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, MinLength, ValidateNested } from 'class-validator';
+
+// Máximo de archivos por respuesta rápida, contando el principal (igual que MAX_PENDING_FILES del chat).
+export const MAX_QUICK_REPLY_FILES = 10;
+
+export class QuickReplyAttachmentDto {
+  @IsString()
+  mediaUrl!: string;
+
+  @IsOptional()
+  @IsString()
+  fileName?: string;
+
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
+  @IsOptional()
+  @IsInt()
+  fileSize?: number;
+}
 
 const SHORTCUT_PATTERN = /^[a-z0-9_-]+$/;
 const SHORTCUT_MESSAGE = 'El atajo solo puede tener letras minúsculas, números, guiones y guiones bajos';
@@ -40,6 +61,15 @@ export class CreateQuickReplyDto {
   @IsOptional()
   @IsInt()
   fileSize?: number;
+
+  // Adjuntos además del principal (mediaUrl). En update, [] o null los quita todos.
+  @ApiPropertyOptional({ type: () => [QuickReplyAttachmentDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_QUICK_REPLY_FILES - 1)
+  @ValidateNested({ each: true })
+  @Type(() => QuickReplyAttachmentDto)
+  extraAttachments?: QuickReplyAttachmentDto[];
 }
 
 export class UpdateQuickReplyDto {
@@ -86,4 +116,13 @@ export class UpdateQuickReplyDto {
   @IsOptional()
   @IsInt()
   fileSize?: number | null;
+
+  // Adjuntos además del principal (mediaUrl). En update, [] o null los quita todos.
+  @ApiPropertyOptional({ type: () => [QuickReplyAttachmentDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_QUICK_REPLY_FILES - 1)
+  @ValidateNested({ each: true })
+  @Type(() => QuickReplyAttachmentDto)
+  extraAttachments?: QuickReplyAttachmentDto[] | null;
 }

@@ -1291,7 +1291,8 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .message-author { display: block; font-weight: 700; font-size: 10px; margin-bottom: 3px; color: var(--brand-text); border: 0; background: none; padding: 0; font-family: inherit; text-align: left; cursor: pointer; }
 .message-author:hover { text-decoration: underline; }
 .chat-composer { background: var(--surface); border-top: 1px solid var(--line); padding: 13px 15px; display: flex; gap: 9px; align-items: flex-end; position: relative; flex-shrink: 0; }
-.chat-composer textarea { resize: none; flex: 1; min-height: 42px; max-height: 110px; border: 1px solid var(--border-neutral-8); border-radius: 11px; padding: 11px 12px; outline: 0; font-size: 11px; }
+.chat-composer textarea { resize: none; flex: 1; min-height: 42px; max-height: 110px; border: 1px solid var(--border-neutral-8); border-radius: 11px; padding: 11px 12px; outline: 0; font-size: 11px; line-height: 18px; }
+/* 42px = 18px de línea + 11px arriba y abajo + 2px de borde: el texto y el placeholder quedan al medio. */
 .chat-composer textarea:focus { border-color: var(--border-info-2); }
 .send-button { width: 42px; height: 42px; border: 0; border-radius: 11px; color: var(--on-color); background: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
 .send-button:hover:not(:disabled) { background: var(--accent-dark); }
@@ -1373,7 +1374,9 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .quick-reply-tray-form-media img, .quick-reply-tray-form-media video { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
 .quick-reply-tray-form-media-name { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quick-reply-tray-form-media button { margin-left: auto; color: var(--text-neutral-8); flex-shrink: 0; }
-.quick-reply-tray-form-media button:hover { color: var(--danger-text); }
+.quick-reply-tray-form-media button:hover:not(:disabled) { color: var(--text); }
+.quick-reply-tray-form-media button:disabled { opacity: .35; cursor: default; }
+.quick-reply-tray-form-media .quick-reply-tray-form-media-remove:hover { color: var(--danger-text); }
 
 .quick-reply-autocomplete { position: absolute; bottom: 100%; left: 15px; right: 15px; margin-bottom: 6px; background: var(--surface); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow-info-6); overflow-y: auto; max-height: 220px; }
 .quick-reply-autocomplete-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; background: none; text-align: left; font-size: 11px; }

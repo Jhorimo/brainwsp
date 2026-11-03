@@ -733,6 +733,9 @@ model QuickReply {
   fileName  String?
   mimeType  String?
   fileSize  Int?
+  // Adjuntos 2.º en adelante: [{ mediaUrl, fileName, mimeType, fileSize }]. El 1.º sigue en
+  // mediaUrl/fileName/... para no tocar las respuestas que ya existen.
+  extraAttachments Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)

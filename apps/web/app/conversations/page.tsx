@@ -65,7 +65,22 @@ type Message = { id: string; waMessageId?: string; body?: string | null; caption
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
-type QuickReply = { id: string; shortcut: string; title: string; content?: string | null; active: boolean; mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null };
+type QuickReplyAttachment = { mediaUrl: string; fileName?: string | null; mimeType?: string | null; fileSize?: number | null };
+type QuickReply = { id: string; shortcut: string; title: string; content?: string | null; active: boolean; mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; extraAttachments?: QuickReplyAttachment[] | null };
+// Archivo en el formulario de respuestas rápidas. `savedIndex` = posición en la respuesta ya
+// guardada (para la vista previa desde el servidor); los recién subidos traen `previewUrl`.
+type QuickReplyDraftFile = { mediaUrl: string; fileName: string; mimeType: string; fileSize: number; previewUrl?: string; savedIndex?: number };
+
+// Todos los archivos de una respuesta rápida, en orden: el principal y luego los extra.
+function quickReplyFiles(qr: QuickReply): QuickReplyAttachment[] {
+  if (!qr.mediaUrl) return [];
+  return [{ mediaUrl: qr.mediaUrl, fileName: qr.fileName, mimeType: qr.mimeType, fileSize: qr.fileSize }, ...(qr.extraAttachments ?? [])];
+}
+
+function fetchQuickReplyFiles(qr: QuickReply) {
+  return Promise.all(quickReplyFiles(qr).map((file, index) =>
+    fetchAsFile(quickReplyFileUrl(qr.id, index), file.fileName || `${qr.id}-${index}`, file.mimeType || 'application/octet-stream')));
+}
 type IncidentType = 'SUGGESTION' | 'BUG' | 'OTHER';
 type IncidentStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
 type Incident = {
@@ -695,9 +710,8 @@ export default function ConversationsPage() {
   const [qrTitleDraft, setQrTitleDraft] = useState('');
   const [qrContentDraft, setQrContentDraft] = useState('');
   const [qrSaving, setQrSaving] = useState(false);
-  const [qrMediaDraft, setQrMediaDraft] = useState<{ mediaUrl: string; fileName: string; mimeType: string; fileSize: number; previewUrl?: string } | null>(null);
+  const [qrFilesDraft, setQrFilesDraft] = useState<QuickReplyDraftFile[]>([]);
   const [qrMediaUploading, setQrMediaUploading] = useState(false);
-  const [qrMediaCleared, setQrMediaCleared] = useState(false);
   const qrFileInputRef = useRef<HTMLInputElement>(null);
   const [qrSendingId, setQrSendingId] = useState<string | null>(null);
   const [qrAutocompleteOpen, setQrAutocompleteOpen] = useState(false);
@@ -1590,11 +1604,11 @@ export default function ConversationsPage() {
     else draftsRef.current.delete(chatId);
   };
 
-  const sendMediaFile = async (file: File, opts: { caption?: string; ptt?: boolean } = {}) => {
+  const sendMediaFile = async (file: File, opts: { caption?: string; ptt?: boolean; noQuote?: boolean } = {}) => {
     if (!selectedId || sending) return;
     const chatId = selectedId;
     setSending(true);
-    const quotedMessageId = replyToMessage?.id;
+    const quotedMessageId = opts.noQuote ? undefined : replyToMessage?.id;
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -1663,8 +1677,8 @@ export default function ConversationsPage() {
     const texto = value.replace(/(^|\s)\/([a-z0-9_-]+)/gi, (match, prefijo: string, token: string) => {
       const qr = activos.find((item) => item.shortcut.toLowerCase() === token.toLowerCase());
       if (!qr) return match;
-      // Un solo adjunto por envío: si ya hay uno tomado, el resto se deja intacto para
-      // que el agente vea que no se expandió en vez de perder silenciosamente el archivo.
+      // Una sola respuesta con archivos por envío: si ya hay una tomada, el resto se deja
+      // intacto para que el agente vea que no se expandió en vez de perder los archivos.
       if (qr.mediaUrl) {
         if (conMedia) return match;
         conMedia = qr;
@@ -1686,8 +1700,11 @@ export default function ConversationsPage() {
       const qr = conMedia as QuickReply;
       setQrSendingId(qr.id);
       try {
-        const file = await fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream');
-        await sendMediaFile(file, { caption: expandido.trim() || undefined });
+        // Un mensaje por archivo, en orden; el texto y la cita van solo con el primero.
+        const files = await fetchQuickReplyFiles(qr);
+        for (const [index, file] of files.entries()) {
+          await sendMediaFile(file, { caption: index === 0 ? expandido.trim() || undefined : undefined, noQuote: index > 0 });
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'No se pudo cargar el archivo de la respuesta rápida');
       } finally { setQrSendingId(null); }
@@ -2191,10 +2208,10 @@ export default function ConversationsPage() {
       const sinToken = text.slice(0, start) + text.slice(caret);
       setText(sinToken);
       setQrSendingId(qr.id);
-      fetchAsFile(quickReplyFileUrl(qr.id), qr.fileName || qr.id, qr.mimeType || 'application/octet-stream')
-        .then((file) => {
+      fetchQuickReplyFiles(qr)
+        .then((files) => {
           if (selectedIdRef.current !== chatAtStart) return;
-          attachFile(file);
+          attachFiles(files);
           if (!qr.content) return;
           const conContenido = sinToken.slice(0, start) + qr.content + sinToken.slice(start);
           setText(conContenido);
@@ -2232,8 +2249,7 @@ export default function ConversationsPage() {
     setQrShortcutDraft('');
     setQrTitleDraft('');
     setQrContentDraft('');
-    setQrMediaDraft((current) => { if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl); return null; });
-    setQrMediaCleared(false);
+    setQrFilesDraft((current) => { current.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); }); return []; });
   };
 
   const startEditQuickReply = (qr: QuickReply) => {
@@ -2241,45 +2257,63 @@ export default function ConversationsPage() {
     setQrShortcutDraft(qr.shortcut);
     setQrTitleDraft(qr.title);
     setQrContentDraft(qr.content || '');
-    setQrMediaDraft(qr.mediaUrl ? { mediaUrl: qr.mediaUrl, fileName: qr.fileName || '', mimeType: qr.mimeType || '', fileSize: qr.fileSize || 0 } : null);
-    setQrMediaCleared(false);
+    setQrFilesDraft(quickReplyFiles(qr).map((file, index) => ({ mediaUrl: file.mediaUrl, fileName: file.fileName || '', mimeType: file.mimeType || '', fileSize: file.fileSize || 0, savedIndex: index })));
   };
 
-  const uploadQuickReplyMedia = async (file: File) => {
+  // Sube uno o varios archivos y los agrega al final de la lista (máximo MAX_PENDING_FILES).
+  const uploadQuickReplyMedia = async (files: File[]) => {
+    const room = Math.max(MAX_PENDING_FILES - qrFilesDraft.length, 0);
+    const accepted = files.slice(0, room);
+    if (accepted.length < files.length) setError(`Máximo ${MAX_PENDING_FILES} archivos por respuesta rápida`);
+    if (!accepted.length) return;
     setQrMediaUploading(true);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      const uploaded = await apiFetch<{ mediaUrl: string; fileName: string; mimeType: string; fileSize: number }>('/quick-replies/media', { method: 'POST', body: form });
-      const previewUrl = isImageFile(file) || isVideoFile(file) ? URL.createObjectURL(file) : undefined;
-      setQrMediaDraft((current) => {
-        if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
-        return { ...uploaded, previewUrl };
-      });
-      setQrMediaCleared(false);
+      for (const file of accepted) {
+        const form = new FormData();
+        form.append('file', file);
+        const uploaded = await apiFetch<{ mediaUrl: string; fileName: string; mimeType: string; fileSize: number }>('/quick-replies/media', { method: 'POST', body: form });
+        const previewUrl = isImageFile(file) || isVideoFile(file) ? URL.createObjectURL(file) : undefined;
+        setQrFilesDraft((current) => [...current, { ...uploaded, previewUrl }]);
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo subir el archivo'); }
     finally { setQrMediaUploading(false); }
   };
 
-  const removeQuickReplyMedia = () => {
-    setQrMediaDraft((current) => { if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl); return null; });
-    setQrMediaCleared(true);
+  const removeQuickReplyMedia = (index: number) => {
+    setQrFilesDraft((current) => {
+      const item = current[index];
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return current.filter((_, i) => i !== index);
+    });
+  };
+
+  const moveQuickReplyMedia = (index: number, delta: number) => {
+    setQrFilesDraft((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const saveQuickReply = async () => {
     const shortcut = qrShortcutDraft.trim().toLowerCase();
     const title = qrTitleDraft.trim();
     const content = qrContentDraft.trim();
-    if (!shortcut || !title || (!content && !qrMediaDraft)) return;
+    if (!shortcut || !title || (!content && !qrFilesDraft.length)) return;
     setQrSaving(true);
     try {
-      const body: Record<string, unknown> = { shortcut, title, content };
-      if (qrMediaDraft || qrMediaCleared) {
-        body.mediaUrl = qrMediaDraft?.mediaUrl ?? null;
-        body.fileName = qrMediaDraft?.fileName ?? null;
-        body.mimeType = qrMediaDraft?.mimeType ?? null;
-        body.fileSize = qrMediaDraft?.fileSize ?? null;
-      }
+      // El primero va en los campos de siempre; el resto, en extraAttachments.
+      const [first, ...rest] = qrFilesDraft;
+      const body: Record<string, unknown> = {
+        shortcut, title, content,
+        mediaUrl: first?.mediaUrl ?? null,
+        fileName: first?.fileName || null,
+        mimeType: first?.mimeType || null,
+        fileSize: first?.fileSize ?? null,
+        extraAttachments: rest.map(({ mediaUrl, fileName, mimeType, fileSize }) => ({ mediaUrl, fileName, mimeType, fileSize })),
+      };
       if (editingQuickReplyId) {
         const updated = await apiFetch<QuickReply>(`/quick-replies/${editingQuickReplyId}`, { method: 'PATCH', body: JSON.stringify(body) });
         setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.shortcut.localeCompare(b.shortcut)));
@@ -3361,7 +3395,7 @@ export default function ConversationsPage() {
               <button className="quick-reply-tray-body" onClick={() => void sendQuickReplyFromTray(qr)} disabled={qrSendingId === qr.id}>
                 <span className="quick-reply-tray-shortcut">/{qr.shortcut}{!qr.active && ' · inactiva'}{qrSendingId === qr.id && ' · cargando…'}</span>
                 <strong>{qr.mediaUrl && <Paperclip size={11} />} {qr.title}</strong>
-                <span className="quick-reply-tray-preview">{qr.content || qr.fileName}</span>
+                <span className="quick-reply-tray-preview">{qr.content || qr.fileName}{quickReplyFiles(qr).length > 1 && ` · ${quickReplyFiles(qr).length} archivos`}</span>
               </button>
               {canManageQuickReplies && (
                 <div className="quick-reply-tray-actions">
@@ -3383,28 +3417,32 @@ export default function ConversationsPage() {
               type="file"
               hidden
               accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
-              onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadQuickReplyMedia(file); }}
+              multiple
+              onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) void uploadQuickReplyMedia(files); }}
             />
-            {qrMediaDraft ? (() => {
-              const previewSrc = qrMediaDraft.previewUrl || (editingQuickReplyId ? quickReplyFileUrl(editingQuickReplyId) : undefined);
-              const isImage = qrMediaDraft.mimeType.startsWith('image/');
-              const isVideo = qrMediaDraft.mimeType.startsWith('video/');
+            {qrFilesDraft.map((item, index) => {
+              const previewSrc = item.previewUrl || (editingQuickReplyId && item.savedIndex !== undefined ? quickReplyFileUrl(editingQuickReplyId, item.savedIndex) : undefined);
+              const isImage = item.mimeType.startsWith('image/');
+              const isVideo = item.mimeType.startsWith('video/');
               return (
-                <div className="quick-reply-tray-form-media">
+                <div className="quick-reply-tray-form-media" key={`${item.mediaUrl}-${index}`}>
                   {previewSrc && isImage && <img src={previewSrc} alt="" />}
                   {previewSrc && isVideo && <video src={previewSrc} muted />}
-                  {(!previewSrc || (!isImage && !isVideo)) && <span className="quick-reply-tray-form-media-name"><FileText size={12} /> {qrMediaDraft.fileName}</span>}
-                  <button onClick={removeQuickReplyMedia} title="Quitar archivo"><X size={12} /></button>
+                  <span className="quick-reply-tray-form-media-name">{(!previewSrc || (!isImage && !isVideo)) && <FileText size={12} />} {index + 1}. {item.fileName}</span>
+                  {qrFilesDraft.length > 1 && <button onClick={() => moveQuickReplyMedia(index, -1)} disabled={index === 0} title="Subir"><ChevronUp size={12} /></button>}
+                  {qrFilesDraft.length > 1 && <button onClick={() => moveQuickReplyMedia(index, 1)} disabled={index === qrFilesDraft.length - 1} title="Bajar"><ChevronDown size={12} /></button>}
+                  <button className="quick-reply-tray-form-media-remove" onClick={() => removeQuickReplyMedia(index)} title="Quitar archivo"><X size={12} /></button>
                 </div>
               );
-            })() : (
+            })}
+            {qrFilesDraft.length < MAX_PENDING_FILES && (
               <button className="quick-reply-tray-attach" onClick={() => qrFileInputRef.current?.click()} disabled={qrMediaUploading}>
-                <Paperclip size={13} /> {qrMediaUploading ? 'Subiendo…' : 'Adjuntar imagen, video, PDF o archivo'}
+                <Paperclip size={13} /> {qrMediaUploading ? 'Subiendo…' : qrFilesDraft.length ? 'Agregar otro archivo' : 'Adjuntar imagen, video, PDF o archivo'}
               </button>
             )}
             <div className="quick-reply-tray-form-actions">
               {editingQuickReplyId && <button onClick={resetQuickReplyForm} disabled={qrSaving}>Cancelar</button>}
-              <button onClick={() => void saveQuickReply()} disabled={qrSaving || qrMediaUploading || !qrShortcutDraft.trim() || !qrTitleDraft.trim() || (!qrContentDraft.trim() && !qrMediaDraft)}>{editingQuickReplyId ? 'Actualizar' : 'Guardar'}</button>
+              <button onClick={() => void saveQuickReply()} disabled={qrSaving || qrMediaUploading || !qrShortcutDraft.trim() || !qrTitleDraft.trim() || (!qrContentDraft.trim() && !qrFilesDraft.length)}>{editingQuickReplyId ? 'Actualizar' : 'Guardar'}</button>
             </div>
           </div>
         )}

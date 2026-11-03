@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
@@ -10,7 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { StorageService } from '../storage/storage.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { CreateQuickReplyDto, UpdateQuickReplyDto } from './quick-replies.dto';
-import { QuickRepliesService } from './quick-replies.service';
+import { extraAttachmentsOf, QuickRepliesService } from './quick-replies.service';
 import { pipeToResponse } from '../common/pipe-stream';
 
 // Techo tecnico fijo del interceptor de Multer (rechaza el multipart antes de que corra el
@@ -65,13 +65,18 @@ export class QuickRepliesController {
   // internal URL to the browser — same proxy pattern as /stickers/:id/file and /media/:messageId.
   // Also what the composer fetches when an agent clicks a quick reply with media, to turn it
   // back into a File and reuse the normal attach-and-send flow.
+  // `?index=N` (1, 2, …) devuelve los adjuntos extra; sin index, el principal.
   @Get(':id/file')
-  async file(@CurrentUser() user: JwtUser, @Param('id') id: string, @Res() res: Response) {
+  async file(@CurrentUser() user: JwtUser, @Param('id') id: string, @Query('index') index: string | undefined, @Res() res: Response) {
     const item = await this.service.getOwned(user.companyId, id);
-    if (!item.mediaUrl) throw new BadRequestException('Esta respuesta rápida no tiene archivo adjunto');
-    const objectName = item.mediaUrl.split('/').pop() as string;
-    res.setHeader('Content-Type', item.mimeType || 'application/octet-stream');
-    if (item.fileName) res.setHeader('Content-Disposition', `inline; filename="${item.fileName}"`);
+    const position = Number(index ?? 0);
+    const file = position > 0
+      ? extraAttachmentsOf(item)[position - 1]
+      : item.mediaUrl ? { mediaUrl: item.mediaUrl, fileName: item.fileName, mimeType: item.mimeType } : undefined;
+    if (!file?.mediaUrl) throw new BadRequestException('Esta respuesta rápida no tiene ese archivo adjunto');
+    const objectName = file.mediaUrl.split('/').pop() as string;
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    if (file.fileName) res.setHeader('Content-Disposition', `inline; filename="${file.fileName}"`);
     const stream = await this.storage.getObjectStream(objectName);
     pipeToResponse(stream, res);
   }

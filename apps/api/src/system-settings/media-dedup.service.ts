@@ -230,7 +230,7 @@ export class MediaDedupService {
   }
 
   // Objetos que usa algo distinto de un mensaje o una respuesta rápida: stickers guardados,
-  // flujos, widget, comprobantes y QR de pago, avatares. Esos nunca se borran ni se mueven.
+  // flujos, widget, comprobantes y QR de pago, avatares, adjuntos extra de respuestas rápidas. Esos nunca se borran ni se mueven.
   private async protectedObjectNames() {
     const names = new Set<string>();
     const collect = (text: string | null | undefined) => {
@@ -242,6 +242,7 @@ export class MediaDedupService {
       UNION ALL SELECT "qrImageUrl" FROM "PlatformPaymentMethod" WHERE "qrImageUrl" IS NOT NULL
       UNION ALL SELECT "avatarUrl" FROM "Contact" WHERE "avatarUrl" LIKE '%/%-%-%-%-%'
       UNION ALL SELECT configuration::text FROM "WhatsAppInstance" WHERE configuration IS NOT NULL
+      UNION ALL SELECT "extraAttachments"::text FROM "QuickReply" WHERE "extraAttachments" IS NOT NULL
       UNION ALL SELECT graph::text FROM "Flow"
       UNION ALL SELECT context::text FROM "FlowExecution" WHERE context::text LIKE '%-%-%-%-%'`;
     for (const row of texts) collect(row.text);
