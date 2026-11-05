@@ -54,6 +54,24 @@ export class StartConversationDto {
   name?: string;
 }
 
+// Abrir (o crear vacío) el chat con un número sin enviar nada: clic en un número o en una tarjeta de contacto.
+export class OpenConversationDto {
+  @ApiProperty()
+  @IsUUID()
+  instanceId!: string;
+
+  @ApiProperty({ example: '51999999999' })
+  @IsString()
+  @MinLength(8)
+  phone!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+}
+
 export class UpdateMessageFlagsDto {
   @ApiPropertyOptional()
   @IsOptional()

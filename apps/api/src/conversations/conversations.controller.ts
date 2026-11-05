@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ModuleAccessGuard } from '../common/guards/module-access.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { ConversationsService } from './conversations.service';
-import { AttachTagDto, ForwardMessageDto, SendAgentMessageDto, SendContactDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateContactNameDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
+import { AttachTagDto, ForwardMessageDto, OpenConversationDto, SendAgentMessageDto, SendContactDto, SendReactionDto, SendStickerDto, StartConversationDto, UpdateContactNameDto, UpdateConversationDto, UpdateMessageFlagsDto, UpdateNotesDto, UpdateStageDto } from './conversations.dto';
 
 // Techo tecnico fijo del interceptor de Multer (el multipart se rechaza antes de que el
 // handler llegue a correr, asi que tiene que ser generoso). El limite REAL, configurable
@@ -79,6 +79,11 @@ export class ConversationsController {
   @Post('start')
   start(@CurrentUser() user: JwtUser, @Body() dto: StartConversationDto) {
     return this.service.startConversation(user.companyId, dto.instanceId, dto.phone, dto.text, user.sub, dto.name);
+  }
+
+  @Post('open')
+  open(@CurrentUser() user: JwtUser, @Body() dto: OpenConversationDto) {
+    return this.service.openConversation(user.companyId, dto.instanceId, dto.phone, dto.name);
   }
 
   @Post(':id/messages')

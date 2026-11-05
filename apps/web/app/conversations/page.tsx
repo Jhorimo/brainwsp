@@ -1905,7 +1905,23 @@ export default function ConversationsPage() {
 
   // Clic en un número dentro de un mensaje: si ya hay chat con ese número en la misma línea del
   // chat abierto, lo abre; si no, abre "Nuevo chat" con el número y la línea ya puestos.
-  const openNewChatWithPhone = async (digits: string) => {
+  // Abre directo el chat con un número en la línea dada: el servidor reusa el contacto/chat o los
+  // crea vacíos, sin enviar nada. Si falla, se cae al modal "Nuevo chat" de siempre.
+  const openPhoneChatDirect = async (digits: string, lineId: string, name?: string) => {
+    try {
+      const conversation = await apiFetch<Conversation>('/conversations/open', {
+        method: 'POST',
+        body: JSON.stringify({ instanceId: lineId, phone: digits, name: name || undefined }),
+      });
+      setConversations((current) => current.some((item) => item.id === conversation.id) ? current : sortConversations([conversation, ...current]));
+      openChat(conversation.id);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const openNewChatWithPhone = async (digits: string, name?: string) => {
     const lineId = selected?.instance.id;
     const matches = (item: Conversation) => (!lineId || item.instance.id === lineId) && !isGroupContact(item.contact) && item.contact.phone === digits;
     const loaded = conversations.find(matches);
@@ -1918,8 +1934,10 @@ export default function ConversationsPage() {
         return;
       }
     } catch { /* si la búsqueda falla, se ofrece crear el chat */ }
+    if (lineId && await openPhoneChatDirect(digits, lineId, name)) return;
     void openNewChatModal().then(() => {
       fillNewChatPhone(digits);
+      if (name) setNewChatName(name);
       if (lineId) setNewChatInstanceId(lineId);
     });
   };
@@ -1943,6 +1961,7 @@ export default function ConversationsPage() {
         return;
       }
     } catch { /* si la búsqueda falla, se ofrece crear el chat */ }
+    if (await openPhoneChatDirect(digits, lineId, authorName(author) || undefined)) return;
     void openNewChatModal().then(() => {
       fillNewChatPhone(digits);
       setNewChatName(authorName(author) || '');
@@ -2818,7 +2837,7 @@ export default function ConversationsPage() {
                   </div>
                   {phoneDigits && (
                     <div className="doc-card-actions">
-                      <a href="#" onClick={(e) => { e.preventDefault(); openNewChatWithPhone(phoneDigits); }}>Mensaje</a>
+                      <a href="#" onClick={(e) => { e.preventDefault(); void openNewChatWithPhone(phoneDigits, c.displayName || parsed.name); }}>Mensaje</a>
                     </div>
                   )}
                 </div>

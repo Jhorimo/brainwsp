@@ -386,6 +386,35 @@ export class ConversationsService {
     return this.deliverText(companyId, conversation, text, sentByUserId);
   }
 
+  // Igual que startConversation pero sin enviar nada: reusa el contacto/chat del número o los crea
+  // vacíos, para abrir el chat con un clic. El nombre solo se pone si el contacto aún no tiene uno.
+  async openConversation(companyId: string, instanceId: string, rawPhone: string, name?: string) {
+    const instance = await this.prisma.whatsAppInstance.findFirst({ where: { id: instanceId, companyId, active: true } });
+    if (!instance) throw new NotFoundException('Instancia de WhatsApp no encontrada');
+    if (instance.provider === WhatsAppProvider.CLIENERA_CHAT) throw new BadRequestException('Clienera Chat es el chat de la web: elige una línea de WhatsApp para escribir a un número');
+
+    const phone = normalizePhone(rawPhone);
+    if (phone.length < 8 || phone.length > 15) throw new BadRequestException('Número inválido');
+    const waId = (await findExistingContactWaId(this.prisma, companyId, phone)) ?? `${phone}@s.whatsapp.net`;
+    const trimmedName = name?.trim() || undefined;
+
+    let contact = await this.prisma.contact.upsert({
+      where: { companyId_waId: { companyId, waId } },
+      update: {},
+      create: { companyId, waId, phone, name: trimmedName },
+    });
+    if (!contact.phone || (trimmedName && !contact.name)) {
+      contact = await this.prisma.contact.update({ where: { id: contact.id }, data: { phone: contact.phone || phone, ...(trimmedName && !contact.name ? { name: trimmedName } : {}) } });
+    }
+
+    const conversation = await this.prisma.conversation.upsert({
+      where: { instanceId_contactId: { instanceId, contactId: contact.id } },
+      update: {},
+      create: { companyId, instanceId, contactId: contact.id },
+    });
+    return this.getHydrated(companyId, conversation.id);
+  }
+
   // A quote only makes sense pointing at a message already in this same conversation —
   // silently drop anything else (stale id from a since-switched chat, cross-conversation id)
   // instead of failing the whole send, since the message itself is still perfectly valid.
