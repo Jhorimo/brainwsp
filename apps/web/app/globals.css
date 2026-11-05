@@ -1430,6 +1430,8 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .lightbox-close:hover { background: var(--fixed-neutral-10); color: var(--on-color); }
 .media-caption { margin-top: 6px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 .message-link { color: var(--text-info-5); text-decoration: underline; word-break: break-all; }
+/* Un número no se parte entre dos líneas. */
+.message-phone { white-space: nowrap; }
 .message-bubble.out .message-link { color: var(--text-info-6); }
 .message-audio { width: 240px; height: 34px; }
 .message-sticker { width: 110px; height: 110px; object-fit: contain; }

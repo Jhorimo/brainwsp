@@ -33,7 +33,7 @@ export class QuickRepliesService {
     private readonly agentAccess: AgentAccessService,
   ) {}
 
-  // Las más usadas primero. Un AGENT solo ve las generales y las de sus departamentos; los
+  // Orden alfabético por atajo (los usuarios están acostumbrados a él). Un AGENT solo ve las generales y las de sus departamentos; los
   // demás roles ven todas (las administran).
   async list(user: { sub: string; companyId: string; role: UserRole }) {
     const where: Prisma.QuickReplyWhereInput = { companyId: user.companyId };
@@ -43,7 +43,7 @@ export class QuickRepliesService {
     }
     return this.prisma.quickReply.findMany({
       where,
-      orderBy: [{ usageCount: 'desc' }, { shortcut: 'asc' }],
+      orderBy: { shortcut: 'asc' },
       include: { department: { select: { id: true, name: true } } },
     });
   }

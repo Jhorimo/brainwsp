@@ -68,8 +68,8 @@ type Project = { id: string; name: string; active: boolean };
 type QuickReplyAttachment = { mediaUrl: string; fileName?: string | null; mimeType?: string | null; fileSize?: number | null };
 type QuickReply = { id: string; shortcut: string; title: string; content?: string | null; active: boolean; mediaUrl?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; extraAttachments?: QuickReplyAttachment[] | null; departmentId?: string | null; department?: { id: string; name: string } | null; usageCount?: number };
 
-// Las más usadas primero (igual que el orden de la API), y a igualdad por atajo.
-const byUsage = (a: QuickReply, b: QuickReply) => (b.usageCount ?? 0) - (a.usageCount ?? 0) || a.shortcut.localeCompare(b.shortcut);
+// Orden alfabético por atajo, igual que la API. usageCount se sigue contando pero no ordena.
+const byShortcut = (a: QuickReply, b: QuickReply) => a.shortcut.localeCompare(b.shortcut);
 const normalizeText = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 // Variables que se reemplazan al insertar una respuesta rápida.
 const QUICK_REPLY_VARIABLES = ['{{nombre}}', '{{agente}}', '{{empresa}}'];
@@ -343,7 +343,10 @@ function hostnameFromUrl(url: string) {
 // WhatsApp's own lightweight markup: *bold*, _italic_, ~strikethrough~, ```monospace```, plus
 // bare URLs (with or without a protocol, e.g. "app.misire.pe") and phone numbers in
 // international format (+51 970 445 971) — same things WhatsApp Web itself auto-links.
-const FORMAT_PATTERN = /(https?:\/\/[^\s]+)|(\+\d[\d\s\-()]{6,18}\d)|(\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,24}(?:\/[^\s]*)?\b)|\*([^\n*]+)\*|_([^\n_]+)_|~([^\n~]+)~|```([^`]+)```/g;
+// Celular peruano sin "+": 9 dígitos que empiezan con 9, juntos o separados por espacio/guion
+// (987654321, 987 654 321, 987-654-321), opcionalmente con 51 delante. Exigir el 9 inicial y
+// que no haya más dígitos pegados evita marcar DNI (8), RUC (11), montos o códigos.
+const FORMAT_PATTERN = /(https?:\/\/[^\s]+)|(\+\d[\d\s\-()]{6,18}\d|(?<![\d+])(?:51[\s-]?)?9\d{2}[\s-]?\d{3}[\s-]?\d{3}(?![\d]))|(\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,24}(?:\/[^\s]*)?\b)|\*([^\n*]+)\*|_([^\n_]+)_|~([^\n~]+)~|```([^`]+)```/g;
 // `onPhoneClick`, when given, takes over left-clicking an auto-linked phone number — used to
 // open this app's own "Nuevo chat" (pre-filled) instead of sending the agent out to wa.me.
 function formatMessageText(text: string, onPhoneClick?: (digits: string) => void) {
@@ -357,10 +360,11 @@ function formatMessageText(text: string, onPhoneClick?: (digits: string) => void
     const [full, url, phone, domain, bold, italic, strike, mono] = match;
     if (url) nodes.push(<a key={key++} href={url} target="_blank" rel="noreferrer" className="message-link">{url}</a>);
     else if (phone) {
-      const digits = phone.replace(/[^\d]/g, '');
+      const raw = phone.replace(/[^\d]/g, '');
+      const digits = raw.length === 9 ? `51${raw}` : raw;
       nodes.push(onPhoneClick
-        ? <a key={key++} href={`https://wa.me/${digits}`} className="message-link" onClick={(e) => { e.preventDefault(); onPhoneClick(digits); }}>{phone}</a>
-        : <a key={key++} href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" className="message-link">{phone}</a>);
+        ? <a key={key++} href={`https://wa.me/${digits}`} className="message-link message-phone" title="Abrir chat con este número" onClick={(e) => { e.preventDefault(); onPhoneClick(digits); }}>{phone}</a>
+        : <a key={key++} href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" className="message-link message-phone">{phone}</a>);
     }
     else if (domain) nodes.push(<a key={key++} href={`https://${domain}`} target="_blank" rel="noreferrer" className="message-link">{domain}</a>);
     else if (bold !== undefined) nodes.push(<strong key={key++}>{bold}</strong>);
@@ -446,13 +450,15 @@ function adOriginLabel(ad: AdOrigin) {
 }
 function parseVCard(vcard?: string) {
   if (!vcard) return { name: undefined as string | undefined, phones: [] as string[] };
-  const lines = vcard.split(/\r?\n/);
-  const name = lines.find((line) => line.startsWith('FN:'))?.slice(3).trim();
+  // Desdobla líneas partidas (RFC 6350) y acepta prefijos de grupo de iPhone ("item1.TEL;...").
+  const lines = vcard.replace(/\r?\n[ \t]/g, '').split(/\r?\n/).map((line) => line.replace(/^[\w-]+\./, ''));
+  const value = (line: string) => line.slice(line.indexOf(':') + 1).trim();
+  const name = lines.find((line) => /^FN[;:]/i.test(line));
   const phones = lines
-    .filter((line) => line.startsWith('TEL'))
-    .map((line) => line.slice(line.indexOf(':') + 1).trim())
+    .filter((line) => /^TEL[;:]/i.test(line))
+    .map((line) => value(line) || line.match(/waid=(\d+)/i)?.[1] || '')
     .filter(Boolean);
-  return { name, phones };
+  return { name: name ? value(name) || undefined : undefined, phones };
 }
 // Adjuntos pendientes del compositor: se acumulan (arrastrar/pegar/elegir) y se envían juntos.
 type PendingAttachment = { id: string; file: File; previewUrl: string | null };
@@ -1740,10 +1746,10 @@ export default function ConversationsPage() {
     return content.replace(/\{\{\s*(nombre|agente|empresa)\s*\}\}/gi, (_, key: string) => values[key.toLowerCase()] ?? '');
   };
 
-  // Suma un uso (sin esperar) y reordena localmente para que la próxima vez salga más arriba.
+  // Suma un uso (sin esperar); solo se guarda el contador, el orden sigue siendo alfabético.
   const markQuickReplyUsed = (qr: QuickReply) => {
     void apiFetch(`/quick-replies/${qr.id}/use`, { method: 'POST' }).catch(() => {});
-    setQuickReplies((current) => current.map((item) => item.id === qr.id ? { ...item, usageCount: (item.usageCount ?? 0) + 1 } : item).sort(byUsage));
+    setQuickReplies((current) => current.map((item) => item.id === qr.id ? { ...item, usageCount: (item.usageCount ?? 0) + 1 } : item).sort(byShortcut));
   };
 
   // Escobita del compositor: borra texto, adjuntos y menciones de una vez, para cambiar de
@@ -1897,10 +1903,25 @@ export default function ConversationsPage() {
     setNewChatPhone(digits);
   };
 
-  // Clicking an auto-linked phone number inside a message opens "Nuevo chat" pre-filled
-  // with that number, instead of sending the agent out to wa.me.
-  const openNewChatWithPhone = (digits: string) => {
-    void openNewChatModal().then(() => fillNewChatPhone(digits));
+  // Clic en un número dentro de un mensaje: si ya hay chat con ese número en la misma línea del
+  // chat abierto, lo abre; si no, abre "Nuevo chat" con el número y la línea ya puestos.
+  const openNewChatWithPhone = async (digits: string) => {
+    const lineId = selected?.instance.id;
+    const matches = (item: Conversation) => (!lineId || item.instance.id === lineId) && !isGroupContact(item.contact) && item.contact.phone === digits;
+    const loaded = conversations.find(matches);
+    if (loaded) { openChat(loaded.id); return; }
+    try {
+      const found = (await apiFetch<Conversation[]>(`/conversations?q=${digits}${lineId ? `&instanceId=${lineId}` : ''}`)).find(matches);
+      if (found) {
+        setConversations((current) => current.some((item) => item.id === found.id) ? current : sortConversations([found, ...current]));
+        openChat(found.id);
+        return;
+      }
+    } catch { /* si la búsqueda falla, se ofrece crear el chat */ }
+    void openNewChatModal().then(() => {
+      fillNewChatPhone(digits);
+      if (lineId) setNewChatInstanceId(lineId);
+    });
   };
 
   // Clic en el nombre de quien escribió en un grupo: abre su chat individual en la misma línea del
@@ -2407,10 +2428,10 @@ export default function ConversationsPage() {
       };
       if (editingQuickReplyId) {
         const updated = await apiFetch<QuickReply>(`/quick-replies/${editingQuickReplyId}`, { method: 'PATCH', body: JSON.stringify(body) });
-        setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort(byUsage));
+        setQuickReplies((current) => current.map((item) => item.id === updated.id ? updated : item).sort(byShortcut));
       } else {
         const created = await apiFetch<QuickReply>('/quick-replies', { method: 'POST', body: JSON.stringify(body) });
-        setQuickReplies((current) => [...current, created].sort(byUsage));
+        setQuickReplies((current) => [...current, created].sort(byShortcut));
       }
       resetQuickReplyForm();
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar la respuesta rápida'); }
