@@ -8,6 +8,7 @@ import makeWASocket, {
   proto,
   type WAMessage,
   type WASocket,
+  isJidStatusBroadcast,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import {
@@ -46,6 +47,23 @@ const disconnectReasonName = (code?: number) => (code === undefined ? 'desconoci
 // connection can go weeks without reconnecting, so backfillAvatars (reconnect-only, gaps-only)
 // never revisits an avatar it already has — see refreshStaleAvatars below.
 const AVATAR_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+// Fallos de red pasajeros del servidor (DNS "ENOTFOUND a.whatsapp.net", cortes, timeouts):
+// antes la foto/audio recibido se perdía al primer intento. Se reintenta 2 veces (1s y 3s);
+// los errores que no son de red (archivo expirado, 404, etc.) no se reintentan.
+const TRANSIENT_NETWORK_ERROR = /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed/i;
+async function downloadMediaWithRetry<T>(download: () => Promise<T>): Promise<T> {
+  const delays = [1_000, 3_000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await download();
+    } catch (error) {
+      const text = error instanceof Error ? `${error.message} ${String((error as { cause?: unknown }).cause ?? '')}` : String(error);
+      if (attempt >= delays.length || !TRANSIENT_NETWORK_ERROR.test(text)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
 
 export class SessionManager {
   private readonly sockets = new Map<string, WASocket>();
@@ -125,7 +143,16 @@ export class SessionManager {
   // pero no enviaba y el estado parpadeaba, 2026-10-22). Ahora la segunda espera a la primera.
   private readonly connecting = new Map<string, Promise<void>>();
 
-  async connect(instanceId: string) {
+  // Líneas que nunca se vincularon (nadie escaneó el QR): cada QR caduca, el socket se cierra y
+  // antes se reintentaba para siempre (hasta 24 mil intentos por línea). Se cuentan los cierres
+  // con el QR en pantalla y, tras MAX_UNSCANNED_QR_CYCLES, la línea queda en LOGGED_OUT hasta que
+  // alguien pulse "Generar QR". Las líneas ya vinculadas (creds.me presente) nunca entran aquí.
+  private static readonly MAX_UNSCANNED_QR_CYCLES = 3;
+  private readonly unscannedQrCycles = new Map<string, number>();
+
+  // `manual` = lo pidió alguien desde el panel ("Conectar" / "Generar QR"): reinicia el conteo.
+  async connect(instanceId: string, options: { manual?: boolean } = {}) {
+    if (options.manual) this.unscannedQrCycles.delete(instanceId);
     if (this.sockets.has(instanceId)) return;
     const inFlight = this.connecting.get(instanceId);
     if (inFlight) return inFlight;
@@ -160,6 +187,9 @@ export class SessionManager {
     }
     await this.setInstanceState(instanceId, InstanceStatus.CONNECTING, { lastError: null });
     const childLogger = this.logger.child({ instanceId });
+    // Baileys registra en "info" cada notificación de historial con el payload completo (cientos de
+    // KB por línea) y cada reintento de QR: llenaba el disco. Para Baileys solo se guarda warn+.
+    const baileysLogger = this.logger.child({ instanceId }, { level: 'warn' });
 
     // An outdated WA Web protocol version is the classic cause of messages
     // arriving on the recipient's device stuck on "Esperando este mensaje":
@@ -170,15 +200,18 @@ export class SessionManager {
     const socket = makeWASocket({
       auth: {
         creds: auth.state.creds,
-        keys: makeCacheableSignalKeyStore(auth.state.keys, childLogger as never),
+        keys: makeCacheableSignalKeyStore(auth.state.keys, baileysLogger as never),
       },
       version,
-      logger: childLogger as never,
+      logger: baileysLogger as never,
       browser: Browsers.macOS('Google Chrome'),
       printQRInTerminal: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
+      // Los estados (historias de 24 h) no se usan en el panel y ya se descartaban al guardar;
+      // ignorarlos aquí evita que Baileys los descifre y llene el log de "transaction failed".
+      shouldIgnoreJid: (jid) => isJidStatusBroadcast(jid),
       getMessage: async (key) => {
         if (!key.id) return undefined;
         const stored = await this.prisma.message.findUnique({
@@ -214,6 +247,7 @@ export class SessionManager {
             lastConnectedAt: new Date(),
           },
         });
+        this.unscannedQrCycles.delete(instanceId);
         await this.emitInstance(instanceId);
         childLogger.info({ phoneNumber }, 'WhatsApp connected');
         this.backfillAvatars(instanceId, socket).catch((error) => {
@@ -285,6 +319,24 @@ export class SessionManager {
           });
           await this.releaseLease(instanceId);
           return;
+        }
+
+        const neverLinked = !auth.state.creds.me;
+        if (neverLinked && before?.status === InstanceStatus.QR_PENDING && statusCode !== DisconnectReason.restartRequired) {
+          const cycles = (this.unscannedQrCycles.get(instanceId) ?? 0) + 1;
+          this.unscannedQrCycles.set(instanceId, cycles);
+          if (cycles >= SessionManager.MAX_UNSCANNED_QR_CYCLES) {
+            this.unscannedQrCycles.delete(instanceId);
+            childLogger.info({ cycles }, 'QR not scanned: pausing until someone presses "Generar QR"');
+            await this.setInstanceState(instanceId, InstanceStatus.LOGGED_OUT, {
+              qr: null,
+              reconnectAttempt: 0,
+              lastError: 'El código QR no se escaneó a tiempo. Pulsa "Generar QR" para intentarlo de nuevo.',
+              lastDisconnectedAt: new Date(),
+            });
+            await this.releaseLease(instanceId);
+            return;
+          }
         }
 
         await this.scheduleReconnect(instanceId, statusCode);
@@ -416,12 +468,22 @@ export class SessionManager {
     await this.releaseLease(instanceId);
   }
 
+  // Apagado del worker (deploy/reinicio). Solo cierra los sockets: NO es logout, las credenciales
+  // quedan guardadas y al arrancar de nuevo cada línea reconecta sin QR. Los leases se liberan en
+  // paralelo y con tope de tiempo para que una línea trabada no retrase al resto; luego se da un
+  // momento a que terminen de guardarse las claves y estados que los cierres disparan.
   async close() {
-    for (const instanceId of this.sockets.keys()) {
+    const ids = [...this.sockets.keys()];
+    for (const instanceId of ids) {
       this.manualStops.add(instanceId);
       this.sockets.get(instanceId)?.end(new Error('worker shutdown'));
-      await this.releaseLease(instanceId);
     }
+    const withTimeout = (work: Promise<unknown>, ms: number) =>
+      Promise.race([work, new Promise((resolve) => setTimeout(resolve, ms).unref())]);
+    const results = await Promise.allSettled(ids.map((id) => withTimeout(this.releaseLease(id), 5_000)));
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed) this.logger.warn({ failed, total: ids.length }, 'some leases could not be released on shutdown');
+    await new Promise((resolve) => setTimeout(resolve, 2_000).unref());
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer);
     for (const timer of this.leaseRetryTimers.values()) clearTimeout(timer);
     this.leaseRetryTimers.clear();
@@ -730,14 +792,16 @@ export class SessionManager {
         );
       } else {
         try {
-          const buffer = await downloadMediaMessage(message, 'buffer', {}, {
-            logger: this.logger as never,
-            reuploadRequest: socket.updateMediaMessage,
-          });
+          const buffer = await downloadMediaWithRetry(() =>
+            downloadMediaMessage(message, 'buffer', {}, {
+              logger: this.logger as never,
+              reuploadRequest: socket.updateMediaMessage,
+            }),
+          );
           const uploaded = await uploadBuffer(buffer, content.mimeType || 'application/octet-stream', extensionFromMime(content.mimeType));
           mediaUrl = uploaded.internalUrl;
         } catch (error) {
-          this.logger.warn({ err: error, messageId: message.key.id }, 'failed to download inbound media');
+          this.logger.warn({ error: error instanceof Error ? error.message : String(error), messageId: message.key.id }, 'failed to download inbound media');
         }
       }
     }

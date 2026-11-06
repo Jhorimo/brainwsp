@@ -23,13 +23,25 @@ async function start() {
   logger.info('BrainWSP worker ready');
 }
 
+// Docker espera stop_grace_period (60s en prod) antes de matar el proceso. Si algo del cierre se
+// cuelga, se sale igual a los 50s para que quede registrado en vez de un SIGKILL silencioso.
+const SHUTDOWN_DEADLINE_MS = 50_000;
+let shuttingDown = false;
+
 async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info({ signal }, 'shutting down worker');
+  setTimeout(() => {
+    logger.error('shutdown took too long: forcing exit');
+    process.exit(1);
+  }, SHUTDOWN_DEADLINE_MS).unref();
   await Promise.allSettled([commands.close(), outbound.close()]);
   await sessions.close();
   await realtime.close();
   await Promise.allSettled([outboundQueue.close(), outboundQueueConnection.quit()]);
   await prisma.$disconnect();
+  logger.info('worker stopped cleanly');
   process.exit(0);
 }
 

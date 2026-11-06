@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff, LockKeyhole, MessageSquareText, Radio, Sparkles } from 'lucide-react';
-import { API_URL, apiFetch, clearAuthSession, getToken, setAuthSession } from '@/lib/api';
+import { API_URL, readJsonResponse, apiFetch, clearAuthSession, getToken, setAuthSession } from '@/lib/api';
 import { GoogleIcon } from '@/components/google-icon';
 import { BrandIcon } from '@/components/brand-mark';
 import { APP_VERSION } from '@/lib/version';
@@ -53,7 +53,7 @@ function LoginForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket, companyName: withCompanyName }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.message || 'No se pudo continuar con Google');
       if (data.needsCompany) {
         setGoogleTicket(ticket);
@@ -117,7 +117,7 @@ function LoginForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, remember }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.message || 'No se pudo iniciar sesión');
       setAuthSession(data, remember);
       finishSession(data);

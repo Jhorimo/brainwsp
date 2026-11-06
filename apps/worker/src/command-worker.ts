@@ -17,7 +17,7 @@ export class CommandWorker {
   }
 
   private async process(job: Job<{ instanceId: string; conversationId?: string; archive?: boolean }>) {
-    if (job.name === 'connect') return this.sessions.connect(job.data.instanceId);
+    if (job.name === 'connect') return this.sessions.connect(job.data.instanceId, { manual: true });
     if (job.name === 'disconnect') return this.sessions.disconnect(job.data.instanceId);
     if (job.name === 'logout') return this.sessions.logout(job.data.instanceId);
     if (job.name === 'refresh-avatars') return this.sessions.forceRefreshAvatars(job.data.instanceId);

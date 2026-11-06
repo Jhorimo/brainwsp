@@ -123,6 +123,19 @@ export async function fetchAsFile(url: string, fileName: string, mimeType: strin
   return new File([blob], fileName, { type: mimeType });
 }
 
+// Mensaje cuando el servidor no responde con JSON: durante un despliegue o una caída el proxy
+// devuelve una página HTML (502/503/504) y response.json() mostraba "Unexpected token '<'".
+const SERVER_UNAVAILABLE_MESSAGE = 'El sistema se está actualizando o no está disponible en este momento. Intenta de nuevo en unos segundos.';
+
+// Lee la respuesta como JSON sin romperse si llega HTML u otra cosa.
+export async function readJsonResponse<T = any>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error(response.ok ? 'Respuesta inesperada del servidor. Intenta de nuevo.' : SERVER_UNAVAILABLE_MESSAGE);
+  }
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
@@ -140,7 +153,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   }
 
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
+    let detail = response.status >= 502 ? SERVER_UNAVAILABLE_MESSAGE : `HTTP ${response.status}`;
     try {
       const data = await response.json();
       detail = Array.isArray(data.message) ? data.message.join(', ') : data.message || detail;

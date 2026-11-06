@@ -68,6 +68,21 @@ export class AuthService {
     // `passwordHash` is null for accounts that only ever signed in with Google — nothing
     // to compare against, so treat that the same as a wrong password rather than letting
     // bcrypt.compare(password, null) throw.
+    // Cuenta creada solo con Google (sin contraseña): se dice cómo entrar en vez de un
+    // "contraseña incorrecta" que hace pensar que la clave está mal.
+    if (user?.active && !user.passwordHash && user.googleId) {
+      void this.logAccess({
+        action: 'LOGIN',
+        success: false,
+        userId: user.id,
+        companyId: user.companyId,
+        ip,
+        userAgent,
+        metadata: { email: normalizedEmail, reason: 'GOOGLE_ONLY_ACCOUNT' },
+      });
+      throw new UnauthorizedException('Esta cuenta se creó con Google. Usa el botón "Ingresar con Google".');
+    }
+
     if (!user?.active || !user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
       void this.logAccess({
         action: 'LOGIN',

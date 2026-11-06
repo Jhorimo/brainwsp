@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronDown, Building2, Check, Copy, Eye, EyeOff, KeyRound, MessageSquareText, Radio, Sparkles } from 'lucide-react';
-import { API_URL, setAuthSession } from '@/lib/api';
+import { API_URL, readJsonResponse, setAuthSession } from '@/lib/api';
 import { GoogleIcon } from '@/components/google-icon';
 import { BrandIcon } from '@/components/brand-mark';
 
@@ -100,7 +100,7 @@ export default function RegisterPage() {
           requestedPlanId: selectedPlanId || undefined,
         }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.message || 'No se pudo crear la cuenta');
       setAuthSession(data, true);
       setNeedsPayment(!!data.needsPayment);

@@ -23,9 +23,30 @@ jobs:
         permissions:
             contents: read
             packages: write
+        outputs:
+            worker_changed: ${{ steps.cambios.outputs.worker_changed }}
         steps:
             - name: Descargar codigo
               uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            # Reiniciar el worker desconecta TODAS las lineas de WhatsApp un momento. Solo se
+            # reconstruye y se reinicia si cambio algo que afecta al worker; si no, el deploy
+            # actualiza solo API y web. Ante la duda (push manual, primer push, historial raro) si.
+            - name: Detectar cambios del worker
+              id: cambios
+              run: |
+                  BEFORE="${{ github.event.before }}"
+                  if [ "${{ github.event_name }}" != "push" ] || [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                      echo "worker_changed=true" >> "$GITHUB_OUTPUT"; exit 0
+                  fi
+                  if git diff --name-only "$BEFORE" "${{ github.sha }}" | grep -qE '^(apps/worker/|packages/|package\.json$|package-lock\.json$)'; then
+                      echo "worker_changed=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "worker_changed=false" >> "$GITHUB_OUTPUT"
+                  fi
+                  git diff --name-only "$BEFORE" "${{ github.sha }}"
 
             - name: Preparar Buildx
               uses: docker/setup-buildx-action@v3
@@ -50,6 +71,7 @@ jobs:
                   cache-to: type=gha,mode=max,scope=api
 
             - name: Imagen Worker
+              if: steps.cambios.outputs.worker_changed == 'true'
               uses: docker/build-push-action@v6
               with:
                   context: .
@@ -93,6 +115,9 @@ jobs:
                       set -e
                       cd /root/mipse/brainwsp
                       COMPOSE="docker compose -f docker-compose.prod.yml"
+                      WORKER_CHANGED="${{ needs.build.outputs.worker_changed }}"
+                      if [ "$WORKER_CHANGED" = "true" ]; then SERVICES="api web worker"; else SERVICES="api web"; fi
+                      echo "Servicios a actualizar: $SERVICES"
 
                       # 1. Anotar que imagenes estan corriendo ahora, para poder volver.
                       PREV_API=$(docker inspect --format '{{.Image}}' brainwsp-api-1 2>/dev/null || true)
@@ -103,7 +128,7 @@ jobs:
                       # Solo las imagenes propias. postgres/redis van fijadas por tag y minio
                       # ya esta en el servidor: quay.io/minio/minio devuelve "unauthorized"
                       # (MinIO dejo de publicarla) y un solo pull fallido aborta el despliegue.
-                      $COMPOSE pull api web worker
+                      $COMPOSE pull $SERVICES
 
                       # 2. Aplicar las migraciones en un contenedor aparte (mismo script que
                       #    corre el CMD del contenedor api, ver packages/database/migrate-deploy.sh).
