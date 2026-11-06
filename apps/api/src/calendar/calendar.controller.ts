@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Logger, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
@@ -9,7 +9,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { JwtUser } from '../common/types/jwt-user';
 import { CalendarService } from './calendar.service';
-import { CreateAppointmentDto } from './calendar.dto';
+import { CreateAppointmentDto, SetAttendedDto } from './calendar.dto';
 
 // NOTE: like /incidents, appointment routes aren't gated by ModuleAccessGuard/'calendar' —
 // "Agendar cita" has to work from any conversation regardless of whether the agent has the
@@ -77,6 +77,20 @@ export class CalendarController {
   @Get('appointments')
   list(@CurrentUser() user: JwtUser) {
     return this.service.listAppointments(user.companyId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('appointments/today')
+  today(@CurrentUser() user: JwtUser) {
+    return this.service.listTodayForUser(user.companyId, user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Patch('appointments/:id/attended')
+  attended(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: SetAttendedDto) {
+    return this.service.setAttended(user.companyId, id, dto.attended);
   }
 
   // Full shared-calendar view (BrainWSP appointments + anything booked directly on Google)

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BrandIcon } from './brand-mark';
 import { ThemeToggle } from './theme-toggle';
+import { AppointmentsBell } from './appointments-bell';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -455,6 +456,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
             </div>
             <div className="topbar-actions">
               <ThemeToggle />
+              <AppointmentsBell />
               {actions}
               <button className="icon-button" type="button" aria-label="Configuración" title="Mi perfil y configuración" onClick={openProfile}><Settings size={19} /></button>
             </div>

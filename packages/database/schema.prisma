@@ -796,6 +796,7 @@ model CalendarEvent {
   location        String?
   startAt         DateTime
   endAt           DateTime
+  attendedAt      DateTime?
   createdByUserId String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

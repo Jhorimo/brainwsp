@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export class CreateAppointmentDto {
   @ApiProperty({ example: 'b6f1c2b0-2222-4444-8888-000000000000' })
@@ -28,4 +28,10 @@ export class CreateAppointmentDto {
   @ApiProperty({ example: '2026-08-25T15:30:00.000Z' })
   @IsDateString()
   endAt!: string;
+}
+
+export class SetAttendedDto {
+  @ApiProperty({ example: true, description: 'true = asistió (check), false = quitar el check' })
+  @IsBoolean()
+  attended!: boolean;
 }

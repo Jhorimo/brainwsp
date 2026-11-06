@@ -88,6 +88,30 @@ export class CalendarService {
     });
   }
 
+  // Campana del topbar: citas de HOY (hora de Lima) que agendó este usuario. Perú no usa
+  // horario de verano, así que el día es [00:00, 24:00) a UTC-5 fijo.
+  listTodayForUser(companyId: string, userId: string) {
+    const LIMA_OFFSET_MS = 5 * 3_600_000;
+    const limaNow = new Date(Date.now() - LIMA_OFFSET_MS);
+    const from = new Date(Date.UTC(limaNow.getUTCFullYear(), limaNow.getUTCMonth(), limaNow.getUTCDate()) + LIMA_OFFSET_MS);
+    const to = new Date(from.getTime() + 86_400_000);
+    return this.prisma.calendarEvent.findMany({
+      where: { companyId, createdByUserId: userId, startAt: { gte: from, lt: to } },
+      orderBy: { startAt: 'asc' },
+      include: appointmentInclude,
+    });
+  }
+
+  async setAttended(companyId: string, id: string, attended: boolean) {
+    const appointment = await this.prisma.calendarEvent.findFirst({ where: { id, companyId }, select: { id: true } });
+    if (!appointment) throw new NotFoundException('Cita no encontrada');
+    return this.prisma.calendarEvent.update({
+      where: { id },
+      data: { attendedAt: attended ? new Date() : null },
+      include: appointmentInclude,
+    });
+  }
+
   // Full view of the shared Google Calendar for a date range — not just what BrainWSP
   // created. Other tools/vendors book directly on the same account, so the calendar page
   // reads the calendar itself and cross-references our own rows by googleEventId to tell
