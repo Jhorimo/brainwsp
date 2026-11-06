@@ -74,6 +74,9 @@ export class GoogleCalendarService {
         location: event.location || undefined,
         start: { dateTime: event.startAt.toISOString() },
         end: { dateTime: event.endAt.toISOString() },
+        // Dos avisos fijos por cita: 5 minutos antes y a la hora exacta, sin depender
+        // del aviso predeterminado de cada calendario (suele ser 30 min).
+        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }, { method: 'popup', minutes: 0 }] },
       },
     });
     return { googleEventId: data.id as string, htmlLink: data.htmlLink || undefined, refreshedTokens: getRefreshed() };
