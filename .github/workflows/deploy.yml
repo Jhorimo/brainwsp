@@ -119,11 +119,6 @@ jobs:
                       if [ "$WORKER_CHANGED" = "true" ]; then SERVICES="api web worker"; else SERVICES="api web"; fi
                       echo "Servicios a actualizar: $SERVICES"
 
-                      # 1. Anotar que imagenes estan corriendo ahora, para poder volver.
-                      PREV_API=$(docker inspect --format '{{.Image}}' brainwsp-api-1 2>/dev/null || true)
-                      PREV_WEB=$(docker inspect --format '{{.Image}}' brainwsp-web-1 2>/dev/null || true)
-                      PREV_WRK=$(docker inspect --format '{{.Image}}' brainwsp-worker-1 2>/dev/null || true)
-                      echo "Version actual -> api=$PREV_API web=$PREV_WEB worker=$PREV_WRK"
 
                       # Solo las imagenes propias. postgres/redis van fijadas por tag y minio
                       # ya esta en el servidor: quay.io/minio/minio devuelve "unauthorized"
@@ -139,33 +134,46 @@ jobs:
                           exit 1
                       fi
 
-                      # 3. Recien ahora reemplazamos los contenedores.
-                      $COMPOSE up -d
-
-                      # 4. Esperar hasta 2 minutos a que la API quede saludable.
-                      echo "--- Esperando a que la API responda ---"
-                      ESTADO=""
-                      for i in $(seq 1 24); do
-                          ESTADO=$(docker inspect --format '{{.State.Health.Status}}' brainwsp-api-1 2>/dev/null || echo "ausente")
-                          [ "$ESTADO" = "healthy" ] && break
-                          sleep 5
-                      done
-
-                      # 5. Si no arranco, volver a la version anterior.
-                      if [ "$ESTADO" != "healthy" ]; then
-                          echo "ERROR: la API no quedo saludable (estado: $ESTADO). Revirtiendo."
-                          docker logs --tail 40 brainwsp-api-1 || true
-
-                          if [ -n "$PREV_API" ]; then
-                              docker tag "$PREV_API" ghcr.io/jhorimo/brainwsp-api:latest
-                              [ -n "$PREV_WEB" ] && docker tag "$PREV_WEB" ghcr.io/jhorimo/brainwsp-web:latest
-                              [ -n "$PREV_WRK" ] && docker tag "$PREV_WRK" ghcr.io/jhorimo/brainwsp-worker:latest
-                              $COMPOSE up -d
-                              echo "Revertido a la version anterior."
+                      # 3. Reemplazo SIN CORTE para api y web: se levanta un 2º contenedor con
+                      #    la imagen nueva al lado del viejo (nginx-proxy reparte entre ambos
+                      #    porque comparten VIRTUAL_HOST), se espera a que responda y recien
+                      #    ahi se apaga el viejo. Si el nuevo no arranca, se borra y el viejo
+                      #    sigue atendiendo: el rollback es automatico y sin corte.
+                      sano() { # $1 = id del contenedor, $2 = servicio
+                          if [ "$2" = "api" ]; then
+                              [ "$(docker inspect --format '{{.State.Health.Status}}' "$1" 2>/dev/null)" = "healthy" ]
                           else
-                              echo "No habia version anterior registrada; no se pudo revertir."
+                              docker exec "$1" sh -c 'wget -qO- -T 3 http://127.0.0.1:3000/login >/dev/null' 2>/dev/null
                           fi
-                          exit 1
+                      }
+                      rolling() { # $1 = servicio
+                          SVC="$1"
+                          OLD=$(docker ps -q -f "label=com.docker.compose.project=brainwsp" -f "label=com.docker.compose.service=$SVC")
+                          echo "--- Actualizando $SVC sin corte (viejo: ${OLD:-ninguno}) ---"
+                          $COMPOSE up -d --no-deps --no-recreate --scale "$SVC=2" "$SVC"
+                          NEW=$(docker ps -q -f "label=com.docker.compose.project=brainwsp" -f "label=com.docker.compose.service=$SVC" | grep -v -F "${OLD:-__none__}" | head -1 || true)
+                          if [ -z "$NEW" ]; then echo "ERROR: no se creo el contenedor nuevo de $SVC."; return 1; fi
+                          for i in $(seq 1 24); do sano "$NEW" "$SVC" && break; sleep 5; done
+                          if ! sano "$NEW" "$SVC"; then
+                              echo "ERROR: $SVC nuevo no respondio. Se borra; el viejo sigue atendiendo."
+                              docker logs --tail 40 "$NEW" || true
+                              docker rm -f "$NEW" >/dev/null
+                              return 1
+                          fi
+                          # El nuevo ya esta en el proxy; damos unos segundos a nginx para
+                          # recargar antes de quitar el viejo.
+                          sleep 5
+                          if [ -n "$OLD" ]; then docker stop -t 30 $OLD >/dev/null && docker rm $OLD >/dev/null; fi
+                          echo "$SVC actualizado: $(docker ps --format '{{.Names}}' -f id=$NEW)"
+                      }
+
+                      rolling api || { echo "Despliegue abortado: produccion sigue con la version anterior."; exit 1; }
+                      rolling web || { echo "Despliegue abortado en web: api ya nueva, web sigue con la anterior."; exit 1; }
+
+                      # 4. El worker solo se reinicia si su codigo cambio (apagado ordenado,
+                      #    sin pedir QR). Un solo worker siempre: dos a la vez pelearian las sesiones.
+                      if [ "$WORKER_CHANGED" = "true" ]; then
+                          $COMPOSE up -d --no-deps worker
                       fi
 
                       echo "--- Despliegue correcto ---"
