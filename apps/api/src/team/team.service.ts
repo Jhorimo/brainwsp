@@ -8,11 +8,11 @@ export class TeamService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getCompanyProfile(companyId: string) {
-    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { id: true, name: true, slug: true, phone: true } });
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { id: true, name: true, slug: true, phone: true, signAgentName: true } });
     return company;
   }
 
-  async updateCompanyProfile(companyId: string, data: { name?: string; phone?: string; slug?: string }) {
+  async updateCompanyProfile(companyId: string, data: { name?: string; phone?: string; slug?: string; signAgentName?: boolean }) {
     if (data.slug !== undefined) {
       // Es el identificador del enlace público de Clienera Chat (clienera.com/<slug>) y del
       // widget embebible — cambiarlo invalida de inmediato cualquier link/script ya repartido
@@ -28,9 +28,10 @@ export class TeamService {
         // resto de campos opcionales de texto en el schema.
         ...(data.phone !== undefined ? { phone: data.phone.trim() || null } : {}),
         ...(data.slug !== undefined ? { slug: data.slug.trim() } : {}),
+        ...(data.signAgentName !== undefined ? { signAgentName: data.signAgentName } : {}),
       },
     });
-    return { id: company.id, name: company.name, slug: company.slug, phone: company.phone };
+    return { id: company.id, name: company.name, slug: company.slug, phone: company.phone, signAgentName: company.signAgentName };
   }
 
   async listUsers(companyId: string) {

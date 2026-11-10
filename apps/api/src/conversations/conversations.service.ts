@@ -426,6 +426,21 @@ export class ConversationsService {
 
   // Shared by `sendText` (ownership already verified by `getOwned`) and `startConversation`
   // (owns it implicitly — it just created/upserted the conversation itself).
+  // "Firmar mensajes con el nombre del agente" (Company.signAgentName): antepone
+  // "*Nombre Completo:*" + salto de línea, que WhatsApp muestra en negrita. Solo mensajes
+  // escritos por una persona (bot/automatizaciones/API no traen sentByUserId). Se guarda
+  // firmado a proposito: asi el panel muestra lo mismo que ve el cliente.
+  private async signWithAgentName(companyId: string, sentByUserId: string | undefined, text: string | undefined) {
+    if (!sentByUserId) return text;
+    const [company, user] = await Promise.all([
+      this.prisma.company.findUnique({ where: { id: companyId }, select: { signAgentName: true } }),
+      this.prisma.user.findUnique({ where: { id: sentByUserId }, select: { name: true } }),
+    ]);
+    const name = user?.name?.trim().replace(/\*/g, '');
+    if (!company?.signAgentName || !name) return text;
+    return text?.trim() ? `*${name}:*\n${text}` : `*${name}:*`;
+  }
+
   private async deliverText(companyId: string, conversation: { id: string; instanceId: string; contactId: string; aiEnabled: boolean }, text: string, sentByUserId?: string, quotedMessageId?: string, mentions: { jid: string; digits: string; name: string }[] = []) {
     const conversationId = conversation.id;
     const message = await this.prisma.message.create({
@@ -437,7 +452,7 @@ export class ConversationsService {
         direction: MessageDirection.OUTBOUND,
         type: MessageType.TEXT,
         status: MessageStatus.QUEUED,
-        body: text,
+        body: await this.signWithAgentName(companyId, sentByUserId, text),
         sentByUserId,
         quotedMessageId,
         ...(mentions.length ? { metadata: { mentions } } : {}),
@@ -503,7 +518,8 @@ export class ConversationsService {
         direction: MessageDirection.OUTBOUND,
         type,
         status: MessageStatus.QUEUED,
-        caption: caption || undefined,
+        // Audios no llevan texto en WhatsApp: no se firman.
+        caption: (type === MessageType.AUDIO ? caption : await this.signWithAgentName(companyId, sentByUserId, caption)) || undefined,
         fileName: file.originalname,
         mimeType: uploadMimeType,
         mediaUrl: internalUrl,

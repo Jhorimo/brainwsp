@@ -139,6 +139,9 @@ model Company {
   // Se edita desde /admin/clients → "Módulos".
   moduleOverrides String[]           @default([])
   aiSystemPrompt String?            @db.Text
+  // "Firmar mensajes con el nombre del agente": lo que envía una persona desde el panel sale
+  // como "*Nombre:*\n<mensaje>" (ver ConversationsService.signWithAgentName).
+  signAgentName  Boolean            @default(false)
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   plan           Plan?              @relation(fields: [planId], references: [id], onDelete: SetNull)

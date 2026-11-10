@@ -35,6 +35,7 @@ import {
   UserPlus,
   Users,
   Wifi,
+  X,
   Zap,
 } from 'lucide-react';
 import { IncomingCallProvider } from './incoming-call-provider';
@@ -88,12 +89,24 @@ const crmNavigation = [
   { href: '/crm/pipelines', label: 'Pipelines', icon: Kanban, module: 'crm-pipelines' },
 ];
 
+// Secciones del modal "Mi perfil y configuración" (menú lateral). managerOnly = solo
+// propietario/administrador; un agente solo ve "Mi cuenta".
+type ProfileSectionKey = 'perfil' | 'seguridad' | 'empresa' | 'mensajes' | 'modulos' | 'integracion';
+const PROFILE_SECTIONS: { key: ProfileSectionKey; label: string; desc: string; icon: typeof User; group: 'cuenta' | 'empresa'; managerOnly?: boolean }[] = [
+  { key: 'perfil', label: 'Perfil', desc: 'Tu nombre y datos de acceso a BrainWSP.', icon: User, group: 'cuenta' },
+  { key: 'seguridad', label: 'Seguridad', desc: 'Cambia la contraseña de tu cuenta.', icon: ShieldCheck, group: 'cuenta' },
+  { key: 'empresa', label: 'Empresa', desc: 'Nombre y teléfono de contacto de tu empresa.', icon: Building2, group: 'empresa', managerOnly: true },
+  { key: 'mensajes', label: 'Mensajes', desc: 'Cómo salen los mensajes que envía tu equipo.', icon: MessageSquareText, group: 'empresa', managerOnly: true },
+  { key: 'modulos', label: 'Plan y módulos', desc: 'Lo que incluye tu plan actual. Lo bloqueado se activa subiendo de plan desde "Mi Plan".', icon: LayoutGrid, group: 'empresa', managerOnly: true },
+  { key: 'integracion', label: 'Integración BrainPOS', desc: 'Credencial maestra para conectar BrainPOS.', icon: KeyRound, group: 'empresa', managerOnly: true },
+];
+
 export function AppShell({ title, subtitle, children, actions }: { title: string; subtitle?: string; children: React.ReactNode; actions?: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [identity, setIdentity] = useState({ company: 'Empresa', role: 'Usuario', initials: 'BW', personInitials: 'U', name: '', email: '' });
   const [profileModal, setProfileModal] = useState(false);
-  const [profileTab, setProfileTab] = useState<'perfil' | 'seguridad'>('perfil');
+  const [profileTab, setProfileTab] = useState<ProfileSectionKey>('perfil');
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -114,6 +127,9 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneSaved, setPhoneSaved] = useState(false);
   const [phoneError, setPhoneError] = useState('');
+  const [signAgentName, setSignAgentName] = useState(false);
+  const [signSaving, setSignSaving] = useState(false);
+  const [signError, setSignError] = useState('');
   const [masterCredential, setMasterCredential] = useState<MasterCredential | null>(null);
   const [masterAuthKey, setMasterAuthKey] = useState('');
   const [masterAuthVisible, setMasterAuthVisible] = useState(false);
@@ -208,9 +224,10 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   // id/name/slug desde el login) — hay que pedirlo aparte, igual que el AUTH KEY maestro.
   const loadCompanyPhone = async () => {
     try {
-      const company = await apiFetch<{ phone?: string | null }>('/team/company');
+      const company = await apiFetch<{ phone?: string | null; signAgentName?: boolean }>('/team/company');
       setPhoneDraft(company.phone || '');
       setPhoneOriginal(company.phone || '');
+      setSignAgentName(!!company.signAgentName);
     } catch {}
   };
 
@@ -314,6 +331,22 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
     }
   };
 
+  const toggleSignAgentName = async () => {
+    const next = !signAgentName;
+    setSignAgentName(next);
+    setSignSaving(true);
+    setSignError('');
+    try {
+      const updated = await apiFetch<{ signAgentName?: boolean }>('/team/company', { method: 'PATCH', body: JSON.stringify({ signAgentName: next }) });
+      setSignAgentName(!!updated.signAgentName);
+    } catch (err) {
+      setSignAgentName(!next);
+      setSignError(err instanceof Error ? err.message : 'No se pudo guardar la firma');
+    } finally {
+      setSignSaving(false);
+    }
+  };
+
   const changePassword = async () => {
     setPasswordError('');
     setPasswordSuccess(false);
@@ -369,6 +402,19 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
   }, [effectiveModules, pathname, router]);
 
   const isAccountManager = identity.role === 'OWNER' || identity.role === 'ADMIN';
+  const profileSections = PROFILE_SECTIONS.filter((section) => isAccountManager || !section.managerOnly);
+  const currentProfileSection = profileSections.find((section) => section.key === profileTab) || profileSections[0];
+
+  // Con el modal abierto la página de fondo no debe desplazarse (antes la rueda movía el
+  // fondo), y Escape lo cierra.
+  useEffect(() => {
+    if (!profileModal) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setProfileModal(false); };
+    window.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', onKey); };
+  }, [profileModal]);
 
   const logout = () => {
     clearAuthSession();
@@ -469,28 +515,40 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
 
       {profileModal && (
         <div className="modal-backdrop" onClick={() => setProfileModal(false)}>
-          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h2>Mi perfil</h2><p>Tus datos de acceso a BrainWSP.</p></div>
-            <div className="chat-quick-filters profile-tabs">
-              <button type="button" className={`chat-quick-tab ${profileTab === 'perfil' ? 'active' : ''}`} onClick={() => setProfileTab('perfil')}><User size={12} style={{ verticalAlign: -2, marginRight: 4 }} />Perfil</button>
-              <button type="button" className={`chat-quick-tab ${profileTab === 'seguridad' ? 'active' : ''}`} onClick={() => setProfileTab('seguridad')}><ShieldCheck size={12} style={{ verticalAlign: -2, marginRight: 4 }} />Seguridad</button>
-            </div>
+          <div className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Mi perfil y configuración" onClick={(e) => e.stopPropagation()}>
+            <aside className="settings-nav">
+              <div className="settings-me">
+                <div className="settings-avatar">{identity.personInitials}</div>
+                <div className="settings-me-text"><strong>{identity.name || identity.email}</strong><span>{roleLabels[identity.role] || identity.role}</span></div>
+              </div>
+              {(['cuenta', 'empresa'] as const).map((group) => {
+                const items = profileSections.filter((section) => section.group === group);
+                if (!items.length) return null;
+                return (
+                  <div key={group} className="settings-group">
+                    <div className="settings-group-label">{group === 'cuenta' ? 'Mi cuenta' : identity.company}</div>
+                    {items.map((section) => (
+                      <button key={section.key} type="button" className={`settings-nav-item${profileTab === section.key ? ' active' : ''}`} aria-current={profileTab === section.key ? 'page' : undefined} onClick={() => setProfileTab(section.key)}>
+                        <section.icon size={15} />{section.label}
+                        {section.key === 'mensajes' && signAgentName && <span className="settings-badge">Firma activa</span>}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+              <button type="button" className="settings-nav-item settings-logout" onClick={logout}><LogOut size={15} />Cerrar sesión</button>
+            </aside>
 
-            {profileTab === 'perfil' ? (
-              <div className="modal-body profile-modal-body">
-                <div className="profile-avatar-card">
-                  <div className="profile-avatar">{identity.personInitials}</div>
-                  <div className="profile-avatar-name">{identity.name || identity.email}</div>
-                  <div className="profile-avatar-email">{identity.email}</div>
-                  <span className="status-pill neutral">{roleLabels[identity.role] || identity.role}</span>
-                </div>
+            <section className="settings-main">
+              <header className="settings-head">
+                <div><h2>{currentProfileSection.label}</h2><p>{currentProfileSection.desc}</p></div>
+                <button className="modal-close settings-close" type="button" onClick={() => setProfileModal(false)} aria-label="Cerrar"><X size={16} /></button>
+              </header>
 
-                <div>
-                  {nameError && <div className="error-box">{nameError}</div>}
-                  {companyError && <div className="error-box">{companyError}</div>}
-
-                  <div className="profile-section">
-                    <div className="profile-section-title"><User size={14} />Información personal</div>
+              <div className="settings-body">
+                {profileTab === 'perfil' && (
+                  <>
+                    {nameError && <div className="error-box">{nameError}</div>}
                     <div className="form-grid plan-form-grid">
                       <div className="field">
                         <label>Nombre</label>
@@ -506,10 +564,48 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                       <div className="field"><label>Correo</label><input value={identity.email} disabled title="El correo no se puede cambiar desde aquí" /></div>
                       <div className="field"><label>Rol</label><input value={roleLabels[identity.role] || identity.role} disabled title="El rol lo asigna un administrador desde Equipo y agentes" /></div>
                     </div>
-                  </div>
+                    {!isAccountManager && (
+                      <div className="form-grid plan-form-grid" style={{ marginTop: 9 }}>
+                        <div className="field field-full"><label>Empresa</label><input value={identity.company} disabled title="Solo el propietario o un administrador puede cambiar el nombre de la empresa" /></div>
+                      </div>
+                    )}
+                    <span className="row-sub">El correo no se puede cambiar. El rol lo asigna un administrador desde Equipo y agentes.</span>
+                  </>
+                )}
 
-                  <div className="profile-section">
-                    <div className="profile-section-title"><Building2 size={14} />Empresa</div>
+                {profileTab === 'seguridad' && (
+                  <>
+                  {passwordError && <div className="error-box">{passwordError}</div>}
+                  {passwordSuccess && <div className="success-box">Contraseña actualizada correctamente.</div>}
+                  <div className="form-grid plan-form-grid">
+                    <div className="field field-full">
+                      <label>Contraseña actual</label>
+                      <div className="password-input">
+                        <input type={showCurrentPassword ? 'text' : 'password'} value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} autoComplete="current-password" />
+                        <button type="button" className="password-toggle" onClick={() => setShowCurrentPassword((v) => !v)} aria-label={showCurrentPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>Nueva contraseña</label>
+                      <div className="password-input">
+                        <input type={showNewPassword ? 'text' : 'password'} value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} placeholder="Mínimo 10 caracteres" autoComplete="new-password" />
+                        <button type="button" className="password-toggle" onClick={() => setShowNewPassword((v) => !v)} aria-label={showNewPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>Confirmar nueva contraseña</label>
+                      <div className="password-input">
+                        <input type={showConfirmPassword ? 'text' : 'password'} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} autoComplete="new-password" />
+                        <button type="button" className="password-toggle" onClick={() => setShowConfirmPassword((v) => !v)} aria-label={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                      </div>
+                    </div>
+                  </div>
+                  </>
+                )}
+
+                {isAccountManager && profileTab === 'empresa' && (
+                  <>
+                    {companyError && <div className="error-box">{companyError}</div>}
                     <div className="form-grid plan-form-grid">
                       <div className="field">
                         <label>Nombre de la empresa</label>
@@ -542,12 +638,29 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                       )}
                     </div>
                     {isAccountManager && <span className="row-sub">Así nuestro equipo puede contactarte para coordinar tu plan o soporte.</span>}
-                  </div>
+                  </>
+                )}
 
-                  {isAccountManager && (
-                    <div className="profile-section">
-                      <div className="profile-section-title"><LayoutGrid size={14} />Módulos</div>
-                      <p className="row-sub" style={{ marginTop: -6, marginBottom: 10 }}>Lo que incluye tu plan actual. Lo bloqueado se activa subiendo de plan desde &quot;Mi Plan&quot;.</p>
+                {isAccountManager && profileTab === 'mensajes' && (
+                  <>
+                    <div className="sign-agent-row">
+                      <div>
+                        <strong>Firmar mensajes con el nombre del agente</strong>
+                        <span className="row-sub">Cada mensaje que envíe alguien de tu equipo desde el panel llegará con su nombre completo en negrita arriba. Útil si varias personas atienden el mismo número.</span>
+                      </div>
+                      <button type="button" role="switch" aria-checked={signAgentName} aria-label="Firmar mensajes con el nombre del agente" className={`sign-agent-switch${signAgentName ? ' on' : ''}`} disabled={signSaving} onClick={() => void toggleSignAgentName()} />
+                    </div>
+                    {signError && <div className="error-box" style={{ marginTop: 10 }}>{signError}</div>}
+                    <div className="sign-agent-wa" aria-label="Vista previa en WhatsApp">
+                      <div className="sign-agent-wa-in">Hola, ¿tienen el plan Pro?<span>10:41</span></div>
+                      <div className="sign-agent-wa-out">{signAgentName && <><b>{identity.name || 'Juan Pablo'}:</b><br /></>}Sí 👋 cuesta S/ 89 al mes, ¿te paso el detalle?<span>10:42 ✓✓</span></div>
+                    </div>
+                    <span className="row-sub">No se firman: respuestas del bot, automatizaciones, audios, stickers ni lo que se escribe desde el teléfono.</span>
+                  </>
+                )}
+
+                {isAccountManager && profileTab === 'modulos' && (
+                  <>
                       <div className="module-tree" style={{ maxHeight: 'none' }}>
                         {MODULE_TREE.map((node) => {
                           const keys = (node.children ?? [node]).map((child) => child.key);
@@ -579,13 +692,12 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                           );
                         })}
                       </div>
-                    </div>
-                  )}
+                  </>
+                )}
 
-                  {isAccountManager && (
-                    <div className="profile-section">
-                      <div className="profile-section-title"><KeyRound size={14} />Integración BrainPOS</div>
-                      <p className="row-sub" style={{ marginTop: -6, marginBottom: 10 }}>Este AUTH KEY maestro permite que cada instalación de BrainPOS cree su propia instancia y reciba automáticamente su APP KEY.</p>
+                {isAccountManager && profileTab === 'integracion' && (
+                  <>
+                      <p className="row-sub" style={{ marginTop: 0, marginBottom: 12 }}>Este AUTH KEY maestro permite que cada instalación de BrainPOS cree su propia instancia y reciba automáticamente su APP KEY.</p>
                       {masterError && <div className="error-box">{masterError}</div>}
                       {masterLoading && !masterCredential ? <div className="row-sub">Preparando credencial maestra...</div> : masterCredential && (
                         <div className="form-grid plan-form-grid">
@@ -594,49 +706,16 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
                         </div>
                       )}
                       <div className="warning-box"><KeyRound size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Trátalo como una contraseña: con este token se pueden crear y controlar las instancias vinculadas a tu empresa.</div>
-                    </div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
-            ) : (
-              <div className="modal-body">
-                <div className="profile-section">
-                  <div className="profile-section-title"><Lock size={14} />Cambiar contraseña</div>
-                  {passwordError && <div className="error-box">{passwordError}</div>}
-                  {passwordSuccess && <div className="success-box">Contraseña actualizada correctamente.</div>}
-                  <div className="form-grid plan-form-grid">
-                    <div className="field field-full">
-                      <label>Contraseña actual</label>
-                      <div className="password-input">
-                        <input type={showCurrentPassword ? 'text' : 'password'} value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} autoComplete="current-password" />
-                        <button type="button" className="password-toggle" onClick={() => setShowCurrentPassword((v) => !v)} aria-label={showCurrentPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-                      </div>
-                    </div>
-                    <div className="field">
-                      <label>Nueva contraseña</label>
-                      <div className="password-input">
-                        <input type={showNewPassword ? 'text' : 'password'} value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} placeholder="Mínimo 10 caracteres" autoComplete="new-password" />
-                        <button type="button" className="password-toggle" onClick={() => setShowNewPassword((v) => !v)} aria-label={showNewPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-                      </div>
-                    </div>
-                    <div className="field">
-                      <label>Confirmar nueva contraseña</label>
-                      <div className="password-input">
-                        <input type={showConfirmPassword ? 'text' : 'password'} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} autoComplete="new-password" />
-                        <button type="button" className="password-toggle" onClick={() => setShowConfirmPassword((v) => !v)} aria-label={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
-            <div className="modal-actions">
-              <button className="button" onClick={() => setProfileModal(false)}>Cerrar</button>
               {profileTab === 'seguridad' && (
+                <div className="modal-actions">
                 <button className="button primary" disabled={passwordSaving || !passwordForm.currentPassword || !passwordForm.newPassword} onClick={() => void changePassword()}>{passwordSaving ? 'Guardando...' : 'Cambiar contraseña'}</button>
+                </div>
               )}
-            </div>
+            </section>
           </div>
         </div>
       )}

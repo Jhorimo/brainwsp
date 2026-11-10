@@ -202,6 +202,11 @@ export class UpdateCompanyDto {
   @MaxLength(60)
   @Matches(/^[a-z0-9-]+$/, { message: 'El enlace solo puede tener minúsculas, números y guiones' })
   slug?: string;
+
+  @ApiPropertyOptional({ description: 'Firmar cada mensaje enviado desde el panel con el nombre completo del agente en negrita.' })
+  @IsOptional()
+  @IsBoolean()
+  signAgentName?: boolean;
 }
 
 export class UpdateAiSettingsDto {
