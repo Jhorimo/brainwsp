@@ -851,6 +851,11 @@ export default function ConversationsPage() {
   // apaga y el auto-scroll deja de robarle la posición. Es un ref y no estado a propósito:
   // cambia en cada evento de scroll y no debe provocar re-render.
   const anclarAbajoRef = useRef(true);
+  // Botón flotante "ir al final" y contador de mensajes que llegaron mientras se leía arriba.
+  const [showJumpBottom, setShowJumpBottom] = useState(false);
+  const [jumpNewCount, setJumpNewCount] = useState(0);
+  // Diagnóstico TEMPORAL del chat que se queda arriba al abrirlo (ver ScrollReportController).
+  const scrollDiagRef = useRef({ openedAt: 0, convId: '', growth: 0, lastUserAt: 0, lastWriter: '', reported: false, events: [] as string[] });
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1192,8 +1197,16 @@ export default function ConversationsPage() {
   // hubiera tocado nada — y cuanto más activo el chat, más seguido.
   useEffect(() => {
     const el = messageStreamRef.current;
-    if (el && anclarAbajoRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    if (el && anclarAbajoRef.current) { el.scrollTop = el.scrollHeight; noteScroll('msgs'); }
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mensajes nuevos mientras el agente lee historial: se cuentan en el botón flotante.
+  const prevMsgCountRef = useRef(0);
+  useEffect(() => {
+    const prev = prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
+    if (!anclarAbajoRef.current && prev > 0 && messages.length > prev) setJumpNewCount((n) => n + (messages.length - prev));
+  }, [messages.length]);
 
   // Las imágenes, videos y stickers no traen su alto reservado: se cargan DESPUÉS de que el
   // efecto de arriba ya bajó al fondo, el hilo crece y el agente queda en un mensaje de días
@@ -1203,7 +1216,13 @@ export default function ConversationsPage() {
     const el = messageStreamRef.current;
     const inner = el?.firstElementChild;
     if (!el || !inner || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => { if (anclarAbajoRef.current) el.scrollTop = el.scrollHeight; });
+    let lastH = inner.getBoundingClientRect().height;
+    const observer = new ResizeObserver(() => {
+      const h = inner.getBoundingClientRect().height;
+      if (h > lastH) scrollDiagRef.current.growth += Math.round(h - lastH);
+      lastH = h;
+      if (anclarAbajoRef.current) { el.scrollTop = el.scrollHeight; noteScroll('resize'); }
+    });
     observer.observe(inner);
     return () => observer.disconnect();
   }, [selectedId, conversations.some((c) => c.id === selectedId)]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1228,7 +1247,55 @@ export default function ConversationsPage() {
   };
 
   // Al abrir otra conversación siempre se arranca al final, sin heredar el estado anterior.
-  useEffect(() => { anclarAbajoRef.current = true; }, [selectedId]);
+  useEffect(() => {
+    anclarAbajoRef.current = true;
+    setShowJumpBottom(false);
+    setJumpNewCount(0);
+    prevMsgCountRef.current = 0;
+    scrollDiagRef.current = { openedAt: Date.now(), convId: selectedId || '', growth: 0, lastUserAt: 0, lastWriter: '', reported: false, events: [] };
+    if (!selectedId) return;
+    // A los 2,5 s de abrir, si el chat no está al final y el agente no tocó nada, se reporta.
+    const t = setTimeout(() => {
+      const el = messageStreamRef.current;
+      const d = scrollDiagRef.current;
+      if (!el || d.convId !== selectedId || d.lastUserAt) return;
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (gap > 80) sendScrollReport('stuck_on_open', gap);
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function noteScroll(writer: string) {
+    const d = scrollDiagRef.current;
+    d.lastWriter = writer;
+    if (d.events.length < 30) d.events.push(`${writer}@${Date.now() - d.openedAt}`);
+  }
+
+  function sendScrollReport(reason: string, gap: number) {
+    const d = scrollDiagRef.current;
+    const el = messageStreamRef.current;
+    if (d.reported || !el) return;
+    d.reported = true;
+    const pendingMedia = Array.from(el.querySelectorAll('img, video')).filter((m) => (m instanceof HTMLImageElement ? !m.complete : (m as HTMLVideoElement).readyState < 1)).length;
+    apiFetch('/diagnostics/scroll', {
+      method: 'POST',
+      body: JSON.stringify({
+        reason, conversationId: d.convId, gapPx: Math.round(gap), growthPx: d.growth, pendingMedia,
+        msgCount: messages.length, lastWriter: d.lastWriter, elapsedMs: Date.now() - d.openedAt,
+        mobile: window.matchMedia('(max-width: 850px)').matches, ua: navigator.userAgent, events: d.events.join(' '),
+      }),
+    }).catch(() => {});
+  }
+
+  const markUserScroll = () => { scrollDiagRef.current.lastUserAt = Date.now(); };
+
+  const jumpToBottom = () => {
+    const el = messageStreamRef.current;
+    if (!el) return;
+    anclarAbajoRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    setJumpNewCount(0);
+  };
 
   // The emoji picker is teleported to a portal on <body> with `position: fixed`,
   // positioned from the toggle button's own coordinates — `.chat-layout` clips
@@ -3071,14 +3138,25 @@ export default function ConversationsPage() {
                 <button ref={chatHeaderMenuButtonRef} className="icon-button chat-header-more-btn" onClick={() => setChatHeaderMenuOpen((v) => !v)} title="Más opciones"><MoreHorizontal size={17} /></button>
               </div>
             </header>
+            <div className="message-stream-wrap">
             <div
               className="message-stream"
               ref={messageStreamRef}
+              onWheel={markUserScroll}
+              onTouchStart={markUserScroll}
+              onKeyDown={markUserScroll}
+              onPointerDown={markUserScroll}
               onScroll={(e) => {
                 const el = e.currentTarget;
                 // 80px de margen: el navegador redondea y con `scroll-behavior: smooth`
                 // el valor final puede quedar un par de píxeles corto del fondo real.
-                anclarAbajoRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+                const before = anclarAbajoRef.current;
+                anclarAbajoRef.current = gap < 80;
+                const d = scrollDiagRef.current;
+                if (before && !anclarAbajoRef.current && Date.now() - d.lastUserAt > 800) sendScrollReport('unanchored_without_user', gap);
+                setShowJumpBottom(gap > 300);
+                if (gap < 80) setJumpNewCount(0);
               }}
             >
               <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
@@ -3093,6 +3171,18 @@ export default function ConversationsPage() {
                   api={messageListApi}
                 />
               </div>
+            </div>
+            <button
+              type="button"
+              className={`jump-bottom-btn${showJumpBottom ? ' visible' : ''}`}
+              onClick={jumpToBottom}
+              aria-label="Ir al último mensaje"
+              title="Ir al último mensaje"
+              tabIndex={showJumpBottom ? 0 : -1}
+            >
+              <ChevronDown size={22} />
+              {jumpNewCount > 0 && <span className="jump-bottom-count">{jumpNewCount > 99 ? '99+' : jumpNewCount}</span>}
+            </button>
             </div>
 
             {selectMode ? (

@@ -2436,3 +2436,14 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
   .settings-nav-item { flex: none; }
   .settings-logout { margin: 0; }
 }
+
+/* Botón flotante "ir al último mensaje" del chat */
+.message-stream-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.jump-bottom-btn { position: absolute; right: 22px; bottom: 18px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border, rgba(0,0,0,.08)); background: var(--surface, #fff); color: var(--text, #333); display: grid; place-items: center; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.18); opacity: 0; transform: translateY(14px) scale(.85); pointer-events: none; transition: opacity .22s ease, transform .28s cubic-bezier(.2,.9,.3,1.25), background .15s; z-index: 5; }
+.jump-bottom-btn.visible { opacity: 1; transform: none; pointer-events: auto; }
+.jump-bottom-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.22); }
+.jump-bottom-btn:active { transform: scale(.94); }
+.jump-bottom-count { position: absolute; top: -6px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: #25d366; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; animation: jump-pop .3s ease; }
+@keyframes jump-pop { from { transform: scale(.4); } to { transform: scale(1); } }
+@media (max-width: 850px) { .jump-bottom-btn { right: 14px; bottom: 12px; } }
+@media (prefers-reduced-motion: reduce) { .jump-bottom-btn, .jump-bottom-count { transition: none; animation: none; } }
