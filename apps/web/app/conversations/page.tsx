@@ -854,8 +854,11 @@ export default function ConversationsPage() {
   // Botón flotante "ir al final" y contador de mensajes que llegaron mientras se leía arriba.
   const [showJumpBottom, setShowJumpBottom] = useState(false);
   const [jumpNewCount, setJumpNewCount] = useState(0);
-  // Diagnóstico TEMPORAL del chat que se queda arriba al abrirlo (ver ScrollReportController).
-  const scrollDiagRef = useRef({ openedAt: 0, convId: '', growth: 0, lastUserAt: 0, lastWriter: '', reported: false, events: [] as string[] });
+  // Cuándo abrió el chat y cuándo fue la última acción real del agente (rueda, toque, tecla,
+  // arrastre). Solo una acción real suelta el fondo: el diagnóstico en producción mostró que
+  // las fotos al cargar disparaban un `scroll` "a mitad" que apagaba el ancla sin que nadie
+  // tocara nada, y el chat quedaba arriba o parpadeando.
+  const scrollUserRef = useRef({ openedAt: 0, lastUserAt: 0 });
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1197,7 +1200,7 @@ export default function ConversationsPage() {
   // hubiera tocado nada — y cuanto más activo el chat, más seguido.
   useEffect(() => {
     const el = messageStreamRef.current;
-    if (el && anclarAbajoRef.current) { el.scrollTop = el.scrollHeight; noteScroll('msgs'); }
+    if (el && anclarAbajoRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mensajes nuevos mientras el agente lee historial: se cuentan en el botón flotante.
@@ -1216,13 +1219,7 @@ export default function ConversationsPage() {
     const el = messageStreamRef.current;
     const inner = el?.firstElementChild;
     if (!el || !inner || typeof ResizeObserver === 'undefined') return;
-    let lastH = inner.getBoundingClientRect().height;
-    const observer = new ResizeObserver(() => {
-      const h = inner.getBoundingClientRect().height;
-      if (h > lastH) scrollDiagRef.current.growth += Math.round(h - lastH);
-      lastH = h;
-      if (anclarAbajoRef.current) { el.scrollTop = el.scrollHeight; noteScroll('resize'); }
-    });
+    const observer = new ResizeObserver(() => { if (anclarAbajoRef.current) el.scrollTop = el.scrollHeight; });
     observer.observe(inner);
     return () => observer.disconnect();
   }, [selectedId, conversations.some((c) => c.id === selectedId)]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1252,47 +1249,16 @@ export default function ConversationsPage() {
     setShowJumpBottom(false);
     setJumpNewCount(0);
     prevMsgCountRef.current = 0;
-    scrollDiagRef.current = { openedAt: Date.now(), convId: selectedId || '', growth: 0, lastUserAt: 0, lastWriter: '', reported: false, events: [] };
-    if (!selectedId) return;
-    // A los 2,5 s de abrir, si el chat no está al final y el agente no tocó nada, se reporta.
-    const t = setTimeout(() => {
-      const el = messageStreamRef.current;
-      const d = scrollDiagRef.current;
-      if (!el || d.convId !== selectedId || d.lastUserAt) return;
-      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (gap > 80) sendScrollReport('stuck_on_open', gap);
-    }, 2500);
-    return () => clearTimeout(t);
-  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+    scrollUserRef.current = { openedAt: Date.now(), lastUserAt: 0 };
+  }, [selectedId]);
 
-  function noteScroll(writer: string) {
-    const d = scrollDiagRef.current;
-    d.lastWriter = writer;
-    if (d.events.length < 30) d.events.push(`${writer}@${Date.now() - d.openedAt}`);
-  }
-
-  function sendScrollReport(reason: string, gap: number) {
-    const d = scrollDiagRef.current;
-    const el = messageStreamRef.current;
-    if (d.reported || !el) return;
-    d.reported = true;
-    const pendingMedia = Array.from(el.querySelectorAll('img, video')).filter((m) => (m instanceof HTMLImageElement ? !m.complete : (m as HTMLVideoElement).readyState < 1)).length;
-    apiFetch('/diagnostics/scroll', {
-      method: 'POST',
-      body: JSON.stringify({
-        reason, conversationId: d.convId, gapPx: Math.round(gap), growthPx: d.growth, pendingMedia,
-        msgCount: messages.length, lastWriter: d.lastWriter, elapsedMs: Date.now() - d.openedAt,
-        mobile: window.matchMedia('(max-width: 850px)').matches, ua: navigator.userAgent, events: d.events.join(' '),
-      }),
-    }).catch(() => {});
-  }
-
-  const markUserScroll = () => { scrollDiagRef.current.lastUserAt = Date.now(); };
+  const markUserScroll = () => { scrollUserRef.current.lastUserAt = Date.now(); };
 
   const jumpToBottom = () => {
     const el = messageStreamRef.current;
     if (!el) return;
-    anclarAbajoRef.current = true;
+    // No se ancla aquí: si estuviera anclado, el onScroll del recorrido lo clavaría al fondo
+    // de golpe y se perdería la animación. Se ancla solo al llegar (gap < 80).
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     setJumpNewCount(0);
   };
@@ -3151,11 +3117,15 @@ export default function ConversationsPage() {
                 // 80px de margen: el navegador redondea y con `scroll-behavior: smooth`
                 // el valor final puede quedar un par de píxeles corto del fondo real.
                 const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-                const before = anclarAbajoRef.current;
-                anclarAbajoRef.current = gap < 80;
-                const d = scrollDiagRef.current;
-                if (before && !anclarAbajoRef.current && Date.now() - d.lastUserAt > 800) sendScrollReport('unanchored_without_user', gap);
-                setShowJumpBottom(gap > 300);
+                const u = scrollUserRef.current;
+                const now = Date.now();
+                const byUser = now - u.lastUserAt < 1000;
+                if (gap < 80) anclarAbajoRef.current = true;
+                else if (byUser && now - u.openedAt > 300) anclarAbajoRef.current = false;
+                // Sin acción del agente (fotos cargando, acuses que recargan el hilo) y aún
+                // anclado: se vuelve al fondo en vez de soltarlo.
+                else if (anclarAbajoRef.current) el.scrollTop = el.scrollHeight;
+                setShowJumpBottom(!anclarAbajoRef.current && gap > 300);
                 if (gap < 80) setJumpNewCount(0);
               }}
             >
