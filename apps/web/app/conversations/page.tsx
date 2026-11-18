@@ -53,7 +53,7 @@ type Conversation = {
   messages: Array<{ id: string; waMessageId?: string | null; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin; sentFromPhone?: boolean };
 type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; thumbnailUrl?: string; ctwaClid?: string; conversionSource?: string; conversionApp?: string };
 type LineSummary = { id: string; name: string; status: string; provider: string; phoneNumber?: string | null; lastConnectedAt: string | null; unreadChats: number };
 const LINE_FILTER_KEY = 'brainwsp_line_filter';
@@ -532,6 +532,9 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
                     )}
                     {message.direction === 'INBOUND' && authorName(message.author) && (
                       <button className="message-author" onClick={(e) => { e.stopPropagation(); api.openAuthorChat(message.author!); }} title="Abrir el chat con esta persona">{authorName(message.author)}</button>
+                    )}
+                    {message.direction === 'OUTBOUND' && message.metadata?.sentFromPhone && (
+                      <span className="message-from-phone" title="Escrito directamente desde el teléfono de la línea, no desde el panel">📱 Desde el teléfono</span>
                     )}
                     {message.quotedMessage && (
                       <button className="message-quote" onClick={(e) => { e.stopPropagation(); api.scrollToMessage(message.quotedMessage!.id); }}>

@@ -2447,3 +2447,6 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 @keyframes jump-pop { from { transform: scale(.4); } to { transform: scale(1); } }
 @media (max-width: 850px) { .jump-bottom-btn { right: 14px; bottom: 12px; } }
 @media (prefers-reduced-motion: reduce) { .jump-bottom-btn, .jump-bottom-count { transition: none; animation: none; } }
+
+/* Mensaje enviado desde el teléfono de la línea (no desde el panel) */
+.message-from-phone { display: block; font-size: 11px; font-weight: 600; opacity: .7; margin-bottom: 3px; }

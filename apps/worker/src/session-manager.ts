@@ -495,7 +495,13 @@ export class SessionManager {
   }
 
   private async persistIncoming(instanceId: string, message: WAMessage, socket: WASocket) {
-    if (message.key.fromMe || !message.key.remoteJid || !message.key.id || !message.message) return;
+    if (!message.key.remoteJid || !message.key.id || !message.message) return;
+    // `fromMe` en un `notify` = lo escribió alguien desde el teléfono de la línea (u otro
+    // dispositivo vinculado). Antes se descartaba y el panel no mostraba esos mensajes. Lo que
+    // envía el propio panel sale por el socket como `append`, no `notify`, y además se filtra
+    // abajo por waMessageId. Estos mensajes se guardan como OUTBOUND, sin sumar no leídos, sin
+    // crear prospecto y sin disparar bot ni automatizaciones.
+    const fromMe = !!message.key.fromMe;
 
     // Edicion de un mensaje ya enviado. WhatsApp la entrega envuelta como
     // editedMessage.message.protocolMessage con type MESSAGE_EDIT, y trae DOS cosas: la
@@ -562,6 +568,19 @@ export class SessionManager {
       select: { id: true },
     });
     if (alreadyStored) return;
+    const sentAtMs = Number(message.messageTimestamp || 0) * 1000;
+    if (fromMe && Date.now() - sentAtMs < 60_000) {
+      // Solo para mensajes recientes (los atrasados de una reconexión no pueden ser un envío
+      // en curso, y esperar por cada uno frenaría la cola de entrantes).
+      // Por si es el eco de un envío del panel que el outbound-worker aún no terminó de guardar
+      // con su waMessageId: se espera un momento y se vuelve a revisar antes de crear nada.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      const savedMeanwhile = await this.prisma.message.findUnique({
+        where: { instanceId_waMessageId: { instanceId, waMessageId: message.key.id } },
+        select: { id: true },
+      });
+      if (savedMeanwhile) return;
+    }
 
     const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId } });
     if (!instance) return;
@@ -652,17 +671,22 @@ export class SessionManager {
       where: { companyId_waId: { companyId: instance.companyId, waId: identityJid } },
       update: isGroup
         ? { lastSeenAt: new Date(), ...(groupSubject ? { name: groupSubject, pushName: groupSubject } : {}) }
-        : { phone: phone || undefined, pushName: message.pushName || undefined, lastSeenAt: new Date() },
+        : fromMe
+          ? { phone: phone || undefined }
+          : { phone: phone || undefined, pushName: message.pushName || undefined, lastSeenAt: new Date() },
       create: isGroup
         ? { companyId: instance.companyId, waId: identityJid, name: groupSubject || null, pushName: groupSubject || null, lastSeenAt: new Date() }
-        : { companyId: instance.companyId, waId: identityJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
+        : fromMe
+          // `message.pushName` es el nombre de la propia línea, no del contacto.
+          ? { companyId: instance.companyId, waId: identityJid, phone }
+          : { companyId: instance.companyId, waId: identityJid, phone, pushName: message.pushName || null, name: message.pushName || null, lastSeenAt: new Date() },
     });
     this.refreshAvatar(instance.companyId, socket, contact.id, remoteJid, contact.avatarUrl);
 
     // In a group, `key.participant` is the actual sender — track them as their own
     // Contact so the UI can show who wrote each message, distinct from the group itself.
     let authorContactId: string | undefined;
-    if (isGroup && message.key.participant) {
+    if (isGroup && message.key.participant && !fromMe) {
       const participantJid = message.key.participant;
       let participantPhone = jidToPhone(participantJid) || (message.key.participantAlt ? jidToPhone(message.key.participantAlt) : null);
       // Si escribió como @lid sin número, se completa con la equivalencia guardada: así el panel
@@ -707,14 +731,14 @@ export class SessionManager {
           where: { id: existingConversation.id },
           // Como WhatsApp con "Mantener los chats archivados": un mensaje nuevo NO desarchiva el
           // chat; solo se desarchiva a mano desde el panel.
-          data: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
+          data: { lastMessageAt: new Date(), ...(fromMe ? {} : { unreadCount: { increment: 1 } }) },
         })
       : await this.prisma.conversation.create({
           data: {
             companyId: instance.companyId,
             instanceId,
             contactId: contact.id,
-            unreadCount: 1,
+            unreadCount: fromMe ? 0 : 1,
             lastMessageAt: new Date(),
             departmentId: defaultDepartment?.id,
             assignedUserId: defaultAgentId,
@@ -726,7 +750,7 @@ export class SessionManager {
     // predeterminado ya quedaron asignados arriba; si no, un agente lo asigna al revisar la
     // conversación (ver ConversationsService.update, que además hereda el departamento del
     // agente asignado hacia la propia conversación).
-    if (!existingConversation && !isGroup) {
+    if (!existingConversation && !isGroup && !fromMe) {
       const lead = await this.prisma.lead.create({
         data: {
           companyId: instance.companyId,
@@ -816,9 +840,10 @@ export class SessionManager {
         contactId: contact.id,
         authorContactId,
         waMessageId: message.key.id,
-        direction: MessageDirection.INBOUND,
+        direction: fromMe ? MessageDirection.OUTBOUND : MessageDirection.INBOUND,
         type: content.type,
-        status: MessageStatus.RECEIVED,
+        status: fromMe ? MessageStatus.SENT : MessageStatus.RECEIVED,
+        ...(fromMe ? { sentAt: new Date() } : {}),
         body: content.body,
         caption: content.caption,
         fileName: content.fileName,
@@ -833,6 +858,7 @@ export class SessionManager {
           timestamp: String(message.messageTimestamp || ''),
           rawContent: JSON.stringify(message.message, BufferJSON.replacer),
           ...content.metadata,
+          ...(fromMe ? { sentFromPhone: true } : {}),
         },
         quotedMessageId,
       },
@@ -866,7 +892,7 @@ export class SessionManager {
     // Una automatización con keyword coincidente gana sobre la IA genérica — si disparó un
     // flujo, no tiene sentido además contestar con una respuesta libre de IA para el mismo
     // mensaje entrante.
-    if (!botDisabled) {
+    if (!botDisabled && !fromMe) {
       maybeRunFlow(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id)
         .then((triggered) => {
           if (!triggered) return maybeReplyWithAi(this.prisma, this.outboundQueue, this.realtime, this.logger, conversation.id);
