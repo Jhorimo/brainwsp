@@ -28,6 +28,7 @@ import { maybeReplyWithAi } from './ai-agent.js';
 import { maybeRunFlow } from './automation-engine.js';
 import { extensionFromMime, extractMessage, jidToPhone, type AdContext } from './message-utils.js';
 import { completeLidPair } from './lid-identity.js';
+import { CallHandler } from './call-handler.js';
 import { aBuffer, descifrarEdicion, sinDispositivo } from './secret-edit.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
@@ -75,6 +76,7 @@ export class SessionManager {
   private readonly leaseLost = new Set<string>();
   private readonly redis = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
   private readonly avatarRefreshTimer: NodeJS.Timeout;
+  private readonly calls: CallHandler;
 
   constructor(
     private readonly prisma: PrismaClient,
@@ -82,6 +84,10 @@ export class SessionManager {
     private readonly logger: Logger,
     private readonly outboundQueue: Queue,
   ) {
+    this.calls = new CallHandler(prisma, realtime, outboundQueue, logger, (instanceId) => {
+      const socket = this.sockets.get(instanceId);
+      return socket ? (callId, callFrom) => socket.rejectCall(callId, callFrom) : undefined;
+    });
     this.avatarRefreshTimer = setInterval(() => {
       for (const [instanceId, socket] of this.sockets) {
         this.refreshStaleAvatars(instanceId, socket).catch((error) => {
@@ -352,6 +358,11 @@ export class SessionManager {
       }
     });
 
+    // Llamadas de WhatsApp entrantes: aviso flotante en el panel (ver call-handler.ts).
+    socket.ev.on('call', (events) => {
+      void this.calls.handleEvents(instanceId, events);
+    });
+
     socket.ev.on('messages.reaction', async (reactions) => {
       for (const { key, reaction } of reactions) {
         await this.persistReaction(instanceId, key, reaction).catch((error) => {
@@ -472,6 +483,20 @@ export class SessionManager {
   // quedan guardadas y al arrancar de nuevo cada línea reconecta sin QR. Los leases se liberan en
   // paralelo y con tope de tiempo para que una línea trabada no retrase al resto; luego se da un
   // momento a que terminen de guardarse las claves y estados que los cierres disparan.
+  // Rechazo pedido por un agente desde el aviso flotante del panel (comando `reject-call`).
+  rejectCall(instanceId: string, callId: string, rejectedByName: string | null) {
+    return this.calls.reject(instanceId, callId, rejectedByName);
+  }
+
+  // Solo para probar en local sin llamar de verdad (comando `simulate-call`).
+  simulateCall(instanceId: string, opts: Parameters<CallHandler['simulate']>[1]) {
+    if (process.env.ALLOW_CALL_SIMULATION !== '1') {
+      this.logger.warn({ instanceId }, 'simulate-call ignorado: ALLOW_CALL_SIMULATION no está en 1');
+      return;
+    }
+    return this.calls.simulate(instanceId, opts);
+  }
+
   async close() {
     const ids = [...this.sockets.keys()];
     for (const instanceId of ids) {

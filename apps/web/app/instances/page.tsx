@@ -16,6 +16,7 @@ type WidgetConfig = {
 type Instance = {
   id: string; name: string; slug: string; provider: string; phoneNumber?: string | null; displayName?: string | null;
   status: string; qr?: string | null; reconnectAttempt: number; lastError?: string | null; lastConnectedAt?: string | null;
+  callRejectAutoReply?: boolean; callRejectMessage?: string | null;
   inboundCount: number; outboundCount: number; widgetPublicKey?: string | null; configuration?: WidgetConfig | null;
 };
 
@@ -35,6 +36,8 @@ export default function InstancesPage() {
   const [editInstance, setEditInstance] = useState<Instance | null>(null);
   const [editName, setEditName] = useState('');
   const [editSlug, setEditSlug] = useState('');
+  const [editCallReply, setEditCallReply] = useState(false);
+  const [editCallMessage, setEditCallMessage] = useState('');
   const [editError, setEditError] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [deleteInstance, setDeleteInstance] = useState<Instance | null>(null);
@@ -111,14 +114,20 @@ export default function InstancesPage() {
     setEditInstance(instance);
     setEditName(instance.name);
     setEditSlug(instance.slug);
+    setEditCallReply(!!instance.callRejectAutoReply);
+    setEditCallMessage(instance.callRejectMessage || 'En este momento no podemos atender llamadas, escríbenos por aquí 🙂');
     setEditError('');
   };
 
   const saveEdit = async () => {
     if (!editInstance || !editName.trim() || !editSlug.trim()) return;
+    if (editCallReply && !editCallMessage.trim()) { setEditError('Escribe el mensaje a enviar o elige "No enviar nada".'); return; }
     setSavingEdit(true); setEditError('');
     try {
-      await apiFetch(`/instances/${editInstance.id}`, { method: 'PATCH', body: JSON.stringify({ name: editName.trim(), slug: editSlug.trim() }) });
+      const callFields = editInstance.provider === 'BAILEYS'
+        ? { callRejectAutoReply: editCallReply, callRejectMessage: editCallMessage.trim() }
+        : {};
+      await apiFetch(`/instances/${editInstance.id}`, { method: 'PATCH', body: JSON.stringify({ name: editName.trim(), slug: editSlug.trim(), ...callFields }) });
       setEditInstance(null);
       await load();
     } catch (err) { setEditError(err instanceof Error ? err.message : 'No se pudo guardar la instancia'); }
@@ -350,6 +359,23 @@ export default function InstancesPage() {
               <div className="field"><label>Nombre</label><input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(); }} /></div>
               <div className="field"><label>Slug</label><input value={editSlug} onChange={(e) => setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(); }} /></div>
               <div className="warning-box">El slug se usa para elegir esta instancia desde la API (parámetro <code>instance</code>). Si lo cambias, actualiza también las integraciones que lo usan.</div>
+              {editInstance.provider === 'BAILEYS' && (
+                <div className="field call-reply-field">
+                  <label>Al rechazar una llamada desde el panel</label>
+                  <label className="call-reply-option">
+                    <input type="radio" name="callReply" checked={!editCallReply} onChange={() => setEditCallReply(false)} />
+                    <span>No enviar nada</span>
+                  </label>
+                  <label className="call-reply-option">
+                    <input type="radio" name="callReply" checked={editCallReply} onChange={() => setEditCallReply(true)} />
+                    <span>Enviar este mensaje por el chat</span>
+                  </label>
+                  {editCallReply && (
+                    <textarea rows={3} maxLength={500} value={editCallMessage} onChange={(e) => setEditCallMessage(e.target.value)} />
+                  )}
+                  <small className="call-reply-hint">Solo aplica cuando un agente pulsa «Rechazar» en el aviso de llamada. Las llamadas perdidas no envían nada.</small>
+                </div>
+              )}
             </div>
             <div className="modal-actions">
               <button className="button" onClick={() => setEditInstance(null)}>Cancelar</button>

@@ -39,6 +39,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { IncomingCallProvider } from './incoming-call-provider';
+import { WhatsAppCallToast } from './whatsapp-call-toast';
 import { Protected } from './protected';
 import { WhatsAppStatusToast } from './whatsapp-status-toast';
 import { API_URL, apiFetch, clearAuthSession, getStoredCompany, getStoredUser, isImpersonating, stopImpersonation, updateStoredCompany, updateStoredUser } from '@/lib/api';
@@ -510,6 +511,7 @@ export function AppShell({ title, subtitle, children, actions }: { title: string
           <div className="page-content">{children}</div>
           <WhatsAppStatusToast />
           <IncomingCallProvider />
+          <WhatsAppCallToast />
         </main>
       </div>
 

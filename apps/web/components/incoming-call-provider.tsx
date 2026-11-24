@@ -15,7 +15,7 @@ function formatDuration(seconds: number) {
 
 // Timbre sintetizado con Web Audio API (un tono repetido) en vez de un archivo de audio —
 // evita depender de un asset con licencia solo para esto.
-function useRingtone() {
+export function useRingtone() {
   const ctxRef = useRef<AudioContext | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 

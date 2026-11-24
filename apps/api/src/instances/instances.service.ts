@@ -70,6 +70,8 @@ export class InstancesService {
         lastConnectedAt: true,
         lastDisconnectedAt: true,
         autoConnect: true,
+        callRejectAutoReply: true,
+        callRejectMessage: true,
         widgetPublicKey: true,
         configuration: true,
         createdAt: true,
@@ -291,7 +293,7 @@ export class InstancesService {
     return { success: true, instanceId: id };
   }
 
-  async update(companyId: string, id: string, data: { name?: string; slug?: string }) {
+  async update(companyId: string, id: string, data: { name?: string; slug?: string; callRejectAutoReply?: boolean; callRejectMessage?: string }) {
     await this.getOwned(companyId, id);
     if (data.slug !== undefined) {
       const existing = await this.prisma.whatsAppInstance.findUnique({
@@ -304,8 +306,25 @@ export class InstancesService {
       data: {
         ...(data.name !== undefined ? { name: data.name.trim() } : {}),
         ...(data.slug !== undefined ? { slug: data.slug } : {}),
+        ...(data.callRejectAutoReply !== undefined ? { callRejectAutoReply: data.callRejectAutoReply } : {}),
+        ...(data.callRejectMessage !== undefined ? { callRejectMessage: data.callRejectMessage.trim() || null } : {}),
       },
     });
+  }
+
+  // Rechaza una llamada de WhatsApp que está sonando. Solo por acción humana desde el aviso
+  // flotante: el worker conoce el callId y quién llama (no se expone el JID al navegador).
+  async rejectCall(companyId: string, id: string, callId: string, user: { id: string; name: string | null }) {
+    const instance = await this.getOwned(companyId, id);
+    if (instance.provider !== WhatsAppProvider.BAILEYS) {
+      throw new ConflictException('Esta acción está disponible para instancias Baileys');
+    }
+    await this.queues.commands.add(
+      'reject-call',
+      { instanceId: id, callId, rejectedByUserId: user.id, rejectedByName: user.name },
+      { removeOnComplete: 1000, removeOnFail: 1000 },
+    );
+    return { success: true };
   }
 
   // Si la instancia nunca se conectó ni tiene historial, se borra de verdad (limpieza de

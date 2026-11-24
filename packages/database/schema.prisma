@@ -394,6 +394,10 @@ model WhatsAppInstance {
   lastDisconnectedAt DateTime?
   active           Boolean          @default(true)
   autoConnect      Boolean          @default(false)
+  // Llamadas de WhatsApp: al rechazar una llamada desde el panel, opcionalmente se responde
+  // con este texto por chat. Desactivado por defecto (ver worker/src/call-handler.ts).
+  callRejectAutoReply Boolean        @default(false)
+  callRejectMessage   String?
   // Solo relevantes para provider = CLIENERA_CHAT. widgetPublicKey es el token que va en el
   // <script data-company="..."> embebible — deliberadamente distinto de `id`/`slug` para poder
   // rotarlo sin afectar el enlace público (que usa Company.slug) ni la fila interna.

@@ -59,6 +59,12 @@ export class InstancesController {
     return this.service.refreshAvatars(user.companyId, id);
   }
 
+  // Cualquier agente que ve la línea puede rechazar desde el aviso flotante (no solo admins).
+  @Post(':id/calls/:callId/reject')
+  rejectCall(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('callId') callId: string) {
+    return this.service.rejectCall(user.companyId, id, callId, { id: user.sub, name: user.name });
+  }
+
   @Patch(':id')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   update(@CurrentUser() user: JwtUser, @Param('id') id: string, @Body() dto: UpdateInstanceDto) {

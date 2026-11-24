@@ -2450,3 +2450,34 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 
 /* Mensaje enviado desde el teléfono de la línea (no desde el panel) */
 .message-from-phone { display: block; font-size: 11px; font-weight: 600; opacity: .7; margin-bottom: 3px; }
+
+/* Aviso flotante de llamadas de WhatsApp entrantes */
+.wa-call-stack { position: fixed; top: 72px; right: 16px; z-index: 1200; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+.wa-call-toast { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 44px rgba(10, 25, 50, .22); padding: 14px 16px; animation: wa-call-in .28s cubic-bezier(.2,.9,.3,1.2); }
+.wa-call-toast.ringing { border-color: var(--success); }
+.wa-call-toast.ended { opacity: .92; }
+.wa-call-head { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+.wa-call-title { flex: 1; }
+.wa-call-icon { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--success-soft); color: var(--success); }
+.wa-call-toast.ended .wa-call-icon { background: var(--danger-soft); color: var(--danger); }
+.wa-call-icon.pulse { animation: wa-call-pulse 1.2s ease-in-out infinite; }
+.wa-call-sim { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.wa-call-close { border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.wa-call-body { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.wa-call-avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); font-weight: 700; font-size: 18px; }
+.wa-call-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wa-call-who strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-call-who span { font-size: 12px; color: var(--muted); }
+.wa-call-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.wa-call-actions .button { display: inline-flex; align-items: center; gap: 6px; }
+.wa-call-nochat { font-size: 12px; color: var(--muted); }
+.wa-call-error { margin-top: 8px; font-size: 12px; color: var(--danger-text); }
+.wa-call-foot { margin-top: 10px; font-size: 11px; color: var(--muted); }
+@keyframes wa-call-in { from { opacity: 0; transform: translateY(-10px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes wa-call-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(22, 138, 85, .45); } 50% { box-shadow: 0 0 0 8px rgba(22, 138, 85, 0); } }
+@media (max-width: 850px) { .wa-call-stack { top: 60px; right: 12px; left: 12px; width: auto; } }
+@media (prefers-reduced-motion: reduce) { .wa-call-toast, .wa-call-icon.pulse { animation: none; } }
+.call-reply-field { display: flex; flex-direction: column; gap: 6px; }
+.field .call-reply-option, .call-reply-option { display: flex; flex-direction: row; align-items: center; gap: 8px; font-weight: 500; font-size: 13px; text-transform: none; letter-spacing: normal; color: var(--text); cursor: pointer; margin: 0; }
+.call-reply-option input { width: auto; }
+.call-reply-hint { color: var(--muted); font-size: 11px; }

@@ -31,6 +31,17 @@ export class UpdateInstanceDto {
   @IsString()
   @Matches(/^[a-z0-9-]+$/)
   slug?: string;
+
+  @ApiPropertyOptional({ description: 'Responder por chat al rechazar una llamada desde el panel' })
+  @IsOptional()
+  @IsBoolean()
+  callRejectAutoReply?: boolean;
+
+  @ApiPropertyOptional({ example: 'En este momento no podemos atender llamadas, escríbenos por aquí 🙂' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  callRejectMessage?: string;
 }
 
 // Branding básico del widget (Fase 1) — deliberadamente corto, ver punto 10 del brief

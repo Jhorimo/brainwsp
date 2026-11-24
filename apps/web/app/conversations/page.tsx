@@ -53,7 +53,7 @@ type Conversation = {
   messages: Array<{ id: string; waMessageId?: string | null; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice'; callStatus?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin; sentFromPhone?: boolean };
+type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice' | 'video'; callStatus?: string; rejectedByName?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin; sentFromPhone?: boolean };
 type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; thumbnailUrl?: string; ctwaClid?: string; conversionSource?: string; conversionApp?: string };
 type LineSummary = { id: string; name: string; status: string; provider: string; phoneNumber?: string | null; lastConnectedAt: string | null; unreadChats: number };
 const LINE_FILTER_KEY = 'brainwsp_line_filter';
@@ -256,13 +256,14 @@ function formatCallDuration(seconds?: number) {
 
 // Mismo texto en ambos lados (panel de agentes y el widget) — ver c/[slug]/page.tsx.
 function callLabel(metadata?: MessageMetadata | null) {
+  const video = metadata?.callType === 'video';
   switch (metadata?.callStatus) {
-    case 'answered': return `Llamada de voz · ${formatCallDuration(metadata?.durationSeconds)}`;
-    case 'missed': return 'Llamada perdida';
-    case 'declined': return 'Llamada rechazada';
+    case 'answered': return `${video ? 'Videollamada' : 'Llamada de voz'} · ${formatCallDuration(metadata?.durationSeconds)}`;
+    case 'missed': return video ? 'Videollamada perdida' : 'Llamada perdida';
+    case 'declined': return `${video ? 'Videollamada' : 'Llamada'} rechazada${metadata?.rejectedByName ? ` por ${metadata.rejectedByName}` : ''}`;
     case 'cancelled': return 'Llamada cancelada';
     case 'failed': return 'Llamada fallida';
-    default: return 'Llamada de voz';
+    default: return video ? 'Videollamada' : 'Llamada de voz';
   }
 }
 

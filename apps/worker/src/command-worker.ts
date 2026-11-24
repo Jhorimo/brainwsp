@@ -16,11 +16,22 @@ export class CommandWorker {
     this.worker.on('failed', (job, error) => this.logger.error({ err: error, jobId: job?.id }, 'command failed'));
   }
 
-  private async process(job: Job<{ instanceId: string; conversationId?: string; archive?: boolean }>) {
+  private async process(job: Job<{ instanceId: string; conversationId?: string; archive?: boolean; [key: string]: unknown }>) {
     if (job.name === 'connect') return this.sessions.connect(job.data.instanceId, { manual: true });
     if (job.name === 'disconnect') return this.sessions.disconnect(job.data.instanceId);
     if (job.name === 'logout') return this.sessions.logout(job.data.instanceId);
     if (job.name === 'refresh-avatars') return this.sessions.forceRefreshAvatars(job.data.instanceId);
+    if (job.name === 'reject-call') {
+      return this.sessions.rejectCall(job.data.instanceId, String(job.data.callId), (job.data.rejectedByName as string | null) ?? null);
+    }
+    if (job.name === 'simulate-call') {
+      return this.sessions.simulateCall(job.data.instanceId, {
+        phone: String(job.data.phone || ''),
+        isVideo: !!job.data.isVideo,
+        end: job.data.end as 'timeout' | 'accept' | 'terminate' | 'none' | undefined,
+        afterSeconds: typeof job.data.afterSeconds === 'number' ? job.data.afterSeconds : undefined,
+      });
+    }
     // Desactivado: chatModify(archive) hacía que WhatsApp desvinculara el dispositivo (ver
     // ConversationsService.update). Se ignora por si queda algún job viejo en la cola.
     if (job.name === 'archive-chat') return;
