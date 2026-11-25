@@ -68,9 +68,10 @@ export class ConversationsController {
     return this.service.linkedChats(user, id);
   }
 
+  // ?before=<id del mensaje más antiguo cargado>&limit=200 → página anterior del historial.
   @Get(':id/messages')
-  messages(@CurrentUser() user: JwtUser, @Param('id') id: string) {
-    return this.service.messages(user, id);
+  messages(@CurrentUser() user: JwtUser, @Param('id') id: string, @Query('before') before?: string, @Query('limit') limit?: string) {
+    return this.service.messages(user, id, before || undefined, limit ? Number(limit) || undefined : undefined);
   }
 
   // Marcar leído sin traerse el hilo. Antes el único sitio que ponía `unreadCount` a 0

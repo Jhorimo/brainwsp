@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -76,6 +76,9 @@ const byShortcut = (a: QuickReply, b: QuickReply) => a.shortcut.localeCompare(b.
 const normalizeText = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 // Variables que se reemplazan al insertar una respuesta rápida.
 const QUICK_REPLY_VARIABLES = ['{{nombre}}', '{{agente}}', '{{empresa}}'];
+// Hilo: el API devuelve los 500 más recientes y después páginas de 200 al subir.
+const INITIAL_PAGE = 500;
+const OLDER_PAGE = 200;
 // Archivo en el formulario de respuestas rápidas. `savedIndex` = posición en la respuesta ya
 // guardada (para la vista previa desde el servidor); los recién subidos traen `previewUrl`.
 type QuickReplyDraftFile = { mediaUrl: string; fileName: string; mimeType: string; fileSize: number; previewUrl?: string; savedIndex?: number };
@@ -684,6 +687,8 @@ export default function ConversationsPage() {
   // como un panel deslizable bajo demanda en vez de dejarlo inalcanzable en tablet/celular.
   const [contactPanelOpen, setContactPanelOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
   const [search, setSearch] = useState('');
   // La búsqueda vive escondida detrás de la lupa (como WhatsApp) para no gastar una fila entera.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -902,6 +907,14 @@ export default function ConversationsPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageStreamRef = useRef<HTMLDivElement>(null);
+  // Cantidad de mensajes ya vista (para contar solo los NUEVOS en el botón ↓).
+  const prevMsgCountRef = useRef(0);
+  // Paginación del hilo ("cargar mensajes anteriores").
+  const messagesChatRef = useRef<string | null>(null);
+  const restoreScrollRef = useRef<{ height: number; top: number } | null>(null);
+  const [olderState, setOlderState] = useState({ hasMore: false, loading: false });
+  const olderStateRef = useRef(olderState);
+  olderStateRef.current = olderState;
   // `true` mientras el agente esté al final del hilo; en cuanto sube a leer historial se
   // apaga y el auto-scroll deja de robarle la posición. Es un ref y no estado a propósito:
   // cambia en cada evento de scroll y no debe provocar re-render.
@@ -996,7 +1009,19 @@ export default function ConversationsPage() {
   const loadMessages = useCallback(async (conversationId: string, retries = 3) => {
     try {
       const list = await apiFetch<Message[]>(`/conversations/${conversationId}/messages`);
-      setMessages(list);
+      const sameChat = messagesChatRef.current === conversationId;
+      messagesChatRef.current = conversationId;
+      if (!sameChat) setOlderState({ hasMore: list.length >= INITIAL_PAGE, loading: false });
+      // Al recargar el MISMO chat se conservan las páginas antiguas que el agente ya cargó
+      // subiendo ("cargar mensajes anteriores"); antes se reemplazaba todo por los 500 últimos.
+      setMessages((current) => {
+        if (!sameChat || !list.length || !current.length) return list;
+        const ids = new Set(list.map((m) => m.id));
+        const first = list[0].createdAt;
+        const older = current.filter((m) => !ids.has(m.id) && m.createdAt < first);
+        if (older.length) prevMsgCountRef.current += older.length;
+        return older.length ? [...older, ...list] : list;
+      });
       setConversations((current) => current.map((item) => item.id === conversationId ? { ...item, unreadCount: 0 } : item));
       // Un chat recién creado ("Nuevo chat") se carga con el primer mensaje todavía en cola, y el
       // aviso de "enviado" puede llegar antes que esta carga y perderse; sin él los ✓✓ tampoco
@@ -1025,6 +1050,41 @@ export default function ConversationsPage() {
     } catch {}
   }, []);
   useEffect(() => { if (selectedId) void loadMessages(selectedId); }, [selectedId, loadMessages]);
+
+  // "Cargar mensajes anteriores": al acercarse al inicio del chat se pide la página anterior
+  // (200) y se antepone sin mover lo que el agente está leyendo.
+  const loadOlderMessages = useCallback(async () => {
+    const chatId = selectedIdRef.current;
+    const el = messageStreamRef.current;
+    if (!chatId || !el || olderStateRef.current.loading || !olderStateRef.current.hasMore) return;
+    const oldest = messagesRef.current[0];
+    if (!oldest) return;
+    setOlderState({ hasMore: true, loading: true });
+    try {
+      const page = await apiFetch<Message[]>(`/conversations/${chatId}/messages?before=${encodeURIComponent(oldest.id)}&limit=${OLDER_PAGE}`);
+      if (selectedIdRef.current !== chatId) return;
+      const ids = new Set(messagesRef.current.map((m) => m.id));
+      const fresh = page.filter((m) => !ids.has(m.id));
+      restoreScrollRef.current = { height: el.scrollHeight, top: el.scrollTop };
+      prevMsgCountRef.current += fresh.length; // no cuenta como "mensajes nuevos" del botón ↓
+      setMessages((current) => [...fresh, ...current]);
+      setOlderState({ hasMore: page.length >= OLDER_PAGE, loading: false });
+    } catch (err) {
+      setOlderState({ hasMore: true, loading: false });
+      setError(err instanceof Error ? err.message : 'No se pudieron cargar los mensajes anteriores');
+    }
+  }, []);
+
+  // Tras anteponer una página: mantener a la vista el mismo mensaje. Si el navegador ya lo
+  // ajustó solo (scroll anchoring), no se toca.
+  useLayoutEffect(() => {
+    const el = messageStreamRef.current;
+    const saved = restoreScrollRef.current;
+    if (!el || !saved) return;
+    restoreScrollRef.current = null;
+    const expected = saved.top + (el.scrollHeight - saved.height);
+    if (Math.abs(el.scrollTop - expected) > 2) el.scrollTop = expected;
+  }, [messages]);
   useEffect(() => { setContactPanelOpen(false); }, [selectedId]);
 
   // Land ready to type the moment an agent opens/switches a conversation, same as WhatsApp Web.
@@ -1268,7 +1328,6 @@ export default function ConversationsPage() {
   }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mensajes nuevos mientras el agente lee historial: se cuentan en el botón flotante.
-  const prevMsgCountRef = useRef(0);
   useEffect(() => {
     const prev = prevMsgCountRef.current;
     prevMsgCountRef.current = messages.length;
@@ -3219,9 +3278,21 @@ export default function ConversationsPage() {
                 else if (anclarAbajoRef.current) el.scrollTop = el.scrollHeight;
                 setShowJumpBottom(!anclarAbajoRef.current && gap > 300);
                 if (gap < 80) setJumpNewCount(0);
+                // Cerca del inicio: pedir la página anterior antes de tocar el borde.
+                if (el.scrollTop < 600 && !anclarAbajoRef.current) void loadOlderMessages();
               }}
             >
               <div className={`message-stream-inner ${selectMode ? 'select-mode' : ''}`}>
+                {messages.length > 0 && (olderState.hasMore || olderState.loading) && (
+                  <div className="older-messages">
+                    <button type="button" className="button small" disabled={olderState.loading} onClick={() => void loadOlderMessages()}>
+                      {olderState.loading ? 'Cargando mensajes anteriores…' : 'Cargar mensajes anteriores'}
+                    </button>
+                  </div>
+                )}
+                {messages.length > 0 && !olderState.hasMore && !olderState.loading && messages.length >= INITIAL_PAGE && (
+                  <div className="older-messages older-messages-end">Inicio de la conversación en BrainWSP</div>
+                )}
                 <MessageList
                   messages={messages}
                   selectMode={selectMode}

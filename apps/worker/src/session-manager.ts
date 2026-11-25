@@ -971,7 +971,7 @@ export class SessionManager {
         WHERE m."instanceId" = ANY(${instanceIds}::text[])
           AND m."mediaUrl" IS NULL AND m.deleted = false
           AND m.type IN ('IMAGE','VIDEO','AUDIO','DOCUMENT','STICKER')
-          AND m."createdAt" > now() - make_interval(days => ${MEDIA_RECOVERY_WINDOW_DAYS})
+          AND m."createdAt" > now() - make_interval(days => ${MEDIA_RECOVERY_WINDOW_DAYS}::int)
           AND m.metadata ? 'mediaError' AND m.metadata ? 'rawContent'
           AND m.metadata->>'mediaRetryAt' IS NOT NULL
           AND (m.metadata->>'mediaRetryAt')::timestamptz <= now()

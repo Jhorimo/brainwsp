@@ -2588,3 +2588,8 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .media-unavailable-copy span { font-size: 11.5px; line-height: 1.4; color: var(--text-neutral-1); }
 .media-unavailable-caption { font-style: italic; overflow-wrap: anywhere; }
 .media-unavailable .button { flex: 1 1 100%; }
+/* "Cargar mensajes anteriores" arriba del hilo */
+.older-messages { display: flex; justify-content: center; padding: 4px 0 14px; }
+.older-messages .button { background: var(--surface); box-shadow: 0 2px 8px var(--shadow-info-2); }
+.older-messages-end { font-size: 11.5px; color: var(--text-neutral-1); }
+.older-messages-end::before, .older-messages-end::after { content: '—'; margin: 0 8px; opacity: .5; }

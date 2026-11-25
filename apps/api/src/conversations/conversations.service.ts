@@ -272,16 +272,30 @@ export class ConversationsService {
     return byConversation;
   }
 
-  async messages(user: JwtUser, conversationId: string) {
+  // Sin `before`: los 500 más recientes (y marca leído). Con `before` (id del mensaje más
+  // antiguo que ya tiene el panel): la página anterior, para "cargar mensajes anteriores" al
+  // subir en el chat — antes no existía y en un grupo activo solo se veían ~2 días.
+  async messages(user: JwtUser, conversationId: string, before?: string, limit?: number) {
     await this.getOwned(user, conversationId);
+    const take = before ? Math.min(Math.max(limit || 200, 1), 500) : 500;
+    let anchor: { id: string; createdAt: Date } | null = null;
+    if (before) {
+      anchor = await this.prisma.message.findFirst({ where: { id: before, conversationId, companyId: user.companyId }, select: { id: true, createdAt: true } });
+      if (!anchor) return [];
+    }
     // `take` alone with an ascending order returns the OLDEST 500 messages — for a
     // conversation with more history than that, every message past #500 (including
     // anything sent or received just now) would never come back from this endpoint.
     // Take the most recent 500 instead, then restore chronological order for display.
+    // El desempate por id hace que la paginación no salte ni repita mensajes con la misma hora.
     const items = await this.prisma.message.findMany({
-      where: { companyId: user.companyId, conversationId },
-      orderBy: { createdAt: 'desc' },
-      take: 500,
+      where: {
+        companyId: user.companyId,
+        conversationId,
+        ...(anchor ? { OR: [{ createdAt: { lt: anchor.createdAt } }, { createdAt: anchor.createdAt, id: { lt: anchor.id } }] } : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take,
       include: {
         // phone: para que el nombre de quien escribe en un grupo abra su chat individual.
         author: { select: { id: true, name: true, pushName: true, phone: true } },
@@ -289,7 +303,7 @@ export class ConversationsService {
         quotedMessage: { select: quotedMessageSelect },
       },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
+    if (!anchor) await this.prisma.conversation.update({ where: { id: conversationId }, data: { unreadCount: 0 } });
     return items.reverse();
   }
 
