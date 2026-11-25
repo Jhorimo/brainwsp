@@ -944,6 +944,37 @@ export class ConversationsService {
     };
   }
 
+  // "Reenviar" un mensaje que quedó fallido. Mismo mensaje (no se duplica en el chat): vuelve
+  // a la cola con un jobId nuevo (el del primer intento sigue guardado como fallido y BullMQ
+  // ignoraría uno repetido). Si la línea pide QR, se avisa en vez de encolar otro fallo.
+  async resendMessage(user: JwtUser, conversationId: string, messageId: string) {
+    const conversation = await this.getOwned(user, conversationId);
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, companyId: user.companyId, direction: MessageDirection.OUTBOUND },
+      select: { id: true, status: true, type: true },
+    });
+    if (!message) throw new NotFoundException('Mensaje no encontrado');
+    if (message.status !== MessageStatus.FAILED) throw new BadRequestException('Solo se pueden reenviar mensajes que no se enviaron');
+    const instance = await this.prisma.whatsAppInstance.findUnique({ where: { id: conversation.instanceId }, select: { status: true, name: true } });
+    if (instance?.status === InstanceStatus.QR_PENDING || instance?.status === InstanceStatus.LOGGED_OUT) {
+      throw new BadRequestException(`La línea ${instance.name} está desconectada: escanea el QR en WhatsApp → líneas y vuelve a intentarlo`);
+    }
+    const updated = await this.prisma.message.update({
+      where: { id: message.id },
+      data: { status: MessageStatus.QUEUED, error: null },
+      include: { quotedMessage: { select: quotedMessageSelect } },
+    });
+    await this.queues.outbound.add(message.type === MessageType.TEXT ? 'send-text' : 'send-media', { messageId: message.id }, {
+      jobId: `${message.id}-reenvio-${Date.now()}`,
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 1500 },
+      removeOnComplete: 5000,
+      removeOnFail: 5000,
+    });
+    void this.realtime.publish(user.companyId, 'message.updated', updated, conversation.departmentId);
+    return updated;
+  }
+
   async retryMedia(user: JwtUser, conversationId: string, messageId: string) {
     const conversation = await this.getOwned(user, conversationId);
     const message = await this.prisma.message.findFirst({

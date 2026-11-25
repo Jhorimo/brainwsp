@@ -64,7 +64,7 @@ const lineStatusLabel: Record<string, string> = { CONNECTED: 'conectada', CONNEC
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
-type Message = { id: string; waMessageId?: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; mediaUrl?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
+type Message = { id: string; waMessageId?: string; error?: string | null; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; mediaUrl?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
@@ -420,6 +420,16 @@ function formatFileSize(bytes?: number | null) {
 // A media message whose file failed to persist (e.g. a transient download error on the
 // worker) renders an <img> with no valid src; swap it for a clear placeholder instead of
 // the browser's broken-image icon sitting next to raw alt text.
+// Motivo legible de un envío fallido (Message.error lo escribe el outbound-worker).
+function sendFailureReason(error?: string | null) {
+  if (!error) return 'WhatsApp no confirmó el envío.';
+  if (/escanear el QR|QR nuevo|sesión de WhatsApp fue cerrada/i.test(error)) return 'La línea está desconectada: hay que escanear el QR en WhatsApp → líneas.';
+  if (/no se reconectó/i.test(error)) return 'La línea no se reconectó a tiempo.';
+  if (/Media upload failed/i.test(error)) return 'WhatsApp no aceptó el archivo al subirlo.';
+  if (/aún no está conectado/i.test(error)) return 'La línea no estaba conectada.';
+  return error.length > 120 ? `${error.slice(0, 120)}…` : error;
+}
+
 const MEDIA_LABELS: Record<string, string> = { IMAGE: 'Imagen', VIDEO: 'Video', AUDIO: 'Audio', DOCUMENT: 'Documento', STICKER: 'Sticker' };
 
 // Adjunto que no se pudo guardar al llegar (mediaUrl vacío): en vez de un "no disponible"
@@ -527,6 +537,7 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
   // Solo para invalidar: renderMessageBody / quoteSenderLabel leen estas cosas de la página.
   savedStickerMsgIds: Set<string>;
   retryingMedia: Set<string>;
+  resendingIds: Set<string>;
   conversations: Conversation[];
   selectedId: string | null;
   api: MessageListApi;
@@ -779,6 +790,20 @@ export default function ConversationsPage() {
   const [savedStickerMsgIds, setSavedStickerMsgIds] = useState<Set<string>>(new Set());
   // Adjuntos con "Reintentar descarga" en curso (se limpian al llegar el message.updated o a los 45 s).
   const [retryingMedia, setRetryingMedia] = useState<Set<string>>(new Set());
+  // Mensajes fallidos con "Reenviar" en curso.
+  const [resendingIds, setResendingIds] = useState<Set<string>>(new Set());
+  const resendFailedMessage = async (message: Message) => {
+    if (!selectedId) return;
+    setResendingIds((current) => new Set(current).add(message.id));
+    try {
+      const updated = await apiFetch<Message>(`/conversations/${selectedId}/messages/${message.id}/resend`, { method: 'POST' });
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, ...updated } : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo reenviar el mensaje');
+    } finally {
+      setResendingIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
+    }
+  };
   const retryMediaDownload = async (message: Message) => {
     if (!selectedId) return;
     setRetryingMedia((current) => new Set(current).add(message.id));
@@ -1255,6 +1280,13 @@ export default function ConversationsPage() {
         timers.delete(data.conversationId);
         setTypingConversations((current) => { const next = new Set(current); next.delete(data.conversationId); return next; });
       }
+    });
+    // Estado de las líneas en vivo (aviso "línea desconectada" encima del cuadro de texto).
+    socket.on('instance.updated', (inst: { id: string; status: string }) => {
+      if (!inst?.id || !inst.status) return;
+      setConversations((current) => current.some((c) => c.instance?.id === inst.id && c.instance.status !== inst.status)
+        ? current.map((c) => c.instance?.id === inst.id ? { ...c, instance: { ...c.instance, status: inst.status } } : c)
+        : current);
     });
     socket.on('conversation.updated', (updated: Conversation) => {
       if ('archived' in updated) loadArchivedSummary();
@@ -2922,7 +2954,31 @@ export default function ConversationsPage() {
     }
   };
 
+  // Cuerpo + estado del envío: motivo y "Reenviar" si falló, o "esperando reconexión".
   const renderMessageBody = (message: Message) => {
+    const content = renderMessageContent(message);
+    if (message.direction !== 'OUTBOUND' || message.deleted) return content;
+    if (message.status === 'FAILED') {
+      return (
+        <>
+          {content}
+          <div className="send-failed" role="status">
+            <AlertCircle size={13} aria-hidden="true" />
+            <span><strong>No se envió.</strong> {sendFailureReason(message.error)}</span>
+            <button type="button" className="button small" disabled={resendingIds.has(message.id)} onClick={() => void resendFailedMessage(message)}>
+              {resendingIds.has(message.id) ? 'Reenviando…' : 'Reenviar'}
+            </button>
+          </div>
+        </>
+      );
+    }
+    if ((message.status === 'QUEUED' || message.status === 'PROCESSING') && message.error && /reconecte/i.test(message.error)) {
+      return <>{content}<div className="send-waiting"><Clock size={12} aria-hidden="true" />Esperando que la línea se reconecte…</div></>;
+    }
+    return content;
+  };
+
+  const renderMessageContent = (message: Message) => {
     if (message.deleted) return <div className="message-deleted"><Ban size={13} />Se eliminó este mensaje</div>;
     if (MEDIA_LABELS[message.type] && message.mediaUrl === null) {
       return <MediaUnavailable message={message} retrying={retryingMedia.has(message.id)} onRetry={() => void retryMediaDownload(message)} />;
@@ -3300,6 +3356,7 @@ export default function ConversationsPage() {
                   highlightMessageId={highlightMessageId}
                   savedStickerMsgIds={savedStickerMsgIds}
                   retryingMedia={retryingMedia}
+                  resendingIds={resendingIds}
                   conversations={conversations}
                   selectedId={selectedId}
                   api={messageListApi}
@@ -3330,6 +3387,18 @@ export default function ConversationsPage() {
                 </div>
               </div>
             ) : <>
+            {selected.instance.provider === 'BAILEYS' && ['QR_PENDING', 'LOGGED_OUT', 'DISCONNECTED', 'ERROR'].includes(selected.instance.status) && (
+              <div className="line-down-banner" role="alert">
+                <AlertTriangle size={15} aria-hidden="true" />
+                <span>
+                  <strong>La línea {selected.instance.name} está desconectada.</strong>{' '}
+                  {selected.instance.status === 'QR_PENDING' || selected.instance.status === 'LOGGED_OUT'
+                    ? 'Los mensajes no saldrán hasta escanear el QR en WhatsApp → líneas.'
+                    : 'Los mensajes saldrán cuando se reconecte.'}
+                </span>
+                {isAdmin && <Link className="button small" href="/instances">Ir a WhatsApp</Link>}
+              </div>
+            )}
             {replyToMessage && (
               <div className="composer-reply-preview">
                 <div className="composer-reply-bar" />

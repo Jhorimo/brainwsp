@@ -122,6 +122,12 @@ export class ConversationsController {
     return this.service.sendContact(user, id, dto.contactId, user.sub);
   }
 
+  // "Reenviar" un mensaje que quedó fallido (mismo mensaje, vuelve a la cola).
+  @Post(':id/messages/:messageId/resend')
+  resendMessage(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    return this.service.resendMessage(user, id, messageId);
+  }
+
   // "Reintentar descarga" de un adjunto que no se pudo guardar al llegar (lo hace el worker,
   // que tiene la sesión de WhatsApp; el resultado llega por realtime como message.updated).
   @Post(':id/messages/:messageId/retry-media')

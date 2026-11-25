@@ -1,6 +1,6 @@
-import { MessageStatus, MessageType, type PrismaClient } from '@prisma/client';
+import { MessageDirection, MessageStatus, MessageType, type PrismaClient } from '@prisma/client';
 import { BufferJSON, proto, type WAMessage } from '@whiskeysockets/baileys';
-import { Worker, type Job, type Queue } from 'bullmq';
+import { DelayedError, UnrecoverableError, Worker, type Job, type Queue } from 'bullmq';
 import { Redis as IORedis } from 'ioredis';
 import type { Logger } from 'pino';
 import { resumeFlowDispatch, type FlowResumeJobData } from './automation-engine.js';
@@ -9,6 +9,7 @@ import type { RealtimePublisher } from './realtime.js';
 import type { SessionManager } from './session-manager.js';
 import { downloadObjectBuffer, objectNameFromUrl } from './storage.js';
 import { transcodeToOggOpus } from './audio-transcode.js';
+import { classifySendError, ORDER_RETRY_DELAY_MS, ORDER_WAIT_MAX_MS, RECONNECT_RETRY_DELAY_MS, SEND_ERROR_TEXT, shouldKeepWaiting } from './outbound-policy.js';
 
 type OutboundJobData = { messageId: string } | { instanceId: string; targetMessageId: string; emoji: string } | { instanceId: string; targetMessageId: string } | FlowResumeJobData;
 
@@ -23,7 +24,7 @@ export class OutboundWorker {
     private readonly logger: Logger,
     private readonly outboundQueue: Queue,
   ) {
-    this.worker = new Worker('whatsapp.outbound', (job) => this.process(job), {
+    this.worker = new Worker('whatsapp.outbound', (job, token) => this.process(job, token), {
       connection: this.connection,
       concurrency: config.concurrency,
     });
@@ -33,7 +34,13 @@ export class OutboundWorker {
     });
   }
 
-  private async process(job: Job<OutboundJobData>) {
+  // Reprograma el job sin gastar uno de sus intentos (esperar turno o reconexión).
+  private async postpone(job: Job<OutboundJobData>, token: string | undefined, delayMs: number): Promise<never> {
+    await job.moveToDelayed(Date.now() + delayMs, token);
+    throw new DelayedError();
+  }
+
+  private async process(job: Job<OutboundJobData>, token?: string) {
     if (job.name === 'send-reaction') {
       const data = job.data as { instanceId: string; targetMessageId: string; emoji: string };
       return this.sessions.sendReaction(data.instanceId, data.targetMessageId, data.emoji);
@@ -70,10 +77,53 @@ export class OutboundWorker {
       return updated;
     }
 
+    // Orden dentro del chat: si hay un mensaje ANTERIOR del mismo chat todavía en cola o
+    // enviándose (foto lenta, esperando reconexión…), este espera su turno. Con tope de 10
+    // min para que uno trabado no frene el chat para siempre.
+    const earlierPending = await this.prisma.message.findFirst({
+      where: {
+        conversationId: message.conversationId,
+        direction: MessageDirection.OUTBOUND,
+        status: { in: [MessageStatus.QUEUED, MessageStatus.PROCESSING] },
+        id: { not: message.id },
+        createdAt: { lt: message.createdAt, gt: new Date(Date.now() - ORDER_WAIT_MAX_MS) },
+      },
+      select: { id: true },
+    });
+    if (earlierPending) return this.postpone(job, token, ORDER_RETRY_DELAY_MS);
+
     await this.prisma.message.update({ where: { id: message.id }, data: { status: MessageStatus.PROCESSING, error: null } });
 
+    let socket: Awaited<ReturnType<SessionManager['ensureConnected']>>;
     try {
-      const socket = await this.sessions.ensureConnected(message.instanceId);
+      socket = await this.sessions.ensureConnected(message.instanceId);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      const kind = classifySendError(text);
+      if (kind === 'needs-qr') {
+        // No se va a reconectar sola: falla al instante con un motivo claro (el agente lo
+        // reenvía desde el panel cuando la línea esté vinculada de nuevo).
+        const failed = await this.prisma.message.update({ where: { id: message.id }, data: { status: MessageStatus.FAILED, error: SEND_ERROR_TEXT.needsQr } });
+        await this.realtime.publish(message.companyId, 'message.updated', failed);
+        throw new UnrecoverableError(SEND_ERROR_TEXT.needsQr);
+      }
+      if (kind === 'reconnecting' && shouldKeepWaiting(message.createdAt)) {
+        // Reinicio del worker (deploy) o reconexión: esperar sin gastar intentos.
+        await this.prisma.message.update({ where: { id: message.id }, data: { status: MessageStatus.QUEUED, error: SEND_ERROR_TEXT.waitingReconnect } });
+        return this.postpone(job, token, RECONNECT_RETRY_DELAY_MS);
+      }
+      if (kind === 'reconnecting') {
+        const failed = await this.prisma.message.update({ where: { id: message.id }, data: { status: MessageStatus.FAILED, error: SEND_ERROR_TEXT.reconnectTimeout } });
+        await this.realtime.publish(message.companyId, 'message.updated', failed);
+        throw new UnrecoverableError(SEND_ERROR_TEXT.reconnectTimeout);
+      }
+      const isLastAttempt = job.attemptsMade + 1 >= (job.opts.attempts || 1);
+      const updated = await this.prisma.message.update({ where: { id: message.id }, data: { status: isLastAttempt ? MessageStatus.FAILED : MessageStatus.QUEUED, error: text } });
+      if (isLastAttempt) await this.realtime.publish(message.companyId, 'message.updated', updated);
+      throw error;
+    }
+
+    try {
 
       // "Responder" (reply-to): reconstruct the quoted message's original proto from the
       // raw content the worker keeps (see `rawContent` in persistIncoming / below), so
@@ -210,10 +260,12 @@ export class OutboundWorker {
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       const isLastAttempt = job.attemptsMade + 1 >= (job.opts.attempts || 1);
-      await this.prisma.message.update({
+      const updated = await this.prisma.message.update({
         where: { id: message.id },
         data: { status: isLastAttempt ? MessageStatus.FAILED : MessageStatus.QUEUED, error: text },
       });
+      // Avisar al panel cuando queda fallido (antes seguía mostrando el reloj hasta recargar).
+      if (isLastAttempt) await this.realtime.publish(message.companyId, 'message.updated', updated);
       throw error;
     }
   }
