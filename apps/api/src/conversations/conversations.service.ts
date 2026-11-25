@@ -930,6 +930,18 @@ export class ConversationsService {
     };
   }
 
+  async retryMedia(user: JwtUser, conversationId: string, messageId: string) {
+    const conversation = await this.getOwned(user, conversationId);
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, companyId: user.companyId, type: { in: [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT, MessageType.STICKER] } },
+      select: { id: true, mediaUrl: true },
+    });
+    if (!message) throw new NotFoundException('Mensaje no encontrado');
+    if (message.mediaUrl) return { ok: true, available: true };
+    await this.queues.commands.add('retry-media', { instanceId: conversation.instanceId, messageId: message.id }, { removeOnComplete: 1000, removeOnFail: 1000 });
+    return { ok: true, available: false };
+  }
+
   private async getOwned(user: JwtUser, id: string) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id, companyId: user.companyId },

@@ -56,7 +56,7 @@ type Conversation = {
   messages: Array<{ id: string; waMessageId?: string | null; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; deleted?: boolean; author?: Author | null; metadata?: MessageMetadata | null }>;
 };
 type Reaction = { id: string; emoji: string; fromMe: boolean; reactorJid: string; contactId?: string | null };
-type MessageMetadata = { latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice' | 'video'; callStatus?: string; rejectedByName?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin; sentFromPhone?: boolean };
+type MessageMetadata = { mediaError?: string; mediaRetries?: number; mediaRetryAt?: string | null; latitude?: number; longitude?: number; name?: string; address?: string; live?: boolean; edited?: boolean; mentions?: Array<{ digits: string; name: string }>; originalBody?: string | null; contacts?: Array<{ displayName?: string; vcard?: string }>; callType?: 'voice' | 'video'; callStatus?: string; rejectedByName?: string; durationSeconds?: number; callId?: string; ad?: AdOrigin; sentFromPhone?: boolean };
 type AdOrigin = { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; thumbnailUrl?: string; ctwaClid?: string; conversionSource?: string; conversionApp?: string };
 type LineSummary = { id: string; name: string; status: string; provider: string; phoneNumber?: string | null; lastConnectedAt: string | null; unreadChats: number };
 const LINE_FILTER_KEY = 'brainwsp_line_filter';
@@ -64,7 +64,7 @@ const lineStatusLabel: Record<string, string> = { CONNECTED: 'conectada', CONNEC
 type QuotedMessage = { id: string; type: string; body?: string | null; caption?: string | null; fileName?: string | null; direction: string; author?: Author | null };
 // `waMessageId` es el id que asigna WhatsApp: el acuse de entrega/lectura llega
 // identificado solo por él, sin el id interno, y es como se localiza el mensaje a parchear.
-type Message = { id: string; waMessageId?: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
+type Message = { id: string; waMessageId?: string; body?: string | null; caption?: string | null; type: string; direction: string; status: string; createdAt: string; fileName?: string | null; fileSize?: number | null; mimeType?: string | null; mediaUrl?: string | null; author?: Author | null; pinned: boolean; starred: boolean; deleted?: boolean; reactions?: Reaction[]; metadata?: MessageMetadata | null; quotedMessageId?: string | null; quotedMessage?: QuotedMessage | null };
 type TeamUser = { id: string; name: string; email: string; role: string; active: boolean };
 type Department = { id: string; name: string; active: boolean; users?: Array<{ user: { id: string } }> };
 type Project = { id: string; name: string; active: boolean };
@@ -417,6 +417,34 @@ function formatFileSize(bytes?: number | null) {
 // A media message whose file failed to persist (e.g. a transient download error on the
 // worker) renders an <img> with no valid src; swap it for a clear placeholder instead of
 // the browser's broken-image icon sitting next to raw alt text.
+const MEDIA_LABELS: Record<string, string> = { IMAGE: 'Imagen', VIDEO: 'Video', AUDIO: 'Audio', DOCUMENT: 'Documento', STICKER: 'Sticker' };
+
+// Adjunto que no se pudo guardar al llegar (mediaUrl vacío): en vez de un "no disponible"
+// mudo, se dice qué pasó y se ofrece reintentar. El worker además lo reintenta solo
+// (2 min, 10 min, 30 min, 2 h, 6 h) — ver apps/worker/src/media-recovery.ts.
+function MediaUnavailable({ message, retrying, onRetry }: { message: Message; retrying: boolean; onRetry: () => void }) {
+  const label = MEDIA_LABELS[message.type] || 'Archivo';
+  const error = message.metadata?.mediaError;
+  const autoRetry = message.metadata?.mediaRetryAt && new Date(message.metadata.mediaRetryAt).getTime() > Date.now();
+  const reason = !error ? null
+    : /no está conectada/.test(error) ? 'La línea no está conectada en este momento.'
+    : /no guardó los datos/.test(error) ? 'Este mensaje es antiguo y no se puede volver a descargar.'
+    : 'WhatsApp no entregó el archivo al recibirlo.';
+  return (
+    <div className="media-unavailable" role="group" aria-label={`${label} no disponible`}>
+      <AlertCircle size={18} aria-hidden="true" />
+      <div className="media-unavailable-copy">
+        <strong>{label} no disponible</strong>
+        {reason && <span>{reason}{autoRetry ? ' Se reintentará automáticamente.' : ''}</span>}
+        {message.caption && <span className="media-unavailable-caption">{message.caption}</span>}
+      </div>
+      <button type="button" className="button small" disabled={retrying} onClick={onRetry}>
+        {retrying ? 'Descargando…' : 'Reintentar descarga'}
+      </button>
+    </div>
+  );
+}
+
 function handleMediaError(e: SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.style.display = 'none';
   const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
@@ -495,6 +523,7 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
   highlightMessageId: string | null;
   // Solo para invalidar: renderMessageBody / quoteSenderLabel leen estas cosas de la página.
   savedStickerMsgIds: Set<string>;
+  retryingMedia: Set<string>;
   conversations: Conversation[];
   selectedId: string | null;
   api: MessageListApi;
@@ -743,6 +772,25 @@ export default function ConversationsPage() {
   const stickerTrayRef = useRef<HTMLDivElement>(null);
   const [stickers, setStickers] = useState<Array<{ id: string }>>([]);
   const [savedStickerMsgIds, setSavedStickerMsgIds] = useState<Set<string>>(new Set());
+  // Adjuntos con "Reintentar descarga" en curso (se limpian al llegar el message.updated o a los 45 s).
+  const [retryingMedia, setRetryingMedia] = useState<Set<string>>(new Set());
+  const retryMediaDownload = async (message: Message) => {
+    if (!selectedId) return;
+    setRetryingMedia((current) => new Set(current).add(message.id));
+    const done = () => setRetryingMedia((current) => { const next = new Set(current); next.delete(message.id); return next; });
+    setTimeout(done, 45_000);
+    try {
+      const res = await apiFetch<{ available: boolean }>(`/conversations/${selectedId}/messages/${message.id}/retry-media`, { method: 'POST' });
+      if (res.available) {
+        // Ya estaba guardado (otro agente o el reintento automático se adelantó): solo mostrarlo.
+        setMessages((current) => current.map((item) => item.id === message.id ? { ...item, mediaUrl: item.mediaUrl ?? 'disponible' } : item));
+        done();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo reintentar la descarga');
+      done();
+    }
+  };
   const [stickerUploading, setStickerUploading] = useState(false);
   const stickerFileInputRef = useRef<HTMLInputElement>(null);
   const [showQuickReplyTray, setShowQuickReplyTray] = useState(false);
@@ -1176,6 +1224,13 @@ export default function ConversationsPage() {
         if (index === -1) return current;
         const next = [...current];
         next[index] = { ...next[index], ...payload };
+        return next;
+      });
+      // Resultado de un "Reintentar descarga" (éxito o nuevo motivo de fallo): se libera el botón.
+      if (payload.id) setRetryingMedia((current) => {
+        if (!current.has(payload.id as string)) return current;
+        const next = new Set(current);
+        next.delete(payload.id as string);
         return next;
       });
     });
@@ -2810,6 +2865,9 @@ export default function ConversationsPage() {
 
   const renderMessageBody = (message: Message) => {
     if (message.deleted) return <div className="message-deleted"><Ban size={13} />Se eliminó este mensaje</div>;
+    if (MEDIA_LABELS[message.type] && message.mediaUrl === null) {
+      return <MediaUnavailable message={message} retrying={retryingMedia.has(message.id)} onRetry={() => void retryMediaDownload(message)} />;
+    }
     switch (message.type) {
       case 'IMAGE':
         return <div className="message-media"><button className="media-zoom" onClick={() => setLightboxUrl(mediaUrl(message.id))} title="Ampliar imagen"><img src={mediaUrl(message.id)} alt={message.caption || 'Imagen'} onError={handleMediaError} /><div className="media-fallback"><AlertCircle size={18} />Imagen no disponible</div><span className="media-zoom-hint"><ZoomIn size={15} /></span></button>{message.caption && <div className="media-caption">{formatMessageText(message.caption, openNewChatWithPhone)}</div>}</div>;
@@ -3170,6 +3228,7 @@ export default function ConversationsPage() {
                   selectedMessageIds={selectedMessageIds}
                   highlightMessageId={highlightMessageId}
                   savedStickerMsgIds={savedStickerMsgIds}
+                  retryingMedia={retryingMedia}
                   conversations={conversations}
                   selectedId={selectedId}
                   api={messageListApi}

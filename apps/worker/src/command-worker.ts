@@ -32,6 +32,7 @@ export class CommandWorker {
         afterSeconds: typeof job.data.afterSeconds === 'number' ? job.data.afterSeconds : undefined,
       });
     }
+    if (job.name === 'retry-media') return this.sessions.retryMedia(String(job.data.messageId));
     // Desactivado: chatModify(archive) hacía que WhatsApp desvinculara el dispositivo (ver
     // ConversationsService.update). Se ignora por si queda algún job viejo en la cola.
     if (job.name === 'archive-chat') return;

@@ -32,6 +32,7 @@ import { CallHandler } from './call-handler.js';
 import { aBuffer, descifrarEdicion, sinDispositivo } from './secret-edit.js';
 import type { RealtimePublisher } from './realtime.js';
 import { uploadBuffer } from './storage.js';
+import { downloadPlainMedia, failureMeta, hasMediaKey, isNewsletterJid, mediaNode, type MediaFailureMeta } from './media-recovery.js';
 
 const LEASE_TTL_MS = 30_000;
 const LEASE_RENEW_MS = 10_000;
@@ -52,6 +53,11 @@ const AVATAR_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // Fallos de red pasajeros del servidor (DNS "ENOTFOUND a.whatsapp.net", cortes, timeouts):
 // antes la foto/audio recibido se perdía al primer intento. Se reintenta 2 veces (1s y 3s);
 // los errores que no son de red (archivo expirado, 404, etc.) no se reintentan.
+// Reintento de adjuntos que fallaron al llegar (ver media-recovery.ts y recoverMedia).
+const MEDIA_RECOVERY_INTERVAL_MS = 2 * 60 * 1000;
+const MEDIA_RECOVERY_BATCH = 25;
+const MEDIA_RECOVERY_WINDOW_DAYS = 14;
+
 const TRANSIENT_NETWORK_ERROR = /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed/i;
 async function downloadMediaWithRetry<T>(download: () => Promise<T>): Promise<T> {
   const delays = [1_000, 3_000];
@@ -76,6 +82,8 @@ export class SessionManager {
   private readonly leaseLost = new Set<string>();
   private readonly redis = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
   private readonly avatarRefreshTimer: NodeJS.Timeout;
+  private readonly mediaRecoveryTimer: NodeJS.Timeout;
+  private mediaRecoveryRunning = false;
   private readonly calls: CallHandler;
 
   constructor(
@@ -96,6 +104,10 @@ export class SessionManager {
       }
     }, AVATAR_REFRESH_INTERVAL_MS);
     this.avatarRefreshTimer.unref();
+    this.mediaRecoveryTimer = setInterval(() => {
+      void this.recoverPendingMedia().catch((error) => this.logger.warn({ err: error }, 'media recovery tick failed'));
+    }, MEDIA_RECOVERY_INTERVAL_MS);
+    this.mediaRecoveryTimer.unref();
   }
 
   async bootstrap() {
@@ -514,6 +526,7 @@ export class SessionManager {
     this.leaseRetryTimers.clear();
     for (const timer of this.leaseTimers.values()) clearInterval(timer);
     clearInterval(this.avatarRefreshTimer);
+    clearInterval(this.mediaRecoveryTimer);
     this.reconnectTimers.clear();
     this.leaseTimers.clear();
     await this.redis.quit();
@@ -820,6 +833,7 @@ export class SessionManager {
     }
 
     let mediaUrl: string | undefined;
+    let mediaFailure: MediaFailureMeta | undefined;
     const downloadableTypes: MessageType[] = [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT, MessageType.STICKER];
     if (downloadableTypes.includes(content.type)) {
       // WhatsApp declara fileLength ANTES de descargar (ver message-utils.ts#extractMessage),
@@ -841,16 +855,14 @@ export class SessionManager {
         );
       } else {
         try {
-          const buffer = await downloadMediaWithRetry(() =>
-            downloadMediaMessage(message, 'buffer', {}, {
-              logger: this.logger as never,
-              reuploadRequest: socket.updateMediaMessage,
-            }),
-          );
+          const buffer = await this.downloadMedia(message, socket);
           const uploaded = await uploadBuffer(buffer, content.mimeType || 'application/octet-stream', extensionFromMime(content.mimeType));
           mediaUrl = uploaded.internalUrl;
         } catch (error) {
-          this.logger.warn({ error: error instanceof Error ? error.message : String(error), messageId: message.key.id }, 'failed to download inbound media');
+          // Queda registrado EN el mensaje (los logs se pierden en cada deploy) y programado
+          // para reintentarse solo (recoverPendingMedia) o con "Reintentar descarga".
+          mediaFailure = failureMeta(error, 0);
+          this.logger.warn({ error: mediaFailure.mediaError, messageId: message.key.id, instanceId }, 'failed to download inbound media');
         }
       }
     }
@@ -883,6 +895,7 @@ export class SessionManager {
           timestamp: String(message.messageTimestamp || ''),
           rawContent: JSON.stringify(message.message, BufferJSON.replacer),
           ...content.metadata,
+          ...(mediaFailure ?? {}),
           ...(fromMe ? { sentFromPhone: true } : {}),
         },
         quotedMessageId,
@@ -925,6 +938,113 @@ export class SessionManager {
         .catch((error) => {
           this.logger.warn({ err: error, conversationId: conversation.id }, 'Automation/AI auto-reply failed');
         });
+    }
+  }
+
+  // Descarga de un adjunto. Los canales (@newsletter) mandan la multimedia SIN cifrar y sin
+  // mediaKey: Baileys siempre intenta descifrar, así que se bajan directo. El resto, con
+  // reintentos de red y "reupload" desde el celular si el enlace de WhatsApp ya venció.
+  private async downloadMedia(message: WAMessage, socket: WASocket): Promise<Buffer> {
+    const node = mediaNode(message.message);
+    if (node && !hasMediaKey(node) && isNewsletterJid(message.key.remoteJid)) {
+      return downloadMediaWithRetry(() => downloadPlainMedia(node));
+    }
+    return downloadMediaWithRetry(() =>
+      downloadMediaMessage(message, 'buffer', {}, {
+        logger: this.logger as never,
+        reuploadRequest: socket.updateMediaMessage,
+      }),
+    );
+  }
+
+  // Reintento periódico de los adjuntos que fallaron al llegar (metadata.mediaError) y cuyo
+  // próximo intento ya venció: 2 min, 10 min, 30 min, 2 h y 6 h. Solo líneas conectadas en
+  // este worker (hace falta el socket para pedir el reupload al celular). Los marcados por el
+  // script de rescate de mensajes viejos entran por el mismo camino.
+  private async recoverPendingMedia() {
+    if (this.mediaRecoveryRunning || this.sockets.size === 0) return;
+    this.mediaRecoveryRunning = true;
+    try {
+      const instanceIds = [...this.sockets.keys()];
+      const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT m.id FROM "Message" m
+        WHERE m."instanceId" = ANY(${instanceIds}::text[])
+          AND m."mediaUrl" IS NULL AND m.deleted = false
+          AND m.type IN ('IMAGE','VIDEO','AUDIO','DOCUMENT','STICKER')
+          AND m."createdAt" > now() - make_interval(days => ${MEDIA_RECOVERY_WINDOW_DAYS})
+          AND m.metadata ? 'mediaError' AND m.metadata ? 'rawContent'
+          AND m.metadata->>'mediaRetryAt' IS NOT NULL
+          AND (m.metadata->>'mediaRetryAt')::timestamptz <= now()
+        ORDER BY m."createdAt" DESC
+        LIMIT ${MEDIA_RECOVERY_BATCH}`;
+      let recovered = 0;
+      for (const row of rows) {
+        if (await this.recoverMedia(row.id, false).catch(() => false)) recovered += 1;
+      }
+      if (rows.length) this.logger.info({ tried: rows.length, recovered }, 'media recovery tick');
+    } finally {
+      this.mediaRecoveryRunning = false;
+    }
+  }
+
+  // Botón "Reintentar descarga" del panel (comando retry-media): sin esperar al próximo turno.
+  async retryMedia(messageId: string) {
+    return this.recoverMedia(messageId, true).catch((error) => {
+      this.logger.warn({ err: error, messageId }, 'manual media retry failed');
+      return false;
+    });
+  }
+
+  // Vuelve a armar el mensaje de WhatsApp desde metadata.rawContent, lo descarga, lo sube a
+  // MinIO y avisa al panel (message.updated) para que la imagen aparezca sola. Si falla,
+  // guarda el motivo y programa el siguiente intento.
+  private async recoverMedia(messageId: string, manual: boolean): Promise<boolean> {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: {
+        id: true, instanceId: true, companyId: true, conversationId: true, waMessageId: true, direction: true, mimeType: true, mediaUrl: true, metadata: true,
+        author: { select: { waId: true } },
+        conversation: { select: { departmentId: true } },
+      },
+    });
+    if (!message || message.mediaUrl) return false;
+    const metadata = (message.metadata ?? {}) as Record<string, unknown> & { rawContent?: string; remoteJid?: string; mediaRetries?: number };
+    const publish = (payload: unknown) => this.realtime.publish(message.companyId, 'message.updated', payload, message.conversation.departmentId ?? null);
+
+    const socket = this.sockets.get(message.instanceId);
+    const fail = async (error: unknown) => {
+      const failure = failureMeta(error, Number(metadata.mediaRetries ?? 0));
+      const updated = await this.prisma.message.update({ where: { id: message.id }, data: { metadata: { ...metadata, ...failure } } });
+      await publish({ id: updated.id, metadata: updated.metadata });
+      return false;
+    };
+    if (!socket) return manual ? fail(new Error('la línea no está conectada')) : false;
+    if (!metadata.rawContent || !metadata.remoteJid) return fail(new Error('el mensaje no guardó los datos para volver a descargarlo'));
+
+    const isGroup = metadata.remoteJid.endsWith('@g.us');
+    const waMessage: WAMessage = {
+      key: {
+        remoteJid: metadata.remoteJid,
+        id: message.waMessageId,
+        fromMe: message.direction === MessageDirection.OUTBOUND,
+        ...(isGroup && message.author?.waId ? { participant: message.author.waId } : {}),
+      },
+      message: JSON.parse(metadata.rawContent, BufferJSON.reviver) as proto.IMessage,
+    };
+    try {
+      const buffer = await this.downloadMedia(waMessage, socket);
+      const uploaded = await uploadBuffer(buffer, message.mimeType || 'application/octet-stream', extensionFromMime(message.mimeType || undefined));
+      const { mediaError: _e, mediaRetryAt: _r, ...rest } = metadata;
+      const updated = await this.prisma.message.update({
+        where: { id: message.id },
+        data: { mediaUrl: uploaded.internalUrl, metadata: { ...rest, mediaRecoveredAt: new Date().toISOString() } as object },
+        include: { author: { select: { id: true, name: true, pushName: true } } },
+      });
+      await publish(updated);
+      this.logger.info({ messageId: message.id, manual, retries: metadata.mediaRetries ?? 0 }, 'adjunto recuperado');
+      return true;
+    } catch (error) {
+      return fail(error);
     }
   }
 

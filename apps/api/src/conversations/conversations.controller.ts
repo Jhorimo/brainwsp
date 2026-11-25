@@ -121,6 +121,13 @@ export class ConversationsController {
     return this.service.sendContact(user, id, dto.contactId, user.sub);
   }
 
+  // "Reintentar descarga" de un adjunto que no se pudo guardar al llegar (lo hace el worker,
+  // que tiene la sesión de WhatsApp; el resultado llega por realtime como message.updated).
+  @Post(':id/messages/:messageId/retry-media')
+  retryMedia(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    return this.service.retryMedia(user, id, messageId);
+  }
+
   @Post(':id/messages/:messageId/reaction')
   sendReaction(@CurrentUser() user: JwtUser, @Param('id') id: string, @Param('messageId') messageId: string, @Body() dto: SendReactionDto) {
     return this.service.sendReaction(user, id, messageId, dto.emoji);

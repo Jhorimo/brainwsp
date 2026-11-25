@@ -2580,3 +2580,11 @@ a.ad-reply-card:hover { background: var(--brand-soft); }
 .mail-message.ok svg { color: var(--success-text); }
 .mail-message.error { border-left-color: var(--danger-text); }
 .linked-unverified { margin: 6px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--text); background: var(--warning-soft); border-left: 3px solid var(--warning-text); padding: 7px 9px; border-radius: 8px; }
+/* Adjunto que no se pudo guardar al llegar: motivo + "Reintentar descarga" */
+.media-unavailable { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; width: 280px; max-width: 100%; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); color: var(--text); border: 1px dashed var(--line-strong); box-sizing: border-box; }
+.media-unavailable > svg { color: var(--warning-text); flex-shrink: 0; margin-top: 2px; }
+.media-unavailable-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 200px; }
+.media-unavailable-copy strong { font-size: 12.5px; }
+.media-unavailable-copy span { font-size: 11.5px; line-height: 1.4; color: var(--text-neutral-1); }
+.media-unavailable-caption { font-style: italic; overflow-wrap: anywhere; }
+.media-unavailable .button { flex: 1 1 100%; }
