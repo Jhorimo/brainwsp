@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class StartWidgetSessionDto {
   @ApiPropertyOptional({ description: 'Token de una VisitorSession previa, si el navegador ya tiene una guardada' })
@@ -12,6 +12,12 @@ export class StartWidgetSessionDto {
   @IsString()
   @MaxLength(500)
   pageUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Origen del enlace público (/c/<empresa>/<origen>), ej. instagram o tiktok. Solo aplica al enlace, no al widget embebido' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  src?: string;
 }
 
 export class SendWidgetMessageDto {
@@ -42,4 +48,57 @@ export class EditWidgetMessageDto {
   @MinLength(1)
   @MaxLength(4000)
   text!: string;
+}
+
+export class SaveWidgetProfileDto {
+  @ApiProperty({ description: 'Token de VisitorSession devuelto por /widget/:key/session' })
+  @IsString()
+  token!: string;
+
+  @ApiPropertyOptional({ example: 'María López' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+
+  @ApiPropertyOptional({ example: 'maria@gmail.com' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  email?: string;
+
+  @ApiPropertyOptional({ example: '51987654321', description: 'Celular con código de país, sin +' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  phone?: string;
+  @ApiPropertyOptional({ description: 'Casilla «Avisarme por correo cuando me respondan». true por defecto' })
+  @IsOptional()
+  @IsBoolean()
+  notifyEmail?: boolean;
+
+  @ApiPropertyOptional({ description: '«Empezar un chat nuevo» aunque el correo ya tenga otro chat (sin verificar con código)' })
+  @IsOptional()
+  @IsBoolean()
+  newChat?: boolean;
+}
+
+export class VerifyEmailCodeDto {
+  @ApiProperty({ description: 'Token de VisitorSession' })
+  @IsString()
+  token!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MaxLength(20)
+  code!: string;
+}
+
+// Enlace de los correos de aviso: "Continuar la conversación" (?r=) y "No quiero recibir
+// más avisos" (?baja=). Ver resume-token.ts.
+export class ResumeTokenDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(120)
+  r!: string;
 }

@@ -95,4 +95,24 @@ export class UpdateWidgetConfigDto {
   @IsOptional()
   @IsBoolean()
   allowCalls?: boolean;
+
+  @ApiPropertyOptional({ description: 'Si el enlace público pide datos antes de chatear. true por defecto; el widget embebido nunca los pide' })
+  @IsOptional()
+  @IsBoolean()
+  prechatEnabled?: boolean;
+
+  @ApiPropertyOptional({ enum: ['required', 'optional', 'hidden'] })
+  @IsOptional()
+  @IsIn(['required', 'optional', 'hidden'])
+  prechatName?: 'required' | 'optional' | 'hidden';
+
+  @ApiPropertyOptional({ enum: ['required', 'optional', 'hidden'] })
+  @IsOptional()
+  @IsIn(['required', 'optional', 'hidden'])
+  prechatEmail?: 'required' | 'optional' | 'hidden';
+
+  @ApiPropertyOptional({ enum: ['required', 'optional', 'hidden'] })
+  @IsOptional()
+  @IsIn(['required', 'optional', 'hidden'])
+  prechatPhone?: 'required' | 'optional' | 'hidden';
 }

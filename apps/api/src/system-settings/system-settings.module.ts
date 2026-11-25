@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { SystemSettingsController } from './system-settings.controller';
+import { MailStatusController, SystemSettingsController } from './system-settings.controller';
+import { MailService } from './mail.service';
 import { MediaDedupService } from './media-dedup.service';
 import { SystemSettingsService } from './system-settings.service';
 
@@ -9,8 +10,8 @@ import { SystemSettingsService } from './system-settings.service';
 // storage.module.ts), como ya asume el resto de modulos que suben/bajan de MinIO.
 @Module({
   imports: [AuthModule],
-  controllers: [SystemSettingsController],
-  providers: [SystemSettingsService, MediaDedupService, RolesGuard],
-  exports: [SystemSettingsService],
+  controllers: [SystemSettingsController, MailStatusController],
+  providers: [SystemSettingsService, MediaDedupService, RolesGuard, MailService],
+  exports: [SystemSettingsService, MailService],
 })
 export class SystemSettingsModule {}

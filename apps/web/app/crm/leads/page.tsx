@@ -8,6 +8,7 @@ import { AppShell } from '@/components/app-shell';
 import { NoteButton } from '@/components/note-button';
 import { useConfirm } from '@/components/confirm-provider';
 import { apiFetch, getToken, SOCKET_URL } from '@/lib/api';
+import { sourceLabel } from '@/lib/link-sources';
 
 type LeadStatus = 'NONE' | 'COLD' | 'INTERESTED' | 'VERY_INTERESTED';
 type TeamUser = { id: string; name: string };
@@ -199,7 +200,7 @@ export default function LeadsPage() {
                 <td>
                   <span className="row-main">{lead.title}</span>
                   {lead.notes && <NoteButton notes={lead.notes} />}
-                  {lead.source && <span className="row-sub">{lead.source}</span>}
+                  {lead.source && <span className="row-sub">{sourceLabel(lead.source)}</span>}
                 </td>
                 <td>
                   <span className="row-main">{lead.personName || '—'}</span>

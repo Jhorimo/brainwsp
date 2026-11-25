@@ -128,8 +128,8 @@
 .cc-recording-dot { width: 8px; height: 8px; border-radius: 50%; background: #e74c3c; animation: cc-pulse 1s ease-in-out infinite; }
 @keyframes cc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-.cc-footer { flex-shrink: 0; text-align: center; padding: 7px 0 9px; font-size: 10.5px; color: #adb2c0; background: #fff; }
-.cc-footer strong { color: #747c91; font-weight: 700; }
+.cc-footer { flex-shrink: 0; text-align: center; padding: 7px 0 9px; font-size: 10.5px; color: #5f6678; background: #fff; }
+.cc-footer strong { color: #4a5163; font-weight: 700; }
 .cc-footer-mark { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
 .cc-footer-mark svg { display: block; flex-shrink: 0; border-radius: 5px; background: linear-gradient(145deg, var(--brand-light, #3c86ff), var(--brand, #213786)); padding: 2.5px; color: #fff; }
 
@@ -137,3 +137,60 @@
   .cc-standalone { padding: 0; }
   .cc-standalone .cc-panel { max-width: none; height: 100dvh; border-radius: 0; }
 }
+
+/* ── Formulario de datos del enlace público (nunca en el widget embebido) ───────────── */
+.cc-composer[hidden] { display: none; }
+.cc-welcome.cc-welcome-form { margin: 4px 0 4px; }
+.cc-prechat { display: flex; flex-direction: column; gap: 14px; background: #fff; border: 1px solid #e3e6ef; border-radius: 16px; padding: 16px 16px 12px; box-shadow: 0 6px 18px -10px rgba(20, 30, 60, 0.25); animation: cc-fade-in 0.3s ease; }
+.cc-pf-intro { margin: 0; font-size: 13.5px; line-height: 1.45; color: #3d4557; }
+.cc-pf-field { display: flex; flex-direction: column; gap: 6px; }
+.cc-pf-field label { font-size: 14px; font-weight: 600; color: #1a1f2b; }
+.cc-pf-optional { font-weight: 400; color: #555e70; }
+.cc-pf-field input, .cc-pf-field textarea, .cc-pf-phone { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; color: #1a1f2b; background: #fff; border: 1.5px solid #c9cfdc; border-radius: 12px; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+.cc-pf-field input, .cc-pf-field textarea { min-height: 48px; padding: 11px 13px; }
+.cc-pf-field textarea { resize: none; line-height: 1.4; }
+.cc-pf-field input:focus, .cc-pf-field textarea:focus { outline: none; border-color: var(--cc-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc-color) 25%, transparent); }
+.cc-pf-field.has-error input, .cc-pf-field.has-error .cc-pf-phone { border-color: #c62f3a; }
+.cc-pf-error { font-size: 13px; color: #b3261e; font-weight: 500; }
+.cc-pf-error::before { content: '⚠ '; }
+.cc-pf-phone { position: relative; display: flex; align-items: stretch; min-height: 48px; padding: 0; overflow: hidden; }
+.cc-pf-phone:focus-within { border-color: var(--cc-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc-color) 25%, transparent); }
+.cc-pf-phone select { position: absolute; left: 0; top: 0; bottom: 0; width: 84px; opacity: 0; cursor: pointer; font-size: 16px; }
+.cc-pf-dial { display: flex; align-items: center; gap: 4px; padding: 0 10px 0 13px; min-width: 84px; box-sizing: border-box; font-weight: 600; color: #1a1f2b; background: #f3f5f9; border-right: 1.5px solid #e1e5ee; pointer-events: none; }
+.cc-pf-dial::after { content: '▾'; font-size: 11px; color: #555e70; }
+.cc-pf-phone:has(select:focus-visible) .cc-pf-dial { outline: 2px solid var(--cc-color); outline-offset: -3px; border-radius: 10px 0 0 10px; }
+.cc-pf-phone input { flex: 1; min-width: 0; border: 0; border-radius: 0; box-shadow: none !important; letter-spacing: 0.3px; }
+.cc-pf-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-pf-chip { min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1.5px solid #c9cfdc; background: #f7f8fb; color: #1a1f2b; font: inherit; font-size: 14px; cursor: pointer; }
+.cc-pf-chip:focus-visible, .cc-pf-suggest button:focus-visible, .cc-pf-submit:focus-visible { outline: 3px solid var(--cc-color); outline-offset: 2px; }
+.cc-pf-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13.5px; color: #1a1f2b; background: #fff6e0; border: 1px solid #f0d58a; padding: 8px 10px; border-radius: 10px; }
+.cc-pf-suggest strong { word-break: break-all; }
+.cc-pf-suggest button { min-height: 36px; padding: 0 12px; border-radius: 8px; border: 0; background: #1a1f2b; color: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.cc-pf-server-error { font-size: 13.5px; color: #8c1d18; background: #fdeceb; border: 1px solid #f3c2bf; padding: 9px 11px; border-radius: 10px; }
+.cc-pf-submit { min-height: 50px; border: 0; border-radius: 12px; color: #fff; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.35); transition: filter 0.15s ease, transform 0.1s ease; }
+.cc-pf-submit:hover { filter: brightness(1.06); }
+.cc-pf-submit:active { transform: translateY(1px); }
+.cc-pf-submit:disabled { opacity: 0.7; cursor: progress; }
+.cc-pf-privacy { margin: -4px 0 0; text-align: center; font-size: 12.5px; color: #555e70; }
+@media (prefers-reduced-motion: reduce) { .cc-prechat { animation: none; } .cc-pf-submit { transition: none; } }
+.cc-welcome.cc-welcome-form .cc-welcome-icon { display: none; }
+.cc-welcome.cc-welcome-form { gap: 4px; }
+.cc-pf-check { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.4; color: #1a1f2b; cursor: pointer; padding: 2px 0; }
+.cc-pf-check input { width: 22px; height: 22px; margin: 0; flex-shrink: 0; accent-color: var(--cc-color); cursor: pointer; }
+.cc-pf-check input:focus-visible { outline: 3px solid var(--cc-color); outline-offset: 2px; }
+.cc-notice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; flex-shrink: 0; }
+.cc-notice span { flex: 1; }
+.cc-notice button { border: 0; background: transparent; cursor: pointer; padding: 2px; color: inherit; min-width: 28px; min-height: 28px; display: grid; place-items: center; border-radius: 6px; }
+.cc-notice button:focus-visible { outline: 2px solid currentColor; }
+.cc-notice-ok { background: #e7f6ee; color: #10512f; }
+.cc-notice-error { background: #fdeceb; color: #8c1d18; }
+/* Paso del código de 6 dígitos (volver a un chat existente desde otro dispositivo) */
+.cc-code-title { margin: 0; font-size: 17px; line-height: 1.3; color: #1a1f2b; }
+.cc-code-input { font-size: 26px !important; letter-spacing: 6px; text-align: center; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; min-height: 58px !important; }
+.cc-code-input::placeholder { color: #9aa1b2; letter-spacing: 6px; }
+.cc-code-info { font-size: 13px; color: #10512f; }
+.cc-code-links { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cc-code-links button, .cc-code-new { border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: #2a3d8f; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 40px; padding: 0 2px; }
+.cc-code-links button:disabled { color: #555e70; text-decoration: none; cursor: default; }
+.cc-code-links button:focus-visible, .cc-code-new:focus-visible { outline: 3px solid var(--cc-color); outline-offset: 2px; border-radius: 4px; }
+.cc-code-new { align-self: center; text-align: center; color: #3d4557; font-weight: 500; }

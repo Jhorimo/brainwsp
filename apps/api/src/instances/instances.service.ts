@@ -39,6 +39,13 @@ export interface WidgetConfiguration {
   teaserType?: 'text' | 'image';
   teaserImageObjectName?: string | null;
   teaserImageMimeType?: string | null;
+  // Formulario de datos al entrar por el ENLACE público (nunca en el widget embebido de un
+  // ERP). Ver apps/api/src/widget/prechat.ts: por defecto activo, nombre y correo
+  // obligatorios, celular opcional.
+  prechatEnabled?: boolean;
+  prechatName?: 'required' | 'optional' | 'hidden';
+  prechatEmail?: 'required' | 'optional' | 'hidden';
+  prechatPhone?: 'required' | 'optional' | 'hidden';
 }
 
 const WIDGET_ICON_MAX_BYTES = 2 * 1024 * 1024;

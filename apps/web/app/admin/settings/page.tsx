@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { AdminShell } from '@/components/admin-shell';
 import { useConfirm } from '@/components/confirm-provider';
+import { MailSettingsCard } from '@/components/mail-settings-card';
 import { apiFetch } from '@/lib/api';
 
 type SystemSettings = { mediaRetentionDays: number; maxMediaSizeBytes: number };
@@ -84,7 +85,7 @@ export default function AdminSettingsPage() {
   };
 
   return (
-    <AdminShell title="Configuraciones" subtitle="Ajustes globales del sistema — almacenamiento de archivos en MinIO">
+    <AdminShell title="Configuraciones" subtitle="Ajustes globales del sistema — almacenamiento de archivos y servidor de correo">
       {error && <div className="error-box">{error}</div>}
 
       <section className="table-card" style={{ padding: 20 }}>
@@ -110,6 +111,8 @@ export default function AdminSettingsPage() {
           {saved && <span style={{ color: 'var(--success-text)', fontSize: 11, alignSelf: 'center' }}>Guardado</span>}
         </div>
       </section>
+
+      <MailSettingsCard />
 
       <section className="table-card">
         <h3 style={{ margin: '14px 0 0 20px' }}>Los 10 archivos más pesados</h3>

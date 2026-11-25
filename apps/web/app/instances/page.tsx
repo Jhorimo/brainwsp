@@ -5,6 +5,7 @@ import { Cable, Copy, MessageCircle, Pencil, Plus, Power, QrCode, RefreshCw, Sea
 import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
 import { AppShell } from '@/components/app-shell';
+import { ShareLinks } from '@/components/share-links';
 import { StatusPill } from '@/components/status-pill';
 import { API_URL, apiFetch, getStoredCompany, getToken, SOCKET_URL, updateStoredCompany } from '@/lib/api';
 
@@ -12,7 +13,15 @@ type WidgetConfig = {
   displayName?: string; welcomeMessage?: string; color?: string; position?: 'left' | 'right'; buttonText?: string;
   autoOpen?: boolean; allowMinimize?: boolean; allowCalls?: boolean; iconObjectName?: string | null;
   teaserType?: 'text' | 'image'; teaserImageObjectName?: string | null;
+  prechatEnabled?: boolean; prechatName?: PrechatMode; prechatEmail?: PrechatMode; prechatPhone?: PrechatMode;
 };
+type PrechatMode = 'required' | 'optional' | 'hidden';
+const PRECHAT_FIELDS: Array<{ key: 'prechatName' | 'prechatEmail' | 'prechatPhone'; label: string; fallback: PrechatMode }> = [
+  { key: 'prechatName', label: 'Nombre', fallback: 'required' },
+  { key: 'prechatEmail', label: 'Correo', fallback: 'required' },
+  { key: 'prechatPhone', label: 'Celular', fallback: 'optional' },
+];
+const PRECHAT_MODE_LABELS: Record<PrechatMode, string> = { required: 'Obligatorio', optional: 'Opcional', hidden: 'No pedir' };
 type Instance = {
   id: string; name: string; slug: string; provider: string; phoneNumber?: string | null; displayName?: string | null;
   status: string; qr?: string | null; reconnectAttempt: number; lastError?: string | null; lastConnectedAt?: string | null;
@@ -53,6 +62,7 @@ export default function InstancesPage() {
   const [widgetTeaserError, setWidgetTeaserError] = useState('');
   const widgetTeaserInputRef = useRef<HTMLInputElement>(null);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
+  const [mailEnabled, setMailEnabled] = useState<boolean | null>(null);
   const [companySlug, setCompanySlug] = useState(() => getStoredCompany<{ slug?: string }>().slug || '');
   const [editSlugOpen, setEditSlugOpen] = useState(false);
   const [slugDraft, setSlugDraft] = useState('');
@@ -64,6 +74,7 @@ export default function InstancesPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { apiFetch<{ enabled: boolean }>('/mail-status').then((r) => setMailEnabled(r.enabled)).catch(() => setMailEnabled(null)); }, []);
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token: getToken() } });
     // A dropped connection (dev server reload, network blip, worker restart) can miss the
@@ -186,11 +197,11 @@ export default function InstancesPage() {
     // resto de la configuración guardada) pero los maneja su propio endpoint dedicado de
     // subir/quitar imagen, no este; UpdateWidgetConfigDto los rechaza (forbidNonWhitelisted)
     // si se reenvían acá.
-    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, allowCalls, teaserType } = widgetConfigDraft;
+    const { displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, allowCalls, teaserType, prechatEnabled, prechatName, prechatEmail, prechatPhone } = widgetConfigDraft;
     try {
       await apiFetch(`/instances/${clieneraChannel.id}/widget-config`, {
         method: 'PATCH',
-        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, allowCalls, teaserType }),
+        body: JSON.stringify({ displayName, welcomeMessage, color, buttonText, position, autoOpen, allowMinimize, allowCalls, teaserType, prechatEnabled, prechatName, prechatEmail, prechatPhone }),
       });
       setWidgetConfigOpen(false);
       await load();
@@ -276,7 +287,7 @@ export default function InstancesPage() {
     <AppShell title="WhatsApp" subtitle="Administra las conexiones y sesiones" actions={<button className="button primary" onClick={() => setCreateOpen(true)}><Plus size={16} />Nueva instancia</button>}>
       {error && <div className="error-box">{error}</div>}
       <div className="instance-grid" style={{ marginBottom: 20 }}>
-        <article className="instance-card">
+        <article className={`instance-card${clieneraChannel ? ' clienera-card' : ''}`}>
           <div className="instance-head">
             <div className="instance-logo"><MessageCircle size={21} /></div>
             <div className="instance-name"><strong>Clienera Chat</strong><span>Canal propio: enlace público + widget para tu web</span></div>
@@ -302,17 +313,36 @@ export default function InstancesPage() {
                 <div className="meta-item"><span>Conversaciones recibidas</span><strong>{clieneraChannel.inboundCount}</strong></div>
                 <div className="meta-item"><span>Respuestas enviadas</span><strong>{clieneraChannel.outboundCount}</strong></div>
               </div>
-              <div className="field" style={{ marginTop: 10 }}>
-                <label>Script para tu web</label>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input readOnly value={embedSnippet} style={{ fontFamily: 'monospace', fontSize: 11 }} />
-                  <button className="button small" onClick={() => void copySnippet()}><Copy size={13} />{copiedSnippet ? 'Copiado' : 'Copiar'}</button>
-                </div>
+              <div className="clienera-sections">
+                {companySlug ? (
+                  <ShareLinks siteUrl={SITE_URL} companySlug={companySlug} companyName={clieneraChannel.configuration?.displayName} />
+                ) : (
+                  <section className="share-links"><p className="contact-empty-hint">Configura el enlace de tu empresa (lápiz de «Enlace público») para generar enlaces para compartir.</p></section>
+                )}
+                <section className="clienera-embed" aria-labelledby="clienera-embed-title">
+                  <div className="share-links-head">
+                    <h2 id="clienera-embed-title">Widget dentro de tu web o ERP</h2>
+                    <p>Burbuja de chat para pegar en tu sitio o en el ERP de tus clientes. Funciona aparte de los enlaces y no pide datos al visitante.</p>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="clienera-embed-snippet">Script para tu web</label>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input id="clienera-embed-snippet" readOnly value={embedSnippet} onFocus={(e) => e.currentTarget.select()} style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                      <button className="button small" onClick={() => void copySnippet()}><Copy size={13} />{copiedSnippet ? 'Copiado' : 'Copiar'}</button>
+                    </div>
+                  </div>
+                  <div className="instance-actions">
+                    <button className="button small" disabled={busy === clieneraChannel.id + 'widget-key'} onClick={() => void regenerateWidgetKey()}><RefreshCw size={14} />Rotar clave del widget</button>
+                  </div>
+                </section>
               </div>
-              <div className="instance-actions">
-                {publicLink && <a className="button small" href={publicLink} target="_blank" rel="noreferrer">Abrir enlace público</a>}
-                <button className="button small" onClick={openWidgetConfig}><Pencil size={14} />Personalizar</button>
-                <button className="button small" disabled={busy === clieneraChannel.id + 'widget-key'} onClick={() => void regenerateWidgetKey()}><RefreshCw size={14} />Rotar clave del widget</button>
+              <div className="instance-actions clienera-footer">
+                {mailEnabled !== null && (
+                  <span className={`clienera-mail-status ${mailEnabled ? 'on' : 'off'}`}>
+                    {mailEnabled ? 'Avisos por correo activos: si un cliente del enlace no ve tu respuesta, le llega un correo.' : 'Avisos por correo apagados: los activa el administrador del sistema.'}
+                  </span>
+                )}
+                <button className="button small" onClick={openWidgetConfig}><Pencil size={14} />Personalizar apariencia (enlace y widget)</button>
               </div>
             </>
           )}
@@ -438,11 +468,11 @@ export default function InstancesPage() {
                       <button type="button" className="button small" disabled={widgetTeaserBusy} onClick={() => widgetTeaserInputRef.current?.click()}><Upload size={13} />{widgetTeaserBusy ? 'Subiendo...' : 'Subir imagen'}</button>
                       {widgetConfigDraft.teaserImageObjectName && <button type="button" className="button small" disabled={widgetTeaserBusy} onClick={() => void removeWidgetTeaserImage()}><Trash2 size={13} />Quitar</button>}
                     </div>
-                    <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '6px 0 0' }}>Usa una imagen con el mensaje ya incluido (por ejemplo un personaje señalando el botón de chat), como en taypi.pe. Fondo transparente recomendado. JPG, PNG, GIF o WEBP, máx. 3 MB.</p>
+                    <p style={{ fontSize: 11, color: 'var(--text-neutral-1)', margin: '6px 0 0' }}>Usa una imagen con el mensaje ya incluido (por ejemplo un personaje señalando el botón de chat), como en taypi.pe. Fondo transparente recomendado. JPG, PNG, GIF o WEBP, máx. 3 MB.</p>
                   </>
                 )}
               </div>
-              <div className="field"><label>Color principal</label><input type="color" value={widgetConfigDraft.color || '#6b8afd'} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, color: e.target.value }))} /></div>
+              <div className="field"><label htmlFor="widget-color">Color principal</label><input id="widget-color" type="color" value={widgetConfigDraft.color || '#6b8afd'} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, color: e.target.value }))} /></div>
               <div className="field"><label>Texto del botón</label><input value={widgetConfigDraft.buttonText || ''} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, buttonText: e.target.value }))} placeholder="¿Necesitas ayuda?" /></div>
 
               <div className="field">
@@ -468,14 +498,14 @@ export default function InstancesPage() {
                   <button type="button" className="button small" disabled={widgetIconBusy} onClick={() => widgetIconInputRef.current?.click()}><Upload size={13} />{widgetIconBusy ? 'Subiendo...' : 'Subir imagen'}</button>
                   {widgetConfigDraft.iconObjectName && <button type="button" className="button small" disabled={widgetIconBusy} onClick={() => void removeWidgetIcon()}><Trash2 size={13} />Quitar</button>}
                 </div>
-                <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '6px 0 0' }}>Tu logo o mascota en vez del ícono genérico. JPG, PNG, GIF o WEBP, máx. 2 MB.</p>
+                <p style={{ fontSize: 11, color: 'var(--text-neutral-1)', margin: '6px 0 0' }}>Tu logo o mascota en vez del ícono genérico. JPG, PNG, GIF o WEBP, máx. 2 MB.</p>
               </div>
 
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!widgetConfigDraft.autoOpen} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, autoOpen: e.target.checked }))} />
                 Abrir automáticamente al entrar a la página
               </label>
-              <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
+              <p style={{ fontSize: 11, color: 'var(--text-neutral-1)', margin: '-6px 0 0' }}>
                 {widgetConfigDraft.autoOpen
                   ? 'El panel de chat se abre solo apenas el visitante carga la página.'
                   : 'El visitante solo ve el botón flotante; el chat se abre al hacer clic.'}
@@ -485,7 +515,7 @@ export default function InstancesPage() {
                 <input type="checkbox" checked={widgetConfigDraft.allowMinimize !== false} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, allowMinimize: e.target.checked }))} />
                 Permitir minimizar el botón flotante
               </label>
-              <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
+              <p style={{ fontSize: 11, color: 'var(--text-neutral-1)', margin: '-6px 0 0' }}>
                 Útil si el widget queda embebido dentro de otro software: el visitante puede ocultar la burbuja con un clic y queda recordado en su navegador.
               </p>
 
@@ -493,9 +523,44 @@ export default function InstancesPage() {
                 <input type="checkbox" checked={widgetConfigDraft.allowCalls !== false} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, allowCalls: e.target.checked }))} />
                 Permitir llamadas de voz desde el chat
               </label>
-              <p style={{ fontSize: 11, color: 'var(--text-neutral-16)', margin: '-6px 0 0' }}>
+              <p style={{ fontSize: 11, color: 'var(--text-neutral-1)', margin: '-6px 0 0' }}>
                 El visitante puede iniciar una llamada de voz en vivo (sin WhatsApp, directo en el navegador) que suena en el panel de los agentes.
               </p>
+
+              <section className="prechat-config" aria-labelledby="prechat-config-title">
+                <h3 id="prechat-config-title">Datos al entrar por el enlace</h3>
+                <p>Solo para los enlaces para compartir. El widget dentro de tu web o ERP nunca pide datos.</p>
+                <label className="prechat-toggle">
+                  <input type="checkbox" checked={widgetConfigDraft.prechatEnabled !== false} onChange={(e) => setWidgetConfigDraft((d) => ({ ...d, prechatEnabled: e.target.checked }))} />
+                  Pedir datos antes de empezar el chat
+                </label>
+                {widgetConfigDraft.prechatEnabled !== false && (
+                  <div className="prechat-fields">
+                    {PRECHAT_FIELDS.map((field) => {
+                      const value = widgetConfigDraft[field.key] || field.fallback;
+                      return (
+                        <fieldset key={field.key} className="prechat-field">
+                          <legend>{field.label}</legend>
+                          <div className="prechat-segmented">
+                            {(Object.keys(PRECHAT_MODE_LABELS) as PrechatMode[]).map((mode) => (
+                              <label key={mode} className={value === mode ? 'active' : ''}>
+                                <input type="radio" name={field.key} value={mode} checked={value === mode} onChange={() => setWidgetConfigDraft((d) => ({ ...d, [field.key]: mode }))} />
+                                {PRECHAT_MODE_LABELS[mode]}
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                      );
+                    })}
+                    {PRECHAT_FIELDS.every((field) => (widgetConfigDraft[field.key] || field.fallback) === 'hidden') && (
+                      <p className="prechat-warning" role="status">Con todo en «No pedir» el formulario no se mostrará.</p>
+                    )}
+                    {(widgetConfigDraft.prechatEmail || 'required') === 'hidden' && (
+                      <p className="prechat-hint">Sin correo no podremos avisarle cuando le respondan ni dejarle volver a su chat desde otro dispositivo.</p>
+                    )}
+                  </div>
+                )}
+              </section>
             </div>
             <div className="modal-actions">
               <button className="button" onClick={() => setWidgetConfigOpen(false)}>Cancelar</button>

@@ -11,6 +11,7 @@ import emojiDataEsRaw from 'emoji-picker-react/dist/data/emojis-es.json';
 import { ClieneraMark } from '@/components/brand-mark';
 import { useConfirm } from '@/components/confirm-provider';
 import { playNotificationSound, readSoundPref, writeSoundPref } from '@/lib/notification-sound';
+import { PrechatForm, type PrechatResult, type PrechatSettings, type PrechatValues } from './prechat-form';
 import './chat.css';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -42,7 +43,10 @@ type Bootstrap = {
   widgetPublicKey: string; companyName: string; welcomeMessage: string; color: string; buttonText: string;
   autoOpen: boolean; position: 'left' | 'right'; hasIcon: boolean; iconVersion?: string; allowMinimize: boolean;
   teaserType: 'text' | 'image'; hasTeaserImage: boolean; teaserImageVersion?: string; allowCalls: boolean;
+  prechat?: PrechatSettings; emailNotices?: boolean;
 };
+// Estado del formulario de datos (solo enlace público): `needed` lo decide el servidor.
+type ProfileState = { needed: boolean; completed: boolean; name: string | null; email: string | null; phone: string | null };
 type WidgetMessage = {
   id: string; direction: 'INBOUND' | 'OUTBOUND'; type: string; status: string; body?: string | null;
   caption?: string | null; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; createdAt: string;
@@ -119,13 +123,18 @@ function ticksIcon(status: string) {
 }
 
 export default function PublicChatPage() {
-  const params = useParams<{ slug: string }>();
+  // src: origen del enlace ("/c/<empresa>/instagram" o "?src=instagram") para saber por dónde
+  // llegó el visitante. El widget embebido (embed=1) es otro canal y nunca lo manda.
+  const params = useParams<{ slug: string; src?: string }>();
   const searchParams = useSearchParams();
   const embedded = searchParams.get('embed') === '1';
 
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [token, setToken] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileState | null>(null);
+  // Aviso arriba del chat al entrar desde un correo: "Dejaste de recibir avisos" o "Enlace no válido".
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<WidgetMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -206,6 +215,41 @@ export default function PublicChatPage() {
           window.parent.postMessage({ type: 'clienera:ready', ...data, iconUrl, teaserImageUrl }, '*');
         }
 
+        // Enlaces de los correos de aviso (no aplican al widget embebido):
+        // ?r=   "Continuar la conversación" → sesión nueva para ese contacto, en cualquier dispositivo.
+        // ?baja= "No quiero recibir más avisos" → apaga los avisos y sigue al chat normal.
+        // Se quitan de la URL para que no queden en el historial ni se compartan por error.
+        const resumeParam = embedded ? null : searchParams.get('r');
+        const unsubscribeParam = embedded ? null : searchParams.get('baja');
+        if (resumeParam || unsubscribeParam) {
+          const clean = new URL(window.location.href);
+          clean.searchParams.delete('r');
+          clean.searchParams.delete('baja');
+          window.history.replaceState(null, '', clean.pathname + clean.search + clean.hash);
+        }
+        if (unsubscribeParam) {
+          const res = await fetch(`${API_URL}/widget/${data.widgetPublicKey}/unsubscribe`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ r: unsubscribeParam }),
+          }).catch(() => null);
+          if (!cancelled) setNotice(res?.ok
+            ? { kind: 'ok', text: 'Listo, ya no te enviaremos avisos por correo. Puedes seguir chateando aquí.' }
+            : { kind: 'error', text: 'No pudimos procesar el enlace para dejar de recibir avisos. Escríbenos por el chat y lo hacemos por ti.' });
+        }
+        // La baja usa el mismo enlace firmado: además de apagar los avisos, abre su chat (no
+        // un formulario vacío si lo abre en otro dispositivo).
+        const openParam = resumeParam || unsubscribeParam;
+        if (openParam) {
+          const res = await fetch(`${API_URL}/widget/${data.widgetPublicKey}/resume`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ r: openParam }),
+          }).catch(() => null);
+          if (res?.ok) {
+            const resumed = await res.json() as { token: string };
+            localStorage.setItem(storageKey(data.widgetPublicKey, 'token'), resumed.token);
+          } else if (!cancelled && resumeParam) {
+            setNotice({ kind: 'error', text: 'Este enlace ya no es válido. Puedes escribirnos de nuevo aquí.' });
+          }
+        }
+
         const storedToken = localStorage.getItem(storageKey(data.widgetPublicKey, 'token'));
         // pageUrl lo agrega widget.js al src del iframe (origen+ruta de la página del
         // cliente donde está embebido) — se la pasamos al backend para guardarla en el
@@ -214,9 +258,14 @@ export default function PublicChatPage() {
         const session = await fetch(`${API_URL}/widget/${data.widgetPublicKey}/session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: storedToken || undefined, pageUrl }),
-        }).then((r) => r.json() as Promise<{ token: string; conversationId: string | null }>);
+          body: JSON.stringify({
+            token: storedToken || undefined,
+            pageUrl,
+            src: embedded ? undefined : (params.src || searchParams.get('src') || undefined),
+          }),
+        }).then((r) => r.json() as Promise<{ token: string; conversationId: string | null; profile?: ProfileState }>);
         if (cancelled) return;
+        setProfile(session.profile ?? null);
 
         localStorage.setItem(storageKey(data.widgetPublicKey, 'token'), session.token);
         setToken(session.token);
@@ -581,6 +630,106 @@ export default function PublicChatPage() {
     }
   }, [draft, bootstrap, token, sending, addMessage, stopTyping]);
 
+  // Primer mensaje escrito en el formulario: se manda apenas el chat queda listo (después de
+  // guardar los datos, o después del código si el correo ya tenía chat).
+  const pendingFirstMessage = useRef('');
+
+  const sendFirstMessage = useCallback(async (sessionToken: string) => {
+    const text = pendingFirstMessage.current;
+    pendingFirstMessage.current = '';
+    if (!text || !bootstrap) return;
+    try {
+      const result = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken, text }),
+      }).then((r) => {
+        if (!r.ok) throw new Error('send failed');
+        return r.json() as Promise<{ conversationId: string; message: WidgetMessage }>;
+      });
+      setConversationId(result.conversationId);
+      addMessage(result.message);
+      localStorage.setItem(storageKey(bootstrap.widgetPublicKey, 'conversation'), result.conversationId);
+    } catch {
+      // Los datos ya quedaron guardados: se deja el texto en el cuadro para reenviarlo.
+      setDraft(text);
+    }
+  }, [bootstrap, addMessage]);
+
+  const apiError = async (res: Response, fallback: string) => {
+    if (res.status === 429) {
+      const data = await res.json().catch(() => null) as { message?: string } | null;
+      return data?.message && !/Too Many/i.test(data.message) ? data.message : 'Demasiados intentos, espera un momento';
+    }
+    const data = await res.json().catch(() => null) as { message?: string | string[] } | null;
+    const msg = Array.isArray(data?.message) ? data?.message[0] : data?.message;
+    return msg || fallback;
+  };
+
+  // Formulario del enlace: guarda los datos y, si escribió algo, lo manda como primer mensaje.
+  // Si el correo ya tiene un chat, el servidor pide el código (fase 4) en vez de guardar.
+  const submitProfile = useCallback(async (values: PrechatValues, firstMessage: string): Promise<PrechatResult> => {
+    if (!bootstrap || !token) return { error: 'Recarga la página e inténtalo de nuevo' };
+    pendingFirstMessage.current = firstMessage;
+    try {
+      const res = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, ...values }),
+      });
+      if (!res.ok) return { error: await apiError(res, 'No pudimos guardar tus datos, inténtalo de nuevo') };
+      const data = await res.json() as { profile?: ProfileState; verify?: { emailMasked: string; resendIn: number } };
+      if (data.verify) return { verify: data.verify };
+      setProfile(data.profile ?? null);
+    } catch {
+      return { error: 'Sin conexión. Revisa tu internet e inténtalo de nuevo' };
+    }
+    await sendFirstMessage(token);
+    return null;
+  }, [bootstrap, token, sendFirstMessage]);
+
+  // Código correcto: esta sesión pasa al contacto que ya tenía chat → se carga su historial.
+  const verifyEmailCode = useCallback(async (code: string): Promise<string | null> => {
+    if (!bootstrap || !token) return 'Recarga la página e inténtalo de nuevo';
+    try {
+      const res = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/email-code/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, code }),
+      });
+      if (!res.ok) return apiError(res, 'No pudimos verificar el código');
+      const data = await res.json() as { conversationId: string | null; profile: ProfileState };
+      setConversationId(data.conversationId);
+      if (data.conversationId) {
+        localStorage.setItem(storageKey(bootstrap.widgetPublicKey, 'conversation'), data.conversationId);
+        const history = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/messages?token=${encodeURIComponent(token)}`)
+          .then((r) => r.json() as Promise<{ messages: WidgetMessage[] }>);
+        setMessages(history.messages);
+      }
+      setProfile(data.profile);
+    } catch {
+      return 'Sin conexión. Revisa tu internet e inténtalo de nuevo';
+    }
+    await sendFirstMessage(token);
+    return null;
+  }, [bootstrap, token, sendFirstMessage]);
+
+  const resendEmailCode = useCallback(async (): Promise<{ error?: string; resendIn?: number }> => {
+    if (!bootstrap || !token) return { error: 'Recarga la página e inténtalo de nuevo' };
+    try {
+      const res = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/email-code/resend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (!res.ok) return { error: await apiError(res, 'No pudimos reenviar el código') };
+      const data = await res.json() as { resendIn: number };
+      return { resendIn: data.resendIn };
+    } catch {
+      return { error: 'Sin conexión. Revisa tu internet e inténtalo de nuevo' };
+    }
+  }, [bootstrap, token]);
+
   const sendFile = useCallback(async (file: File) => {
     if (!bootstrap || !token) return;
     setUploadError('');
@@ -695,6 +844,8 @@ export default function PublicChatPage() {
   const onEmojiClick = (data: EmojiClickData) => setDraft((current) => current + data.emoji);
 
   const gradient = useMemo(() => bootstrap ? `linear-gradient(135deg, ${bootstrap.color}, ${shade(bootstrap.color, -28)})` : undefined, [bootstrap]);
+  // El widget embebido en un ERP nunca muestra el formulario (es otro canal).
+  const needsForm = !embedded && Boolean(profile?.needed && bootstrap?.prechat?.enabled);
 
   if (notFound) {
     return <div className="cc-center">Este enlace de chat no está disponible.</div>;
@@ -722,7 +873,7 @@ export default function PublicChatPage() {
                 : 'Normalmente responde en minutos'}
             </span>
           </div>
-          {bootstrap.allowCalls && token && (
+          {bootstrap.allowCalls && token && !needsForm && (
             callState === 'idle' ? (
               <button className="cc-call-btn" aria-label="Llamar" title="Llamar" onClick={() => void startCall()}><Phone size={16} /></button>
             ) : (
@@ -750,13 +901,22 @@ export default function PublicChatPage() {
       </header>
       <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
 
+      {notice && (
+        <div className={`cc-notice cc-notice-${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>
+          <span>{notice.text}</span>
+          <button type="button" aria-label="Cerrar aviso" onClick={() => setNotice(null)}><X size={14} /></button>
+        </div>
+      )}
       <div className="cc-body" ref={scrollRef}>
         {messages.length === 0 && (
-          <div className="cc-welcome">
+          <div className={`cc-welcome${needsForm ? ' cc-welcome-form' : ''}`}>
             <div className="cc-welcome-icon" style={{ background: gradient }}><MessageCircle size={24} /></div>
             <div className="cc-welcome-title">{bootstrap.companyName}</div>
             <div className="cc-welcome-text">{bootstrap.welcomeMessage}</div>
           </div>
+        )}
+        {needsForm && bootstrap.prechat && (
+          <PrechatForm settings={bootstrap.prechat} color={bootstrap.color} emailNotices={Boolean(bootstrap.emailNotices)} onSubmit={submitProfile} onVerifyCode={verifyEmailCode} onResendCode={resendEmailCode} />
         )}
         {messages.map((message) => {
           const isVisitor = message.direction === 'INBOUND';
@@ -842,7 +1002,7 @@ export default function PublicChatPage() {
 
       {uploadError && <div className="cc-error">{uploadError}</div>}
 
-      <div className="cc-composer">
+      <div className="cc-composer" hidden={needsForm}>
         {showEmoji && !recording && (
           <div className="cc-emoji-box" ref={emojiBoxRef}>
             <EmojiPicker onEmojiClick={onEmojiClick} width={290} height={340} searchDisabled lazyLoadEmojis emojiData={emojiDataEs} />

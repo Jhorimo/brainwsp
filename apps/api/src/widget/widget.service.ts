@@ -1,15 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { MessageDirection, MessageStatus, MessageType, UserRole, WhatsAppProvider, type Conversation, type VisitorSession } from '@prisma/client';
 import { hashApiSecret, generateAuthKey as generateVisitorToken } from '../common/utils/secret';
 import type { WidgetConfiguration } from '../instances/instances.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { StorageService } from '../storage/storage.service';
+import { MailService } from '../system-settings/mail.service';
 import { SystemSettingsService } from '../system-settings/system-settings.service';
+import { linkContactSource, normalizeLinkSource } from './link-source';
+import { cleanProfile, isLinkContact, resolvePrechat, type ProfileInput } from './prechat';
+import { verifyResumeToken } from './resume-token';
+import { buildCodeEmail, CODE_MAX_ATTEMPTS, CODE_MAX_PER_HOUR, CODE_RESEND_MS, CODE_TTL_MS, generateCode, hashCode, maskEmail, normalizeCode } from './email-code';
 
-const VISITOR_SESSION_DAYS = 180;
+// Vencimiento deslizante: cada visita lo renueva (ver touchSession), así que en la práctica
+// la sesión del visitante no vence mientras vuelva alguna vez en 10 años. El cliente que
+// escribe hoy y vuelve en 30 días entra directo a su mismo chat.
+const VISITOR_SESSION_DAYS = 3650;
+const sessionExpiry = () => new Date(Date.now() + VISITOR_SESSION_DAYS * 24 * 60 * 60 * 1000);
+
+// sameEmailAs: eligió "Empezar un chat nuevo" con un correo que ya tenía otro chat (sin
+// verificar con el código) — el panel lo muestra para que el agente lo sepa.
+type ContactMetadata = { prechatCompletedAt?: string; sameEmailAs?: string } & Record<string, unknown>;
 
 // Techo duro para el widget público, independiente del límite configurable por el
 // superadmin para el panel (que puede llegar a 500MB pensado para agentes internos de
@@ -39,7 +52,7 @@ function hostnameFromUrl(url: string): string | null {
 // shape, kept in sync by hand since the widget creates these rows outside either of those
 // — the panel's conversations list/thread rendering depends on this exact shape.
 const hydratedConversationInclude = {
-  contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true } },
+  contact: { select: { id: true, name: true, pushName: true, phone: true, email: true, waId: true, avatarUrl: true, source: true, sourceUrl: true } },
   assignedUser: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   instance: { select: { id: true, name: true, slug: true, status: true, provider: true } },
@@ -52,6 +65,7 @@ export class WidgetService {
     private readonly realtime: RealtimeBus,
     private readonly storage: StorageService,
     private readonly systemSettings: SystemSettingsService,
+    private readonly mail: MailService,
   ) {}
 
   private async resolveChannel(widgetPublicKey: string) {
@@ -87,11 +101,13 @@ export class WidgetService {
       teaserType: config.teaserType === 'image' && config.teaserImageObjectName ? 'image' : 'text',
       hasTeaserImage: Boolean(config.teaserImageObjectName),
       teaserImageVersion: config.teaserImageObjectName || undefined,
+      // Solo lo usa la página del ENLACE público; el widget embebido lo ignora siempre.
+      prechat: resolvePrechat(config),
     };
   }
 
   async getBootstrap(widgetPublicKey: string) {
-    return this.branding(await this.resolveChannel(widgetPublicKey));
+    return { ...this.branding(await this.resolveChannel(widgetPublicKey)), emailNotices: (await this.mail.status()).enabled };
   }
 
   // Servidores ICE para las llamadas de voz WebRTC (CallsService) — pública y sin companyId
@@ -161,7 +177,9 @@ export class WidgetService {
       include: { company: { select: { id: true, name: true, slug: true, active: true } } },
     });
     if (!instance) throw new NotFoundException('Esta empresa no tiene Clienera Chat activo');
-    return this.branding(instance);
+    // emailNotices: si el formulario ofrece la casilla de avisos por correo (servidor de
+    // correo configurado por el superadmin).
+    return { ...this.branding(instance), emailNotices: (await this.mail.status()).enabled };
   }
 
   private async findSession(companyId: string, token: string) {
@@ -173,8 +191,33 @@ export class WidgetService {
   private async requireSession(companyId: string, token: string): Promise<VisitorSession> {
     const session = await this.findSession(companyId, token);
     if (!session) throw new UnauthorizedException('Sesión de visitante inválida o expirada');
-    await this.prisma.visitorSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
+    await this.touchSession(session.id);
     return session;
+  }
+
+  private touchSession(id: string) {
+    return this.prisma.visitorSession.update({ where: { id }, data: { lastSeenAt: new Date(), expiresAt: sessionExpiry() } });
+  }
+
+  // Estado del formulario de datos de este visitante. `needed` solo puede ser true para los
+  // contactos que llegaron por el enlace (source link*), nunca para el widget embebido.
+  private async profileState(instance: Awaited<ReturnType<WidgetService['resolveChannel']>>, contactId: string) {
+    const contact = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { name: true, email: true, phone: true, source: true, metadata: true } });
+    const completed = Boolean((contact?.metadata as ContactMetadata | null)?.prechatCompletedAt);
+    const prechat = resolvePrechat(instance.configuration as WidgetConfiguration | null);
+    return {
+      needed: prechat.enabled && isLinkContact(contact?.source) && !completed,
+      completed,
+      // El nombre automático ("web 3: instagram") no se devuelve: no es un dato del visitante.
+      name: completed ? contact?.name ?? null : null,
+      email: completed ? contact?.email ?? null : null,
+      phone: completed ? contact?.phone ?? null : null,
+    };
+  }
+
+  private async assertProfileReady(instance: Awaited<ReturnType<WidgetService['resolveChannel']>>, contactId: string) {
+    const state = await this.profileState(instance, contactId);
+    if (state.needed) throw new BadRequestException('Completa tus datos para empezar el chat');
   }
 
   // Sin registro: a un visitante nuevo se le crea Contact + VisitorSession en el momento.
@@ -183,19 +226,23 @@ export class WidgetService {
   // pageUrl viene de widget.js (window.location del sitio donde está embebido, ej. el ERP de
   // un cliente) — se guarda/actualiza en el Contact para que soporte vea de inmediato de qué
   // cliente se trata sin preguntar (ver Contact.sourceUrl en schema.prisma).
-  async startSession(widgetPublicKey: string, existingToken?: string, pageUrl?: string) {
+  // src: origen del enlace público (/c/<empresa>/<origen>). Solo se usa para visitantes
+  // nuevos que llegan por el enlace (sin pageUrl); el widget embebido en un ERP manda pageUrl
+  // y conserva su comportamiento de siempre (source 'widget', nombre "web N: host"). A un
+  // visitante que ya existía no se le cambia el origen con el que llegó la primera vez.
+  async startSession(widgetPublicKey: string, existingToken?: string, pageUrl?: string, src?: string) {
     const instance = await this.resolveChannel(widgetPublicKey);
 
     if (existingToken) {
       const session = await this.findSession(instance.companyId, existingToken);
       if (session) {
-        await this.prisma.visitorSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
+        await this.touchSession(session.id);
         if (pageUrl) await this.prisma.contact.update({ where: { id: session.contactId }, data: { sourceUrl: pageUrl } });
         const conversation = await this.prisma.conversation.findUnique({
           where: { instanceId_contactId: { instanceId: instance.id, contactId: session.contactId } },
           select: { id: true },
         });
-        return { token: existingToken, conversationId: conversation?.id ?? null };
+        return { token: existingToken, conversationId: conversation?.id ?? null, profile: await this.profileState(instance, session.contactId) };
       }
     }
 
@@ -206,11 +253,17 @@ export class WidgetService {
     // Clienera Chat numera su propia serie). Queda igual de editable después con el lápiz del
     // header — esto solo mejora el valor por defecto, no reemplaza el rename manual.
     const hostname = pageUrl ? hostnameFromUrl(pageUrl) : null;
+    const linkSrc = pageUrl ? null : normalizeLinkSource(src);
+    const source = pageUrl ? 'widget' : linkContactSource(linkSrc);
+    // Enlace con origen: "web N: instagram" con su propio correlativo, igual que la serie por
+    // dominio del widget embebido. Sin origen ni pageUrl queda sin nombre, como siempre.
     const contactName = hostname
       ? `web ${(await this.prisma.contact.count({ where: { companyId: instance.companyId, source: 'widget', sourceUrl: { contains: hostname } } })) + 1}: ${hostname.split('.')[0]}`
-      : undefined;
+      : linkSrc
+        ? `web ${(await this.prisma.contact.count({ where: { companyId: instance.companyId, source } })) + 1}: ${linkSrc}`
+        : undefined;
     const contact = await this.prisma.contact.create({
-      data: { companyId: instance.companyId, waId: `web:${visitorId}`, visitorId, source: 'widget', sourceUrl: pageUrl, name: contactName },
+      data: { companyId: instance.companyId, waId: `web:${visitorId}`, visitorId, source, sourceUrl: pageUrl, name: contactName },
     });
     const token = generateVisitorToken();
     await this.prisma.visitorSession.create({
@@ -218,10 +271,10 @@ export class WidgetService {
         companyId: instance.companyId,
         contactId: contact.id,
         tokenHash: hashApiSecret(token),
-        expiresAt: new Date(Date.now() + VISITOR_SESSION_DAYS * 24 * 60 * 60 * 1000),
+        expiresAt: sessionExpiry(),
       },
     });
-    return { token, conversationId: null };
+    return { token, conversationId: null, profile: await this.profileState(instance, contact.id) };
   }
 
   // Mismas reglas de asignación por defecto y creación de Lead que el inbound de WhatsApp
@@ -271,16 +324,17 @@ export class WidgetService {
       },
     });
 
-    const contact = await this.prisma.contact.findUnique({ where: { id: session.contactId }, select: { name: true, email: true } });
+    const contact = await this.prisma.contact.findUnique({ where: { id: session.contactId }, select: { name: true, email: true, phone: true, source: true } });
     const lead = await this.prisma.lead.create({
       data: {
         companyId: instance.companyId,
         title: contact?.name || 'Prospecto de Clienera Chat',
         personName: contact?.name || undefined,
         personEmail: contact?.email || undefined,
+        personPhone: contact?.phone || undefined,
         assignedUserId: defaultAgentId,
         channel: 'clienera_chat',
-        source: 'widget',
+        source: contact?.source || 'widget',
         contactId: session.contactId,
         conversationId: conversation.id,
         departmentId: defaultDepartmentId,
@@ -306,9 +360,207 @@ export class WidgetService {
   // todavía (se crea recién al mandar un mensaje/media, ver ensureConversation) y sin ella el
   // socket no puede unirse a su sala (handleVisitorConnection exige conversationId). Esto le
   // da al widget un conversationId para abrir el socket y recién ahí emitir "call:invite".
+  // Formulario del enlace público. Solo para contactos que llegaron por el enlace: el widget
+  // embebido en un ERP es otro canal y nunca pide datos. Actualiza el contacto y su
+  // prospecto (si ya existe) y avisa al panel si ya hay conversación.
+  async saveProfile(widgetPublicKey: string, token: string, input: ProfileInput, notifyEmail?: boolean, newChat?: boolean) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const session = await this.requireSession(instance.companyId, token);
+    const contact = await this.prisma.contact.findUnique({ where: { id: session.contactId }, select: { source: true, metadata: true, name: true } });
+    if (!contact || !isLinkContact(contact.source)) throw new BadRequestException('Este chat no usa formulario de datos');
+
+    const settings = resolvePrechat(instance.configuration as WidgetConfiguration | null);
+    const { profile, error } = cleanProfile(input, { ...settings, enabled: true });
+    if (error || !profile) throw new BadRequestException(error || 'Revisa tus datos');
+
+    // Fase 4: si ese correo ya tiene un chat con esta empresa, para ver ese historial hay que
+    // demostrar que el correo es suyo (código de 6 dígitos). Nunca se muestra el historial ni
+    // se escribe en un chat ajeno sin el código, el enlace del correo o el token del navegador.
+    let sameEmailAs: string | undefined;
+    if (profile.email) {
+      const existing = await this.findChatByEmail(instance, profile.email, session.contactId);
+      if (existing) {
+        if (!newChat && (await this.mail.status()).enabled) {
+          return { verify: await this.sendEmailCode(instance, session, existing.id, profile.email) };
+        }
+        // Eligió "Empezar un chat nuevo" (o no hay correo para verificar): chat aparte, marcado.
+        sameEmailAs = existing.id;
+      }
+    }
+
+    const metadata = {
+      ...((contact.metadata as ContactMetadata | null) ?? {}),
+      prechatCompletedAt: new Date().toISOString(),
+      ...(sameEmailAs ? { sameEmailAs } : {}),
+    };
+    await this.prisma.contact.update({
+      where: { id: session.contactId },
+      data: {
+        ...(profile.name ? { name: profile.name } : {}),
+        ...(profile.email ? { email: profile.email } : {}),
+        ...(profile.phone ? { phone: profile.phone } : {}),
+        emailNotify: notifyEmail ?? true,
+        metadata,
+      },
+    });
+
+    const leads = await this.prisma.lead.findMany({ where: { companyId: instance.companyId, contactId: session.contactId }, select: { id: true, title: true } });
+    for (const lead of leads) {
+      const autoTitle = !lead.title || lead.title === 'Prospecto de Clienera Chat' || lead.title === contact.name;
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          ...(profile.name ? { personName: profile.name, ...(autoTitle ? { title: profile.name } : {}) } : {}),
+          ...(profile.email ? { personEmail: profile.email } : {}),
+          ...(profile.phone ? { personPhone: profile.phone } : {}),
+        },
+      });
+    }
+
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { instanceId_contactId: { instanceId: instance.id, contactId: session.contactId } },
+      include: hydratedConversationInclude,
+    });
+    // Sin conversationId a propósito: es para el panel, no para la sala del visitante.
+    if (conversation) void this.realtime.publish(instance.companyId, 'conversation.updated', conversation, conversation.departmentId);
+
+    return { profile: await this.profileState(instance, session.contactId) };
+  }
+
+  // Otro contacto del enlace/widget de esta empresa con ese correo y un chat en este canal.
+  // Se prefiere el chat ORIGINAL de ese correo: los que se crearon con «Empezar un chat nuevo»
+  // sin verificar (metadata.sameEmailAs) podrían ser de otra persona, así que solo se usan si
+  // no queda otro.
+  private async findChatByEmail(instance: Awaited<ReturnType<WidgetService['resolveChannel']>>, email: string, exceptContactId: string) {
+    const candidates = await this.prisma.contact.findMany({
+      where: {
+        companyId: instance.companyId,
+        email,
+        id: { not: exceptContactId },
+        visitorId: { not: null },
+        conversations: { some: { instanceId: instance.id } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      select: { id: true, metadata: true },
+    });
+    const original = candidates.find((c) => !(c.metadata as ContactMetadata | null)?.sameEmailAs) ?? candidates[0];
+    return original ? { id: original.id } : null;
+  }
+
+  // Envía (o reutiliza si se pidió hace menos de 1 min) el código al correo del chat existente.
+  private async sendEmailCode(instance: Awaited<ReturnType<WidgetService['resolveChannel']>>, session: VisitorSession, contactId: string, email: string) {
+    const now = Date.now();
+    const lastForSession = await this.prisma.visitorEmailCode.findFirst({
+      where: { sessionId: session.id, contactId, consumedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (lastForSession && now - lastForSession.createdAt.getTime() < CODE_RESEND_MS && lastForSession.expiresAt.getTime() > now) {
+      return { emailMasked: maskEmail(email), resendIn: Math.ceil((CODE_RESEND_MS - (now - lastForSession.createdAt.getTime())) / 1000) };
+    }
+    const recent = await this.prisma.visitorEmailCode.count({ where: { contactId, createdAt: { gt: new Date(now - 60 * 60 * 1000) } } });
+    if (recent >= CODE_MAX_PER_HOUR) {
+      throw new HttpException('Ya enviamos varios códigos a ese correo. Espera un rato o empieza un chat nuevo.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const code = generateCode();
+    const record = await this.prisma.visitorEmailCode.create({
+      data: { companyId: instance.companyId, contactId, sessionId: session.id, codeHash: hashCode(session.id, code), expiresAt: new Date(now + CODE_TTL_MS) },
+    });
+    const config = (instance.configuration as WidgetConfiguration | null) ?? {};
+    const companyName = config.displayName || instance.company.name;
+    const mail = buildCodeEmail({ companyName, color: config.color || '#6b8afd', code });
+    let sent = false;
+    try {
+      sent = await this.mail.send({ to: email, subject: mail.subject, html: mail.html, text: mail.text, fromName: companyName });
+    } catch {
+      sent = false;
+    }
+    if (!sent) {
+      await this.prisma.visitorEmailCode.delete({ where: { id: record.id } });
+      throw new BadRequestException('No pudimos enviar el código a tu correo. Inténtalo en un momento o empieza un chat nuevo.');
+    }
+    return { emailMasked: maskEmail(email), resendIn: Math.ceil(CODE_RESEND_MS / 1000) };
+  }
+
+  // "Reenviar código" del paso de verificación.
+  async resendEmailCode(widgetPublicKey: string, token: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const session = await this.requireSession(instance.companyId, token);
+    const last = await this.prisma.visitorEmailCode.findFirst({ where: { sessionId: session.id, consumedAt: null }, orderBy: { createdAt: 'desc' } });
+    const target = last ? await this.prisma.contact.findFirst({ where: { id: last.contactId, companyId: instance.companyId }, select: { id: true, email: true } }) : null;
+    if (!target?.email) throw new BadRequestException('Vuelve a escribir tu correo para pedir un código.');
+    return this.sendEmailCode(instance, session, target.id, target.email);
+  }
+
+  // Código correcto → esta sesión pasa a ser del contacto que ya tenía chat (ve su historial)
+  // y se borra el contacto provisional de esta visita si no llegó a tener conversación.
+  async verifyEmailCode(widgetPublicKey: string, token: string, rawCode: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const session = await this.requireSession(instance.companyId, token);
+    const code = normalizeCode(rawCode);
+    const record = await this.prisma.visitorEmailCode.findFirst({ where: { sessionId: session.id, consumedAt: null }, orderBy: { createdAt: 'desc' } });
+    if (!record) throw new BadRequestException('Pide un código nuevo.');
+    if (record.expiresAt.getTime() < Date.now()) throw new BadRequestException('El código venció. Pide uno nuevo.');
+    if (record.attempts >= CODE_MAX_ATTEMPTS) throw new BadRequestException('Demasiados intentos. Pide un código nuevo.');
+    if (code.length !== 6 || hashCode(session.id, code) !== record.codeHash) {
+      const updated = await this.prisma.visitorEmailCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+      const left = CODE_MAX_ATTEMPTS - updated.attempts;
+      throw new BadRequestException(left > 0 ? (left === 1 ? 'Código incorrecto. Te queda 1 intento.' : `Código incorrecto. Te quedan ${left} intentos.`) : 'Demasiados intentos. Pide un código nuevo.');
+    }
+    // Consumo atómico: el mismo código no sirve dos veces (dos pestañas a la vez).
+    const consumed = await this.prisma.visitorEmailCode.updateMany({ where: { id: record.id, consumedAt: null }, data: { consumedAt: new Date() } });
+    if (!consumed.count) throw new BadRequestException('Pide un código nuevo.');
+
+    const target = await this.prisma.contact.findFirst({ where: { id: record.contactId, companyId: instance.companyId }, select: { id: true, metadata: true } });
+    if (!target) throw new BadRequestException('Ese chat ya no existe. Empieza un chat nuevo.');
+    const provisionalId = session.contactId;
+    await this.prisma.visitorSession.update({ where: { id: session.id }, data: { contactId: target.id } });
+    if (provisionalId !== target.id) {
+      await this.prisma.contact.deleteMany({ where: { id: provisionalId, companyId: instance.companyId, conversations: { none: {} }, leads: { none: {} } } });
+    }
+    const targetMeta = (target.metadata as ContactMetadata | null) ?? {};
+    if (!targetMeta.prechatCompletedAt) {
+      await this.prisma.contact.update({ where: { id: target.id }, data: { metadata: { ...targetMeta, prechatCompletedAt: new Date().toISOString() } } });
+    }
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { instanceId_contactId: { instanceId: instance.id, contactId: target.id } },
+      select: { id: true },
+    });
+    return { conversationId: conversation?.id ?? null, profile: await this.profileState(instance, target.id) };
+  }
+
+  // Enlace "Continuar la conversación" del correo (?r=): firma del contacto, no vence.
+  // Crea una sesión nueva en este navegador para ese mismo contacto y su chat.
+  async resume(widgetPublicKey: string, r: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const contactId = verifyResumeToken(instance.companyId, r);
+    const contact = contactId ? await this.prisma.contact.findFirst({ where: { id: contactId, companyId: instance.companyId }, select: { id: true } }) : null;
+    if (!contact) throw new BadRequestException('Este enlace no es válido. Escríbenos de nuevo desde el chat.');
+    const token = generateVisitorToken();
+    await this.prisma.visitorSession.create({
+      data: { companyId: instance.companyId, contactId: contact.id, tokenHash: hashApiSecret(token), expiresAt: sessionExpiry() },
+    });
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { instanceId_contactId: { instanceId: instance.id, contactId: contact.id } },
+      select: { id: true },
+    });
+    return { token, conversationId: conversation?.id ?? null, profile: await this.profileState(instance, contact.id) };
+  }
+
+  // "No quiero recibir más avisos" del correo (?baja=). Idempotente.
+  async unsubscribe(widgetPublicKey: string, r: string) {
+    const instance = await this.resolveChannel(widgetPublicKey);
+    const contactId = verifyResumeToken(instance.companyId, r);
+    if (!contactId) throw new BadRequestException('Este enlace no es válido.');
+    const { count } = await this.prisma.contact.updateMany({ where: { id: contactId, companyId: instance.companyId }, data: { emailNotify: false } });
+    if (!count) throw new BadRequestException('Este enlace no es válido.');
+    return { ok: true };
+  }
+
   async startCallConversation(widgetPublicKey: string, token: string) {
     const instance = await this.resolveChannel(widgetPublicKey);
     const session = await this.requireSession(instance.companyId, token);
+    await this.assertProfileReady(instance, session.contactId);
     const conversation = await this.ensureConversation(instance, session, { bumpUnread: false });
     return { conversationId: conversation.id };
   }
@@ -319,6 +571,7 @@ export class WidgetService {
 
     const instance = await this.resolveChannel(widgetPublicKey);
     const session = await this.requireSession(instance.companyId, token);
+    await this.assertProfileReady(instance, session.contactId);
     const conversation = await this.ensureConversation(instance, session);
 
     const message = await this.prisma.message.create({
@@ -352,6 +605,7 @@ export class WidgetService {
 
     const instance = await this.resolveChannel(widgetPublicKey);
     const session = await this.requireSession(instance.companyId, token);
+    await this.assertProfileReady(instance, session.contactId);
     const conversation = await this.ensureConversation(instance, session);
 
     const { internalUrl } = await this.storage.uploadBuffer(file.buffer, file.mimetype, extname(file.originalname).replace('.', ''));

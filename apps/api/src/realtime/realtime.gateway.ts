@@ -371,7 +371,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const companyId = client.data.companyId as string | undefined;
     const departmentId = (client.data.departmentId ?? null) as string | null;
     if (!conversationId || !companyId) return;
-    const ids = await this.bumpMessageStatus(conversationId, MessageDirection.OUTBOUND, [MessageStatus.SENT, MessageStatus.DELIVERED], MessageStatus.READ);
+    // También desde QUEUED/PROCESSING: en Clienera Chat el visitante ve el mensaje apenas se
+    // publica, aunque el worker todavía no lo haya marcado SENT (el worker no pisa un READ).
+    // Así el aviso por correo (ClieneraMailNotifier) no se manda por algo que ya vio.
+    const ids = await this.bumpMessageStatus(conversationId, MessageDirection.OUTBOUND, [MessageStatus.QUEUED, MessageStatus.PROCESSING, MessageStatus.SENT, MessageStatus.DELIVERED], MessageStatus.READ);
     if (ids.length) this.emitScoped(companyId, 'message.status', { conversationId, ids, status: 'READ' }, departmentId, conversationId);
   }
 }

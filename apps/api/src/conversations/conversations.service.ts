@@ -197,7 +197,7 @@ export class ConversationsService {
         ],
       },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, sourceUrl: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, email: true, emailNotify: true, waId: true, avatarUrl: true, notes: true, source: true, sourceUrl: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },
@@ -884,6 +884,52 @@ export class ConversationsService {
     return hydrated;
   }
 
+  // "También escribe por WhatsApp / por la web": otras conversaciones de la empresa cuyo
+  // contacto tiene el mismo celular (ej. un visitante del enlace de Clienera Chat que dejó su
+  // número y además escribe por una línea de WhatsApp) o el mismo correo (visitante que eligió
+  // "Empezar un chat nuevo" sin verificar el código). Solo informa, nunca fusiona chats, y
+  // respeta los departamentos que el agente puede ver.
+  async linkedChats(user: JwtUser, id: string) {
+    await this.getOwned(user, id);
+    const current = await this.prisma.conversation.findUnique({ where: { id }, select: { contact: { select: { id: true, phone: true, email: true, metadata: true } } } });
+    const contact = current!.contact;
+    const emailUnverified = Boolean((contact.metadata as { sameEmailAs?: string } | null)?.sameEmailAs);
+    const phone = contact.phone?.replace(/\D/g, '');
+    const email = contact.email?.trim().toLowerCase();
+    const matches = [
+      ...(phone && phone.length >= 8 ? [{ phone }, { waId: `${phone}@s.whatsapp.net` }] : []),
+      ...(email ? [{ email }] : []),
+    ];
+    if (!matches.length) return { chats: [], emailUnverified };
+    const restriction = await this.resolveDepartmentRestriction(user);
+    const rows = await this.prisma.conversation.findMany({
+      where: {
+        companyId: user.companyId,
+        id: { not: id },
+        contactId: { not: contact.id },
+        contact: { OR: matches },
+        ...(restriction ? { OR: [{ departmentId: null }, { departmentId: { in: restriction } }] } : {}),
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      take: 5,
+      select: { id: true, lastMessageAt: true, contact: { select: { name: true, pushName: true, phone: true, waId: true, email: true } }, instance: { select: { name: true, provider: true } } },
+    });
+    return {
+      emailUnverified,
+      chats: rows.map((row) => {
+        const samePhone = Boolean(phone && (row.contact.phone?.replace(/\D/g, '') === phone || row.contact.waId === `${phone}@s.whatsapp.net`));
+        return {
+          id: row.id,
+          lastMessageAt: row.lastMessageAt,
+          contactName: row.contact.name || row.contact.pushName || null,
+          instanceName: row.instance.name,
+          provider: row.instance.provider,
+          matchedBy: samePhone ? 'phone' : 'email',
+        };
+      }),
+    };
+  }
+
   private async getOwned(user: JwtUser, id: string) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id, companyId: user.companyId },
@@ -901,7 +947,7 @@ export class ConversationsService {
     return this.prisma.conversation.findFirst({
       where: { id, companyId },
       include: {
-        contact: { select: { id: true, name: true, pushName: true, phone: true, waId: true, avatarUrl: true, notes: true, sourceUrl: true, tags: { select: { tag: true } } } },
+        contact: { select: { id: true, name: true, pushName: true, phone: true, email: true, emailNotify: true, waId: true, avatarUrl: true, notes: true, source: true, sourceUrl: true, tags: { select: { tag: true } } } },
         assignedUser: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         project: { select: { id: true, name: true } },

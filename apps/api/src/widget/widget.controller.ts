@@ -4,7 +4,7 @@ import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { pipeToResponse } from '../common/pipe-stream';
 import { StorageService } from '../storage/storage.service';
-import { EditWidgetMessageDto, SendWidgetMessageDto, StartCallDto, StartWidgetSessionDto } from './widget.dto';
+import { EditWidgetMessageDto, ResumeTokenDto, SaveWidgetProfileDto, SendWidgetMessageDto, StartCallDto, StartWidgetSessionDto, VerifyEmailCodeDto } from './widget.dto';
 import { checkWidgetRateLimit } from './widget-rate-limit';
 import { WidgetService } from './widget.service';
 
@@ -63,7 +63,42 @@ export class WidgetController {
   @Post(':widgetPublicKey/session')
   startSession(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: StartWidgetSessionDto) {
     this.guardRateLimit(req);
-    return this.service.startSession(widgetPublicKey, dto.token, dto.pageUrl);
+    return this.service.startSession(widgetPublicKey, dto.token, dto.pageUrl, dto.src);
+  }
+
+  // Formulario de datos del enlace público (nombre, correo, celular) — ver prechat.ts.
+  @Post(':widgetPublicKey/profile')
+  saveProfile(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: SaveWidgetProfileDto) {
+    this.guardRateLimit(req, dto.token);
+    return this.service.saveProfile(widgetPublicKey, dto.token, { name: dto.name, email: dto.email, phone: dto.phone }, dto.notifyEmail, dto.newChat);
+  }
+
+  // Código de 6 dígitos para volver a un chat existente desde otro dispositivo (fase 4).
+  @Post(':widgetPublicKey/email-code/verify')
+  verifyEmailCode(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: VerifyEmailCodeDto) {
+    this.guardRateLimit(req, dto.token);
+    return this.service.verifyEmailCode(widgetPublicKey, dto.token, dto.code);
+  }
+
+  @Post(':widgetPublicKey/email-code/resend')
+  resendEmailCode(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: StartCallDto) {
+    this.guardRateLimit(req, dto.token);
+    return this.service.resendEmailCode(widgetPublicKey, dto.token);
+  }
+
+  // "Continuar la conversación" desde el correo de aviso: abre el mismo chat en cualquier
+  // dispositivo (crea una sesión nueva para ese contacto).
+  @Post(':widgetPublicKey/resume')
+  resume(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: ResumeTokenDto) {
+    this.guardRateLimit(req);
+    return this.service.resume(widgetPublicKey, dto.r);
+  }
+
+  // "No quiero recibir más avisos" desde el correo.
+  @Post(':widgetPublicKey/unsubscribe')
+  unsubscribe(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: ResumeTokenDto) {
+    this.guardRateLimit(req);
+    return this.service.unsubscribe(widgetPublicKey, dto.r);
   }
 
   // El visitante puede querer llamar sin haber escrito antes — esto le da un conversationId
