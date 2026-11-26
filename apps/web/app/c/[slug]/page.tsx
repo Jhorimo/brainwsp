@@ -678,8 +678,17 @@ export default function PublicChatPage() {
         body: JSON.stringify({ token, ...values }),
       });
       if (!res.ok) return { error: await apiError(res, 'No pudimos guardar tus datos, inténtalo de nuevo') };
-      const data = await res.json() as { profile?: ProfileState; verify?: { emailMasked: string; resendIn: number } };
+      const data = await res.json() as { profile?: ProfileState; verify?: { emailMasked: string; resendIn: number }; conversationId?: string | null; limitedHistory?: boolean };
       if (data.verify) return { verify: data.verify };
+      // Mismo correo que un chat existente → esta visita se unió a ESE chat.
+      if (data.conversationId) {
+        setConversationId(data.conversationId);
+        localStorage.setItem(storageKey(bootstrap.widgetPublicKey, 'conversation'), data.conversationId);
+        const history = await fetch(`${API_URL}/widget/${bootstrap.widgetPublicKey}/messages?token=${encodeURIComponent(token)}`)
+          .then((r) => r.json() as Promise<{ messages: WidgetMessage[] }>).catch(() => ({ messages: [] as WidgetMessage[] }));
+        setMessages(history.messages);
+      }
+      if (data.limitedHistory) setNotice({ kind: 'ok', text: 'Seguimos tu conversación. Por seguridad, en este dispositivo solo verás los mensajes nuevos.' });
       setProfile(data.profile ?? null);
     } catch {
       return { error: 'Sin conexión. Revisa tu internet e inténtalo de nuevo' };

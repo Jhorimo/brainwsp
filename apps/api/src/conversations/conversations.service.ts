@@ -975,6 +975,18 @@ export class ConversationsService {
     return updated;
   }
 
+  // Avisos del chat para los agentes (ConversationEvent): "El cliente se conectó · vía …" /
+  // "salió del chat". El panel los intercala entre los mensajes por hora.
+  async events(user: JwtUser, conversationId: string) {
+    await this.getOwned(user, conversationId);
+    const rows = await this.prisma.conversationEvent.findMany({
+      where: { companyId: user.companyId, conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    });
+    return rows.reverse();
+  }
+
   async retryMedia(user: JwtUser, conversationId: string, messageId: string) {
     const conversation = await this.getOwned(user, conversationId);
     const message = await this.prisma.message.findFirst({

@@ -903,6 +903,13 @@ model VisitorSession {
   companyId  String
   contactId  String
   tokenHash  String   @unique
+  // Por dónde entró esta sesión: "link:instagram", "link", "widget", "email" (enlace del
+  // correo de aviso), "code" (código de 6 dígitos) o "unverified" (mismo correo sin código).
+  // Se muestra a los agentes en el aviso "El cliente se conectó · vía …".
+  via        String?
+  // Sesión sin verificar unida a un chat existente por el correo: el visitante solo ve los
+  // mensajes desde este momento, nunca el historial anterior. null = ve todo.
+  historyFrom DateTime?
   ip         String?
   userAgent  String?
   lastSeenAt DateTime @default(now())
@@ -913,6 +920,20 @@ model VisitorSession {
 
   @@index([companyId])
   @@index([contactId])
+}
+
+// Avisos para los agentes dentro de un chat (no son mensajes: no cuentan como no leídos, no
+// disparan bots ni cambian la vista previa). Hoy: presencia del visitante de Clienera Chat
+// ("se conectó · vía Instagram" / "salió del chat"). type: visitor_joined | visitor_left.
+model ConversationEvent {
+  id             String   @id @default(uuid())
+  companyId      String
+  conversationId String
+  type           String
+  data           Json?
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 // Código de 6 dígitos para volver a un chat de Clienera Chat desde otro dispositivo: el

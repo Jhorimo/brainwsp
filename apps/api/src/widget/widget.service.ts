@@ -238,6 +238,10 @@ export class WidgetService {
       if (session) {
         await this.touchSession(session.id);
         if (pageUrl) await this.prisma.contact.update({ where: { id: session.contactId }, data: { sourceUrl: pageUrl } });
+        // Por dónde entró ESTA vez (el aviso "se conectó · vía TikTok" de los agentes). El
+        // origen del contacto (Contact.source) sigue siendo el de la primera vez.
+        const via = pageUrl ? 'widget' : linkContactSource(src);
+        if (via !== session.via) await this.prisma.visitorSession.update({ where: { id: session.id }, data: { via } });
         const conversation = await this.prisma.conversation.findUnique({
           where: { instanceId_contactId: { instanceId: instance.id, contactId: session.contactId } },
           select: { id: true },
@@ -272,6 +276,7 @@ export class WidgetService {
         contactId: contact.id,
         tokenHash: hashApiSecret(token),
         expiresAt: sessionExpiry(),
+        via: source,
       },
     });
     return { token, conversationId: null, profile: await this.profileState(instance, contact.id) };
@@ -363,7 +368,7 @@ export class WidgetService {
   // Formulario del enlace público. Solo para contactos que llegaron por el enlace: el widget
   // embebido en un ERP es otro canal y nunca pide datos. Actualiza el contacto y su
   // prospecto (si ya existe) y avisa al panel si ya hay conversación.
-  async saveProfile(widgetPublicKey: string, token: string, input: ProfileInput, notifyEmail?: boolean, newChat?: boolean) {
+  async saveProfile(widgetPublicKey: string, token: string, input: ProfileInput, notifyEmail?: boolean, withoutHistory?: boolean) {
     const instance = await this.resolveChannel(widgetPublicKey);
     const session = await this.requireSession(instance.companyId, token);
     const contact = await this.prisma.contact.findUnique({ where: { id: session.contactId }, select: { source: true, metadata: true, name: true } });
@@ -373,25 +378,24 @@ export class WidgetService {
     const { profile, error } = cleanProfile(input, { ...settings, enabled: true });
     if (error || !profile) throw new BadRequestException(error || 'Revisa tus datos');
 
-    // Fase 4: si ese correo ya tiene un chat con esta empresa, para ver ese historial hay que
-    // demostrar que el correo es suyo (código de 6 dígitos). Nunca se muestra el historial ni
-    // se escribe en un chat ajeno sin el código, el enlace del correo o el token del navegador.
-    let sameEmailAs: string | undefined;
+    // El correo identifica a la persona: si ya tiene un chat con esta empresa, esta visita se
+    // une a ESE chat (no se crea otro), venga de Instagram, la web, incógnito u otro celular.
+    //  - Con servidor de correo: primero se ofrece el código de 6 dígitos para ver el historial.
+    //  - "Continuar sin ver el historial" (o sin servidor de correo): mismo chat, pero esta
+    //    sesión solo ve los mensajes desde ahora (historyFrom) y los agentes la ven "sin verificar".
     if (profile.email) {
       const existing = await this.findChatByEmail(instance, profile.email, session.contactId);
       if (existing) {
-        if (!newChat && (await this.mail.status()).enabled) {
+        if (!withoutHistory && (await this.mail.status()).enabled) {
           return { verify: await this.sendEmailCode(instance, session, existing.id, profile.email) };
         }
-        // Eligió "Empezar un chat nuevo" (o no hay correo para verificar): chat aparte, marcado.
-        sameEmailAs = existing.id;
+        return this.attachSession(instance, session, existing.id, { via: 'unverified', historyFrom: new Date() });
       }
     }
 
     const metadata = {
       ...((contact.metadata as ContactMetadata | null) ?? {}),
       prechatCompletedAt: new Date().toISOString(),
-      ...(sameEmailAs ? { sameEmailAs } : {}),
     };
     await this.prisma.contact.update({
       where: { id: session.contactId },
@@ -511,22 +515,34 @@ export class WidgetService {
     const consumed = await this.prisma.visitorEmailCode.updateMany({ where: { id: record.id, consumedAt: null }, data: { consumedAt: new Date() } });
     if (!consumed.count) throw new BadRequestException('Pide un código nuevo.');
 
-    const target = await this.prisma.contact.findFirst({ where: { id: record.contactId, companyId: instance.companyId }, select: { id: true, metadata: true } });
-    if (!target) throw new BadRequestException('Ese chat ya no existe. Empieza un chat nuevo.');
+    const target = await this.prisma.contact.findFirst({ where: { id: record.contactId, companyId: instance.companyId }, select: { id: true } });
+    if (!target) throw new BadRequestException('Ese chat ya no existe. Escríbenos de nuevo.');
+    return this.attachSession(instance, session, target.id, { via: 'code', historyFrom: null });
+  }
+
+  // Une esta sesión del navegador al contacto que ya tenía chat (mismo correo) y borra el
+  // contacto provisional de esta visita si no llegó a tener conversación.
+  private async attachSession(
+    instance: Awaited<ReturnType<WidgetService['resolveChannel']>>,
+    session: VisitorSession,
+    targetContactId: string,
+    options: { via: string; historyFrom: Date | null },
+  ) {
     const provisionalId = session.contactId;
-    await this.prisma.visitorSession.update({ where: { id: session.id }, data: { contactId: target.id } });
-    if (provisionalId !== target.id) {
+    await this.prisma.visitorSession.update({ where: { id: session.id }, data: { contactId: targetContactId, via: options.via, historyFrom: options.historyFrom } });
+    if (provisionalId !== targetContactId) {
       await this.prisma.contact.deleteMany({ where: { id: provisionalId, companyId: instance.companyId, conversations: { none: {} }, leads: { none: {} } } });
     }
-    const targetMeta = (target.metadata as ContactMetadata | null) ?? {};
+    const target = await this.prisma.contact.findUnique({ where: { id: targetContactId }, select: { metadata: true } });
+    const targetMeta = (target?.metadata as ContactMetadata | null) ?? {};
     if (!targetMeta.prechatCompletedAt) {
-      await this.prisma.contact.update({ where: { id: target.id }, data: { metadata: { ...targetMeta, prechatCompletedAt: new Date().toISOString() } } });
+      await this.prisma.contact.update({ where: { id: targetContactId }, data: { metadata: { ...targetMeta, prechatCompletedAt: new Date().toISOString() } } });
     }
     const conversation = await this.prisma.conversation.findUnique({
-      where: { instanceId_contactId: { instanceId: instance.id, contactId: target.id } },
+      where: { instanceId_contactId: { instanceId: instance.id, contactId: targetContactId } },
       select: { id: true },
     });
-    return { conversationId: conversation?.id ?? null, profile: await this.profileState(instance, target.id) };
+    return { conversationId: conversation?.id ?? null, profile: await this.profileState(instance, targetContactId), limitedHistory: !!options.historyFrom };
   }
 
   // Enlace "Continuar la conversación" del correo (?r=): firma del contacto, no vence.
@@ -538,7 +554,7 @@ export class WidgetService {
     if (!contact) throw new BadRequestException('Este enlace no es válido. Escríbenos de nuevo desde el chat.');
     const token = generateVisitorToken();
     await this.prisma.visitorSession.create({
-      data: { companyId: instance.companyId, contactId: contact.id, tokenHash: hashApiSecret(token), expiresAt: sessionExpiry() },
+      data: { companyId: instance.companyId, contactId: contact.id, tokenHash: hashApiSecret(token), expiresAt: sessionExpiry(), via: 'email' },
     });
     const conversation = await this.prisma.conversation.findUnique({
       where: { instanceId_contactId: { instanceId: instance.id, contactId: contact.id } },
@@ -642,13 +658,15 @@ export class WidgetService {
     });
     if (!conversation) return { conversationId: null, messages: [] };
 
+    // Los 200 MÁS RECIENTES (antes devolvía los 200 más antiguos: en un chat largo el
+    // visitante no veía lo último). Una sesión sin verificar solo ve desde que se unió.
     const messages = await this.prisma.message.findMany({
-      where: { conversationId: conversation.id },
-      orderBy: { createdAt: 'asc' },
+      where: { conversationId: conversation.id, ...(session.historyFrom ? { createdAt: { gte: session.historyFrom } } : {}) },
+      orderBy: { createdAt: 'desc' },
       take: 200,
       select: { id: true, direction: true, type: true, status: true, body: true, caption: true, fileName: true, mimeType: true, fileSize: true, createdAt: true, deleted: true, metadata: true },
     });
-    return { conversationId: conversation.id, messages };
+    return { conversationId: conversation.id, messages: messages.reverse() };
   }
 
   // Edición propia del visitante — a diferencia de WhatsApp (donde la edición llega por el

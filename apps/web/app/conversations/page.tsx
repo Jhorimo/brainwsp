@@ -529,8 +529,33 @@ type MessageListApi = {
   quoteSnippet: (quoted: { type: string; body?: string | null; caption?: string | null; fileName?: string | null }) => string;
   openAuthorChat: (author: Author) => void;
 };
-const MessageList = memo(function MessageList({ messages, selectMode, selectedMessageIds, highlightMessageId, api }: {
+// Avisos del chat para los agentes (ConversationEvent): presencia del visitante de Clienera Chat.
+type ChatEvent = { id: string; conversationId: string; type: string; data?: { via?: string | null } | null; createdAt: string };
+
+function viaLabel(via?: string | null) {
+  if (!via) return '';
+  if (via === 'widget') return 'desde el widget de la web';
+  if (via === 'email') return 'desde el enlace del correo';
+  if (via === 'code') return 'desde otro dispositivo, verificado con código';
+  if (via === 'unverified') return 'desde otro dispositivo, sin verificar (no ve el historial anterior)';
+  const origin = linkSourceInfo(via);
+  return origin ? (via === 'link' ? 'por el enlace' : `vía ${origin.label}`) : '';
+}
+
+function ChatEventRow({ event }: { event: ChatEvent }) {
+  const joined = event.type === 'visitor_joined';
+  const via = joined ? viaLabel(event.data?.via) : '';
+  return (
+    <div className={`chat-event ${joined ? 'joined' : 'left'}${event.data?.via === 'unverified' ? ' unverified' : ''}`} title={fullDateTime(event.createdAt)}>
+      <span className="chat-event-dot" aria-hidden="true" />
+      <span>{joined ? 'El cliente se conectó' : 'El cliente salió del chat'}{via ? ` · ${via}` : ''} · {clockTime(event.createdAt)}</span>
+    </div>
+  );
+}
+
+const MessageList = memo(function MessageList({ messages, events, selectMode, selectedMessageIds, highlightMessageId, api }: {
   messages: Message[];
+  events: ChatEvent[];
   selectMode: boolean;
   selectedMessageIds: Set<string>;
   highlightMessageId: string | null;
@@ -542,6 +567,25 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
   selectedId: string | null;
   api: MessageListApi;
 }) {
+  // Cada aviso va justo antes del primer mensaje posterior; los más nuevos que el último
+  // mensaje van al final. Los anteriores al mensaje más antiguo cargado no se muestran
+  // hasta cargar esa página ("cargar mensajes anteriores").
+  const { eventsBefore, trailingEvents } = useMemo(() => {
+    const before = new Map<string, ChatEvent[]>();
+    const trailing: ChatEvent[] = [];
+    if (!messages.length) return { eventsBefore: before, trailingEvents: events };
+    const oldest = messages[0].createdAt;
+    let i = 0;
+    for (const event of events) {
+      if (event.createdAt < oldest) continue;
+      while (i < messages.length && messages[i].createdAt < event.createdAt) i += 1;
+      if (i >= messages.length) { trailing.push(event); continue; }
+      const list = before.get(messages[i].id) ?? [];
+      list.push(event);
+      before.set(messages[i].id, list);
+    }
+    return { eventsBefore: before, trailingEvents: trailing };
+  }, [messages, events]);
   return (
     <>
 {messages.map((message, index) => (
@@ -549,6 +593,7 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
                   {(index === 0 || !isSameDay(messages[index - 1].createdAt, message.createdAt)) && (
                     <div className="day-separator" title={fullDateTime(message.createdAt)}><span>{daySeparatorLabel(message.createdAt)}</span></div>
                   )}
+                  {eventsBefore.get(message.id)?.map((event) => <ChatEventRow key={event.id} event={event} />)}
                   <div
                     id={`msg-${message.id}`}
                     className={`message-bubble ${message.direction === 'OUTBOUND' ? 'out' : ''} ${highlightMessageId === message.id ? 'highlight' : ''} ${selectedMessageIds.has(message.id) ? 'selected' : ''}`}
@@ -611,6 +656,7 @@ const MessageList = memo(function MessageList({ messages, selectMode, selectedMe
                   </div>
                   </Fragment>
                 ))}
+      {trailingEvents.map((event) => <ChatEventRow key={event.id} event={event} />)}
     </>
   );
 });
@@ -792,6 +838,8 @@ export default function ConversationsPage() {
   const [retryingMedia, setRetryingMedia] = useState<Set<string>>(new Set());
   // Mensajes fallidos con "Reenviar" en curso.
   const [resendingIds, setResendingIds] = useState<Set<string>>(new Set());
+  // Avisos del chat abierto ("se conectó · vía Instagram", "salió").
+  const [chatEvents, setChatEvents] = useState<ChatEvent[]>([]);
   const resendFailedMessage = async (message: Message) => {
     if (!selectedId) return;
     setResendingIds((current) => new Set(current).add(message.id));
@@ -1075,6 +1123,13 @@ export default function ConversationsPage() {
     } catch {}
   }, []);
   useEffect(() => { if (selectedId) void loadMessages(selectedId); }, [selectedId, loadMessages]);
+  useEffect(() => {
+    setChatEvents([]);
+    if (!selectedId) return;
+    let cancelled = false;
+    apiFetch<ChatEvent[]>(`/conversations/${selectedId}/events`).then((rows) => { if (!cancelled) setChatEvents(rows); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedId]);
 
   // "Cargar mensajes anteriores": al acercarse al inicio del chat se pide la página anterior
   // (200) y se antepone sin mover lo que el agente está leyendo.
@@ -1282,6 +1337,10 @@ export default function ConversationsPage() {
       }
     });
     // Estado de las líneas en vivo (aviso "línea desconectada" encima del cuadro de texto).
+    socket.on('conversation.event', (event: ChatEvent) => {
+      if (!event?.id || event.conversationId !== selectedIdRef.current) return;
+      setChatEvents((current) => current.some((e) => e.id === event.id) ? current : [...current, event]);
+    });
     socket.on('instance.updated', (inst: { id: string; status: string }) => {
       if (!inst?.id || !inst.status) return;
       setConversations((current) => current.some((c) => c.instance?.id === inst.id && c.instance.status !== inst.status)
@@ -3351,6 +3410,7 @@ export default function ConversationsPage() {
                 )}
                 <MessageList
                   messages={messages}
+                  events={chatEvents}
                   selectMode={selectMode}
                   selectedMessageIds={selectedMessageIds}
                   highlightMessageId={highlightMessageId}

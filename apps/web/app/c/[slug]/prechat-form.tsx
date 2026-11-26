@@ -6,20 +6,11 @@ import { buildPhone, DEFAULT_COUNTRY, PHONE_COUNTRIES } from '@/lib/phone-countr
 
 export type PrechatFieldMode = 'required' | 'optional' | 'hidden';
 export type PrechatSettings = { enabled: boolean; name: PrechatFieldMode; email: PrechatFieldMode; phone: PrechatFieldMode };
-export type PrechatValues = { name?: string; email?: string; phone?: string; notifyEmail?: boolean; newChat?: boolean };
+export type PrechatValues = { name?: string; email?: string; phone?: string; notifyEmail?: boolean; withoutHistory?: boolean };
 // Respuesta del envío: error en texto, o que ese correo ya tiene chat y hay que verificarlo.
 export type PrechatResult = { error?: string; verify?: { emailMasked: string; resendIn: number } } | null;
 
 type Field = 'name' | 'email' | 'phone';
-
-// País por defecto según el idioma del navegador (es-MX → México); si no está en la lista, Perú.
-function guessCountry() {
-  try {
-    const region = (navigator.languages?.[0] || navigator.language || '').split('-')[1]?.toUpperCase();
-    if (region && PHONE_COUNTRIES.some((c) => c.iso === region)) return region;
-  } catch { /* sin navigator */ }
-  return DEFAULT_COUNTRY;
-}
 
 // El color de marca lo elige cada empresa: si con texto blanco no llega a contraste AA
 // (4.5:1), se oscurece lo justo para el botón de enviar.
@@ -66,7 +57,6 @@ export function PrechatForm({ settings, color, emailNotices, onSubmit, onVerifyC
   const refs = { name: useRef<HTMLInputElement>(null), email: useRef<HTMLInputElement>(null), phone: useRef<HTMLInputElement>(null) };
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { setCountry(guessCountry()); }, []);
 
   const visible = (field: Field) => settings[field] !== 'hidden';
   const required = (field: Field) => settings[field] === 'required';
@@ -107,7 +97,8 @@ export function PrechatForm({ settings, color, emailNotices, onSubmit, onVerifyC
     if (raw.trim().startsWith('+') || digits.length > countryInfo.max) {
       if (digits.startsWith(countryInfo.dial) && digits.length - countryInfo.dial.length >= countryInfo.min) digits = digits.slice(countryInfo.dial.length);
     }
-    setNational(digits.slice(0, 15));
+    // Solo los dígitos que admite el país (Perú: 9).
+    setNational(digits.slice(0, countryInfo.max));
   };
 
   const submit = async (e: FormEvent) => {
@@ -120,7 +111,9 @@ export function PrechatForm({ settings, color, emailNotices, onSubmit, onVerifyC
     if (visible('name') && name.trim()) values.name = name.trim();
     if (visible('email') && email.trim()) values.email = email.trim().toLowerCase();
     if (visible('phone') && national) values.phone = buildPhone({ country, customDial: '', national }).phone;
-    if (values.email) values.notifyEmail = emailNotices ? notifyEmail : false;
+    // Solo se manda si se mostró la casilla; si el correo está apagado no es que el cliente
+    // los haya rechazado (queda el valor por defecto: activados).
+    if (values.email && emailNotices) values.notifyEmail = notifyEmail;
     lastValues.current = values;
     setSubmitting(true);
     const result = await onSubmit(values, message.trim());
@@ -129,11 +122,12 @@ export function PrechatForm({ settings, color, emailNotices, onSubmit, onVerifyC
     if (result?.verify) setVerify(result.verify);
   };
 
-  // "Empezar un chat nuevo" desde el paso del código: mismos datos, chat aparte.
-  const startNewChat = async () => {
+  // "Continuar sin ver el historial": se une al MISMO chat (el correo identifica a la
+  // persona) pero este dispositivo solo ve los mensajes desde ahora.
+  const continueWithoutHistory = async () => {
     if (!lastValues.current) return;
     setSubmitting(true);
-    const result = await onSubmit({ ...lastValues.current, newChat: true }, message.trim());
+    const result = await onSubmit({ ...lastValues.current, withoutHistory: true }, message.trim());
     setSubmitting(false);
     if (result?.error) setServerError(result.error);
     else setVerify(null);
@@ -149,7 +143,7 @@ export function PrechatForm({ settings, color, emailNotices, onSubmit, onVerifyC
         serverError={serverError}
         onVerify={onVerifyCode}
         onResend={onResendCode}
-        onNewChat={() => void startNewChat()}
+        onNewChat={() => void continueWithoutHistory()}
         onBack={() => { setVerify(null); setServerError(''); setTimeout(() => refs.email.current?.focus(), 0); }}
       />
     );
@@ -210,13 +204,14 @@ export function PrechatForm({ settings, color, emailNotices, onSubmit, onVerifyC
         <div className={`cc-pf-field${shown('phone') ? ' has-error' : ''}`}>
           <label htmlFor={ids.phone}>{label('Celular', 'phone')}</label>
           <div className="cc-pf-phone">
-            <select id={ids.country} aria-label="Código de país" value={country} onChange={(e) => setCountry(e.target.value)} autoComplete="tel-country-code">
+            <select id={ids.country} aria-label="Código de país" value={country} onChange={(e) => { setCountry(e.target.value); setNational(''); }} autoComplete="tel-country-code">
               {PHONE_COUNTRIES.map((c) => <option key={c.iso} value={c.iso}>{`+${c.dial} ${c.name}`}</option>)}
             </select>
             <span className="cc-pf-dial" aria-hidden="true">+{countryInfo.dial}</span>
             <input
               id={ids.phone} ref={refs.phone} name="tel-national" type="tel" inputMode="tel"
               autoComplete="tel-national" enterKeyHint="next" placeholder={countryInfo.iso === 'PE' ? '987 654 321' : undefined}
+              maxLength={countryInfo.max + Math.floor(countryInfo.max / 3)}
               value={groupDigits(national)} onChange={(e) => onPhoneChange(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, phone: true }))} onKeyDown={nextOnEnter('phone')}
               aria-required={required('phone')} aria-invalid={shown('phone') ? true : undefined} aria-describedby={describedBy('phone')}
@@ -343,8 +338,9 @@ function CodeStep({ color, emailMasked, initialResendIn, busy, serverError, onVe
         <button type="button" onClick={onBack}>Cambiar correo</button>
       </div>
       <button type="button" className="cc-code-new" onClick={onNewChat} disabled={busy}>
-        {busy ? 'Un momento…' : 'No tengo acceso a ese correo: empezar un chat nuevo'}
+        {busy ? 'Un momento…' : 'Continuar sin ver el historial'}
       </button>
+      <p className="cc-code-note">Seguirás en la misma conversación; por seguridad, en este dispositivo solo verás los mensajes nuevos.</p>
     </form>
   );
 }

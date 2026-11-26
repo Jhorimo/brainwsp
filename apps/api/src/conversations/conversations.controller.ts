@@ -63,6 +63,11 @@ export class ConversationsController {
     return this.service.mentionContacts(user, q, conversationId);
   }
 
+  @Get(':id/events')
+  events(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+    return this.service.events(user, id);
+  }
+
   @Get(':id/linked')
   linked(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.service.linkedChats(user, id);

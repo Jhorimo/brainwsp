@@ -19,18 +19,17 @@ type PrechatConfigSource = {
   prechatPhone?: PrechatFieldMode;
 };
 
-// Por defecto: activo, nombre y correo obligatorios, celular opcional.
+// Por defecto: activo y todo obligatorio. El CORREO es siempre obligatorio (no se configura):
+// identifica a la persona — mismo correo = mismo chat (ver WidgetService.saveProfile).
 export function resolvePrechat(config?: PrechatConfigSource | null): PrechatSettings {
   const mode = (value: unknown, fallback: PrechatFieldMode) =>
     PRECHAT_FIELD_MODES.includes(value as PrechatFieldMode) ? (value as PrechatFieldMode) : fallback;
   const settings: PrechatSettings = {
     enabled: config?.prechatEnabled ?? true,
     name: mode(config?.prechatName, 'required'),
-    email: mode(config?.prechatEmail, 'required'),
-    phone: mode(config?.prechatPhone, 'optional'),
+    email: 'required',
+    phone: mode(config?.prechatPhone, 'required'),
   };
-  // Un formulario sin ningún campo visible no tiene sentido: equivale a desactivado.
-  if (settings.name === 'hidden' && settings.email === 'hidden' && settings.phone === 'hidden') settings.enabled = false;
   return settings;
 }
 
@@ -69,6 +68,8 @@ export function cleanProfile(input: ProfileInput, settings: PrechatSettings): { 
   if (settings.phone !== 'hidden') {
     if (!phone && settings.phone === 'required') return { error: 'Escribe tu celular' };
     if (phone && (phone.length < 8 || phone.length > 15)) return { error: 'Revisa tu celular, el número no está completo' };
+    // Perú (+51): celular de 9 dígitos que empieza con 9.
+    if (phone.startsWith('51') && !/^519\d{8}$/.test(phone)) return { error: 'Los celulares de Perú tienen 9 dígitos y empiezan con 9' };
     if (phone) profile.phone = phone;
   }
 

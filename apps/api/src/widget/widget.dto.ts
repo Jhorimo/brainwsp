@@ -77,7 +77,12 @@ export class SaveWidgetProfileDto {
   @IsBoolean()
   notifyEmail?: boolean;
 
-  @ApiPropertyOptional({ description: '«Empezar un chat nuevo» aunque el correo ya tenga otro chat (sin verificar con código)' })
+  @ApiPropertyOptional({ description: '«Continuar sin ver el historial»: une la visita al chat existente de ese correo, sin código; solo ve los mensajes desde ahora' })
+  @IsOptional()
+  @IsBoolean()
+  withoutHistory?: boolean;
+
+  @ApiPropertyOptional({ deprecated: true, description: 'Nombre anterior de withoutHistory (páginas abiertas antes del cambio)' })
   @IsOptional()
   @IsBoolean()
   newChat?: boolean;

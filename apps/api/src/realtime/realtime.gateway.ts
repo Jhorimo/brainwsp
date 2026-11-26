@@ -18,6 +18,7 @@ import type { WidgetConfiguration } from '../instances/instances.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtUser } from '../common/types/jwt-user';
 import { CallsService, type CallEndReason, type CallInviteTargets, type CallState } from './calls.service';
+import { ConversationEventsService, VISITOR_LEFT_GRACE_MS } from './conversation-events.service';
 
 // Cuánto suena una llamada antes de darla por perdida si nadie contesta — ver
 // handleRingTimeout.
@@ -38,6 +39,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly agentAccess: AgentAccessService,
     private readonly prisma: PrismaService,
     private readonly calls: CallsService,
+    private readonly events: ConversationEventsService,
   ) {}
 
   // Sockets de agentes actualmente conectados, por userId — en memoria, de esta sola
@@ -46,6 +48,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   // departamento; nada de esto existía antes de las llamadas (el gateway era puramente
   // servidor→cliente).
   private readonly agentSockets = new Map<string, Set<string>>();
+  // "El cliente salió": se confirma recién si no vuelve en 2 min (ver ConversationEventsService).
+  private readonly visitorLeftTimers = new Map<string, NodeJS.Timeout>();
 
   async handleConnection(client: Socket) {
     // Dos formas de autenticarse en el mismo gateway: un agente del panel (JWT, como
@@ -89,7 +93,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       const session = await this.prisma.visitorSession.findFirst({
         where: { tokenHash: hashApiSecret(visitorToken), expiresAt: { gt: new Date() } },
-        select: { contactId: true },
+        select: { contactId: true, via: true },
       });
       if (!session) return client.disconnect(true);
       const conversation = await this.prisma.conversation.findFirst({
@@ -106,9 +110,32 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.data.companyId = conversation.companyId;
       client.data.departmentId = conversation.departmentId;
       await client.join(`conversation:${conversationId}`);
+      // Presencia para los agentes: "El cliente se conectó · vía …" (solo si antes había salido).
+      const pendingLeft = this.visitorLeftTimers.get(conversationId);
+      if (pendingLeft) { clearTimeout(pendingLeft); this.visitorLeftTimers.delete(conversationId); }
+      void this.events.recordPresence(conversationId, 'visitor_joined', { via: session.via ?? null });
     } catch {
       client.disconnect(true);
     }
+  }
+
+  // Si el visitante cierra el chat y no vuelve en 2 min (ninguna pestaña suya conectada),
+  // se avisa "El cliente salió del chat".
+  private scheduleVisitorLeft(conversationId: string) {
+    const previous = this.visitorLeftTimers.get(conversationId);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(async () => {
+      this.visitorLeftTimers.delete(conversationId);
+      try {
+        const sockets = await this.server.in(`conversation:${conversationId}`).fetchSockets();
+        if (sockets.some((s) => s.data?.visitorContactId)) return;
+        await this.events.recordPresence(conversationId, 'visitor_left');
+      } catch {
+        // sin aviso: no es crítico
+      }
+    }, VISITOR_LEFT_GRACE_MS);
+    timer.unref?.();
+    this.visitorLeftTimers.set(conversationId, timer);
   }
 
   async handleDisconnect(client: Socket) {
@@ -125,6 +152,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     const visitorCall = this.calls.getByVisitorSocket(client.id);
     if (visitorCall) await this.finishCall(visitorCall.callId, visitorCall.status === 'active' ? 'failed' : 'cancelled');
+    const visitorConversationId = client.data.visitorContactId ? (client.data.conversationId as string | undefined) : undefined;
+    if (visitorConversationId) this.scheduleVisitorLeft(visitorConversationId);
   }
 
   private registerAgentSocket(userId: string, socketId: string) {

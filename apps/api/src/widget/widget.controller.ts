@@ -70,7 +70,7 @@ export class WidgetController {
   @Post(':widgetPublicKey/profile')
   saveProfile(@Param('widgetPublicKey') widgetPublicKey: string, @Req() req: Request, @Body() dto: SaveWidgetProfileDto) {
     this.guardRateLimit(req, dto.token);
-    return this.service.saveProfile(widgetPublicKey, dto.token, { name: dto.name, email: dto.email, phone: dto.phone }, dto.notifyEmail, dto.newChat);
+    return this.service.saveProfile(widgetPublicKey, dto.token, { name: dto.name, email: dto.email, phone: dto.phone }, dto.notifyEmail, dto.withoutHistory ?? dto.newChat);
   }
 
   // Código de 6 dígitos para volver a un chat existente desde otro dispositivo (fase 4).

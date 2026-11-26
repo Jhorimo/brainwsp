@@ -18,8 +18,7 @@ type WidgetConfig = {
 type PrechatMode = 'required' | 'optional' | 'hidden';
 const PRECHAT_FIELDS: Array<{ key: 'prechatName' | 'prechatEmail' | 'prechatPhone'; label: string; fallback: PrechatMode }> = [
   { key: 'prechatName', label: 'Nombre', fallback: 'required' },
-  { key: 'prechatEmail', label: 'Correo', fallback: 'required' },
-  { key: 'prechatPhone', label: 'Celular', fallback: 'optional' },
+  { key: 'prechatPhone', label: 'Celular', fallback: 'required' },
 ];
 const PRECHAT_MODE_LABELS: Record<PrechatMode, string> = { required: 'Obligatorio', optional: 'Opcional', hidden: 'No pedir' };
 type Instance = {
@@ -536,6 +535,10 @@ export default function InstancesPage() {
                 </label>
                 {widgetConfigDraft.prechatEnabled !== false && (
                   <div className="prechat-fields">
+                    <div className="prechat-field prechat-field-locked">
+                      <span className="prechat-locked-label">Correo</span>
+                      <span className="prechat-locked-value">Siempre obligatorio · identifica al cliente (mismo correo = mismo chat)</span>
+                    </div>
                     {PRECHAT_FIELDS.map((field) => {
                       const value = widgetConfigDraft[field.key] || field.fallback;
                       return (
@@ -552,12 +555,6 @@ export default function InstancesPage() {
                         </fieldset>
                       );
                     })}
-                    {PRECHAT_FIELDS.every((field) => (widgetConfigDraft[field.key] || field.fallback) === 'hidden') && (
-                      <p className="prechat-warning" role="status">Con todo en «No pedir» el formulario no se mostrará.</p>
-                    )}
-                    {(widgetConfigDraft.prechatEmail || 'required') === 'hidden' && (
-                      <p className="prechat-hint">Sin correo no podremos avisarle cuando le respondan ni dejarle volver a su chat desde otro dispositivo.</p>
-                    )}
                   </div>
                 )}
               </section>
